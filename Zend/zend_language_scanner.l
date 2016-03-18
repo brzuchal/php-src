@@ -1200,6 +1200,10 @@ NEWLINE ("\r"|"\n"|"\r\n")
 	RETURN_TOKEN(T_DECLARE);
 }
 
+<ST_IN_SCRIPTING>"to" {
+    RETURN_TOKEN(T_RANGE);
+}
+
 <ST_IN_SCRIPTING>"enddeclare" {
 	RETURN_TOKEN(T_ENDDECLARE);
 }

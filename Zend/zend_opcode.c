@@ -811,6 +811,8 @@ ZEND_API binary_op_type get_binary_op(int opcode)
 			return (binary_op_type) bitwise_xor_function;
 		case ZEND_BOOL_XOR:
 			return (binary_op_type) boolean_xor_function;
+        case ZEND_RANGE:
+            return (binary_op_type) range_function;
 		default:
 			return (binary_op_type) NULL;
 	}

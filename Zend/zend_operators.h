@@ -811,6 +811,8 @@ static zend_always_inline char *zend_print_long_to_buf(char *buf, zend_long num)
 
 ZEND_API zend_string* ZEND_FASTCALL zend_long_to_str(zend_long num);
 
+ZEND_API int ZEND_FASTCALL range_function(zval *result, zval *op1, zval *op2);
+
 END_EXTERN_C()
 
 #endif
