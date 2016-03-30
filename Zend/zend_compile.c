@@ -5366,12 +5366,6 @@ void zend_compile_prop_decl(zend_ast *ast) /* {{{ */
 			doc_comment = zend_string_copy(zend_ast_get_str(doc_comment_ast));
 		}
 
-		if (flags & ZEND_ACC_FINAL) {
-			zend_error_noreturn(E_COMPILE_ERROR, "Cannot declare property %s::$%s final, "
-				"the final modifier is allowed only for methods and classes",
-				ZSTR_VAL(ce->name), ZSTR_VAL(name));
-		}
-
 		if (zend_hash_exists(&ce->properties_info, name)) {
 			zend_error_noreturn(E_COMPILE_ERROR, "Cannot redeclare %s::$%s",
 				ZSTR_VAL(ce->name), ZSTR_VAL(name));

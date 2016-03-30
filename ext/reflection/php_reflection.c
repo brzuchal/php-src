@@ -951,6 +951,9 @@ static void _property_string(string *str, zend_property_info *prop, char *prop_n
 		if(prop->flags & ZEND_ACC_STATIC) {
 			string_printf(str, "static ");
 		}
+		if(prop->flags & ZEND_ACC_FINAL) {
+			string_printf(str, "final ");
+		}
 
 		zend_unmangle_property_name(prop->name, &class_name, (const char**)&prop_name);
 		string_printf(str, "$%s", prop_name);
@@ -5596,6 +5599,14 @@ ZEND_METHOD(reflection_property, isStatic)
 }
 /* }}} */
 
+/* {{{ proto public bool ReflectionProperty::isFinal()
+   Returns whether this property is final */
+ZEND_METHOD(reflection_property, isFinal)
+{
+	_property_check_flag(INTERNAL_FUNCTION_PARAM_PASSTHRU, ZEND_ACC_FINAL);
+}
+/* }}} */
+
 /* {{{ proto public bool ReflectionProperty::isDefault()
    Returns whether this property is default (declared at compilation time). */
 ZEND_METHOD(reflection_property, isDefault)
@@ -6663,6 +6674,7 @@ static const zend_function_entry reflection_property_functions[] = {
 	ZEND_ME(reflection_property, isPrivate, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_property, isProtected, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_property, isStatic, arginfo_reflection__void, 0)
+	ZEND_ME(reflection_property, isFinal, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_property, isDefault, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_property, getModifiers, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_property, getDeclaringClass, arginfo_reflection__void, 0)
@@ -6893,7 +6905,7 @@ PHP_MINIT_FUNCTION(reflection) /* {{{ */
 	zend_class_implements(reflection_property_ptr, 1, reflector_ptr);
 	zend_declare_property_string(reflection_property_ptr, "name", sizeof("name")-1, "", ZEND_ACC_PUBLIC);
 	zend_declare_property_string(reflection_property_ptr, "class", sizeof("class")-1, "", ZEND_ACC_PUBLIC);
-
+	
 	INIT_CLASS_ENTRY(_reflection_entry, "ReflectionClassConstant", reflection_class_constant_functions);
 	_reflection_entry.create_object = reflection_objects_new;
 	reflection_class_constant_ptr = zend_register_internal_class(&_reflection_entry);
@@ -6905,6 +6917,7 @@ PHP_MINIT_FUNCTION(reflection) /* {{{ */
 	REGISTER_REFLECTION_CLASS_CONST_LONG(property, "IS_PUBLIC", ZEND_ACC_PUBLIC);
 	REGISTER_REFLECTION_CLASS_CONST_LONG(property, "IS_PROTECTED", ZEND_ACC_PROTECTED);
 	REGISTER_REFLECTION_CLASS_CONST_LONG(property, "IS_PRIVATE", ZEND_ACC_PRIVATE);
+	REGISTER_REFLECTION_CLASS_CONST_LONG(property, "IS_FINAL", ZEND_ACC_FINAL);
 
 	INIT_CLASS_ENTRY(_reflection_entry, "ReflectionExtension", reflection_extension_functions);
 	_reflection_entry.create_object = reflection_objects_new;
