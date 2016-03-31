@@ -640,12 +640,11 @@ ZEND_API void zend_std_write_property(zval *object, zval *member, zval *value, v
 			}
 			if ((variable_ptr = zend_hash_find(zobj->properties, Z_STR_P(member))) != NULL) {
 found:
-				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(member));
-				if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0)) {
-					if (Z_TYPE_P(variable_ptr) != IS_NULL) {
-							zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(member)));
-							goto exit;
-						}
+				if ((property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(member))) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(variable_ptr) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(member)));
+						goto exit;
+					}
 				}
 				zend_assign_to_variable(variable_ptr, value, IS_CV);
 				goto exit;
