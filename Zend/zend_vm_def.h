@@ -2178,7 +2178,16 @@ ZEND_VM_HANDLER(136, ZEND_ASSIGN_OBJ, VAR|UNUSED|THIS|CV, CONST|TMPVAR|CV, SPEC(
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 ZEND_VM_C_LABEL(fast_assign_obj):
+				
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						ZEND_VM_C_GOTO(exit_assign_obj);
+					}
+				}
 				value = zend_assign_to_variable(property, value, OP_DATA_TYPE);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);

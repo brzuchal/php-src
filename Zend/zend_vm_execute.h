@@ -18186,7 +18186,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_VAR_CONST_OP_D
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CONST);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -18361,7 +18370,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_VAR_CONST_OP_D
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_TMP_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -18536,7 +18554,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_VAR_CONST_OP_D
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -18711,7 +18738,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_VAR_CONST_OP_D
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CV);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -22547,7 +22583,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_VAR_CV_OP_DATA
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CONST);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -22722,7 +22767,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_VAR_CV_OP_DATA
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_TMP_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -22897,7 +22951,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_VAR_CV_OP_DATA
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -23072,7 +23135,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_VAR_CV_OP_DATA
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CV);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -25104,7 +25176,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_VAR_TMPVAR_OP_
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CONST);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -25279,7 +25360,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_VAR_TMPVAR_OP_
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_TMP_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -25454,7 +25544,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_VAR_TMPVAR_OP_
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -25629,7 +25728,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_VAR_TMPVAR_OP_
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CV);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -27517,7 +27625,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_UNUSED_CONST_O
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CONST);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -27692,7 +27809,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_UNUSED_CONST_O
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_TMP_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -27867,7 +27993,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_UNUSED_CONST_O
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -28042,7 +28177,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_UNUSED_CONST_O
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CV);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -30829,7 +30973,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_UNUSED_CV_OP_D
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CONST);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -31004,7 +31157,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_UNUSED_CV_OP_D
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_TMP_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -31179,7 +31341,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_UNUSED_CV_OP_D
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -31354,7 +31525,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_UNUSED_CV_OP_D
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CV);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -33085,7 +33265,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_UNUSED_TMPVAR_
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CONST);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -33260,7 +33449,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_UNUSED_TMPVAR_
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_TMP_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -33435,7 +33633,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_UNUSED_TMPVAR_
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -33610,7 +33817,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_UNUSED_TMPVAR_
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CV);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -37960,7 +38176,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_CV_CONST_OP_DA
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CONST);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -38135,7 +38360,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_CV_CONST_OP_DA
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_TMP_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -38310,7 +38544,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_CV_CONST_OP_DA
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -38485,7 +38728,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_CV_CONST_OP_DA
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CV);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -44299,7 +44551,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_CV_CV_OP_DATA_
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CONST);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -44474,7 +44735,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_CV_CV_OP_DATA_
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_TMP_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -44649,7 +44919,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_CV_CV_OP_DATA_
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -44824,7 +45103,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_CV_CV_OP_DATA_
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CV);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -47854,7 +48142,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_CV_TMPVAR_OP_D
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CONST);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -48029,7 +48326,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_CV_TMPVAR_OP_D
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_TMP_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -48204,7 +48510,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_CV_TMPVAR_OP_D
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_VAR);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
@@ -48379,7 +48694,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_ASSIGN_OBJ_SPEC_CV_TMPVAR_OP_D
 		if (EXPECTED(prop_offset != (uint32_t)ZEND_DYNAMIC_PROPERTY_OFFSET)) {
 			property = OBJ_PROP(zobj, prop_offset);
 			if (Z_TYPE_P(property) != IS_UNDEF) {
+				zend_property_info *property_info = NULL;
 fast_assign_obj:
+
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(property_name));
+				if ((property_info) != NULL) {
+					if (EXPECTED((property_info->flags & ZEND_ACC_FINAL) != 0) &&(Z_TYPE_P(property) != IS_NULL)) {
+						zend_error(E_WARNING, "Cannot change final property: %s::$%s which has already defined value", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(property_name)));
+						goto exit_assign_obj;
+					}
+				}
 				value = zend_assign_to_variable(property, value, IS_CV);
 				if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
 					ZVAL_COPY(EX_VAR(opline->result.var), value);
