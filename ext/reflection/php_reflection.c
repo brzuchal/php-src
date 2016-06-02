@@ -414,6 +414,9 @@ static void _class_string(string *str, zend_class_entry *ce, zval *obj, char *in
 	} else if (ce->ce_flags & ZEND_ACC_TRAIT) {
 		string_printf(str, "trait ");
 	} else {
+		if (ce->ce_flags & ZEND_ACC_PACKAGE) {
+			string_printf(str, "package ");
+		}
 		if (ce->ce_flags & (ZEND_ACC_IMPLICIT_ABSTRACT_CLASS|ZEND_ACC_EXPLICIT_ABSTRACT_CLASS)) {
 			string_printf(str, "abstract ");
 		}
@@ -1598,6 +1601,9 @@ ZEND_METHOD(reflection, getModifierNames)
 
 	array_init(return_value);
 
+	if (modifiers & ZEND_ACC_PACKAGE) {
+		add_next_index_stringl(return_value, "package", sizeof("package")-1);
+	}
 	if (modifiers & (ZEND_ACC_ABSTRACT | ZEND_ACC_EXPLICIT_ABSTRACT_CLASS)) {
 		add_next_index_stringl(return_value, "abstract", sizeof("abstract")-1);
 	}
@@ -4813,6 +4819,14 @@ ZEND_METHOD(reflection_class, isAbstract)
 }
 /* }}} */
 
+/* {{{ proto public bool ReflectionClass::isPackage()
+   Returns whether this class is package */
+ZEND_METHOD(reflection_class, isPackageDefined)
+{
+	_class_check_flag(INTERNAL_FUNCTION_PARAM_PASSTHRU, ZEND_ACC_PACKAGE);
+}
+/* }}} */
+
 /* {{{ proto public int ReflectionClass::getModifiers()
    Returns a bitfield of the access modifiers for this class */
 ZEND_METHOD(reflection_class, getModifiers)
@@ -6588,6 +6602,7 @@ static const zend_function_entry reflection_class_functions[] = {
 	ZEND_ME(reflection_class, getTraitAliases, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_class, isTrait, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_class, isAbstract, arginfo_reflection__void, 0)
+	ZEND_ME(reflection_class, isPackageDefined, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_class, isFinal, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_class, getModifiers, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_class, isInstance, arginfo_reflection_class_isInstance, 0)
@@ -6882,6 +6897,7 @@ PHP_MINIT_FUNCTION(reflection) /* {{{ */
 	REGISTER_REFLECTION_CLASS_CONST_LONG(class, "IS_IMPLICIT_ABSTRACT", ZEND_ACC_IMPLICIT_ABSTRACT_CLASS);
 	REGISTER_REFLECTION_CLASS_CONST_LONG(class, "IS_EXPLICIT_ABSTRACT", ZEND_ACC_EXPLICIT_ABSTRACT_CLASS);
 	REGISTER_REFLECTION_CLASS_CONST_LONG(class, "IS_FINAL", ZEND_ACC_FINAL);
+	REGISTER_REFLECTION_CLASS_CONST_LONG(class, "IS_PACKAGE_DEFINED", ZEND_ACC_PACKAGE);
 
 	INIT_CLASS_ENTRY(_reflection_entry, "ReflectionObject", reflection_object_functions);
 	_reflection_entry.create_object = reflection_objects_new;

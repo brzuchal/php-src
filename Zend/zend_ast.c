@@ -1054,6 +1054,9 @@ tail_call:
 			} else if (decl->flags & ZEND_ACC_TRAIT) {
 				smart_str_appends(str, "trait ");
 			} else {
+				if (decl->flags & ZEND_ACC_PACKAGE) {
+					smart_str_appends(str, "package ");
+				}
 				if (decl->flags & ZEND_ACC_EXPLICIT_ABSTRACT_CLASS) {
 					smart_str_appends(str, "abstract ");
 				}

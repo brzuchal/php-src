@@ -1292,6 +1292,132 @@ ZEND_API int _object_and_properties_init(zval *arg, zend_class_entry *class_type
 		}
 	}
 
+	if (UNEXPECTED(class_type->ce_flags & ZEND_ACC_PACKAGE)) {
+		zend_class_entry *called_scope = zend_get_called_scope(EG(current_execute_data));
+		if (!called_scope) {
+			zend_throw_error(NULL, "Cannot instantiate package class %s in global scope", ZSTR_VAL(class_type->name));
+		} else {
+			zend_string *called_namespace_name;
+			zend_string *current_namespace_name;
+			zend_string *current_truncated_namespace_name;
+
+			called_namespace_name = zend_string_init(ZSTR_VAL(called_scope->name), ZSTR_LEN(called_scope->name) - strlen(zend_memrchr(ZSTR_VAL(called_scope->name), '\\', ZSTR_LEN(called_scope->name))), 1);
+			current_namespace_name = zend_string_init(ZSTR_VAL(class_type->name), ZSTR_LEN(class_type->name) - strlen(zend_memrchr(ZSTR_VAL(class_type->name), '\\', ZSTR_LEN(class_type->name))), 1);
+			current_truncated_namespace_name = zend_string_init(ZSTR_VAL(called_namespace_name), ZSTR_LEN(current_namespace_name), 1);
+
+//			zend_throw_error(NULL, 
+//				"NAMESPACE: %s, LENGTH: %d", 
+//				ZSTR_VAL(called_namespace_name), 
+//				ZSTR_LEN(called_namespace_name)
+//			);
+//			zend_throw_error(NULL, 
+//				"NAMESPACE: %s, LENGTH: %d", 
+//				ZSTR_VAL(current_namespace_name), 
+//				ZSTR_LEN(current_namespace_name)
+//			);
+//			zend_throw_error(NULL, 
+//				"CalledNamespace: %s, CurrentNamespace: %s, CurrentTruncated: %s, Comparison: same=%d or inclusive=%d", 
+//				ZSTR_VAL(called_namespace_name), 
+//				ZSTR_VAL(current_namespace_name),
+//				ZSTR_VAL(current_truncated_namespace_name),
+//				zend_string_equals(current_namespace_name, called_namespace_name),
+//				zend_string_equals(current_namespace_name, current_truncated_namespace_name)
+//			);
+
+			if (!(zend_string_equals(current_namespace_name, called_namespace_name) || 
+				zend_string_equals(current_namespace_name, current_truncated_namespace_name))
+			) {
+				zend_throw_error(NULL, 
+					"Cannot instantiate package class %s in class %s",
+					ZSTR_VAL(class_type->name),
+					ZSTR_VAL(called_scope->name)
+//					"CalledNamespace: %s, CurrentNamespace: %s, CurrentTruncated: %s, Comparison: same=%d or inclusive=%d", 
+//					ZSTR_VAL(called_namespace_name), 
+//					ZSTR_VAL(current_namespace_name),
+//					ZSTR_VAL(current_truncated_namespace_name),
+//					zend_string_equals(current_namespace_name, called_namespace_name),
+//					zend_string_equals(current_namespace_name, current_truncated_namespace_name)
+				);				
+			}
+
+//			namespace_len = class_name_len - strlen(class_short_name); //4
+//			namespace_name = zend_string_truncate(called_scope->name, 4, 1);
+			
+//			ZSTR_VAL(namespace_name)[4] = "\0";
+
+//			zend_throw_error(NULL, 
+//				"CLASS: %s, LENGTH: %d, SHOULD_BE: %d", 
+//				ZSTR_VAL(namespace_name), 
+//				ZSTR_LEN(namespace_name),
+//				namespace_len
+////				ZEND_MM_ALIGNED_SIZE(_ZSTR_STRUCT_SIZE(namespace_len))//32
+//			);
+
+//			zend_throw_error(
+//				NULL,
+//				"Instantiating package class %s from class %s which has namespace %s, cname.length: %d, scname.length: %d, len: %d", 
+//				ZSTR_VAL(class_type->name),
+//				ZSTR_VAL(called_scope->name),
+//				ZSTR_VAL(ns),
+//				class_name_len,
+//				strlen(class_short_name),
+//				ns_len
+//			);
+
+//			zend_throw_error(
+//				NULL, 
+//				"lc_class_name: %s, class_name_len: %s", 
+//				lc_class_name, 
+//				class_name_len
+//			);
+//			if (lc_class_name) {
+//				++lc_class_name;
+//				class_name_len -= (lc_class_name - ZSTR_VAL(called_scope->name));
+//				lc_class_name = zend_str_tolower_dup(lc_class_name, class_name_len);
+//			} else {
+//				lc_class_name = zend_str_tolower_dup(ZSTR_VAL(called_scope->name), class_name_len);
+//			}
+
+//			//			FC(current_namespace)
+//			zval *name;
+//			const char *backslash;
+//			char* namespace_name;
+//			name = ZSTR_VAL(called_scope->name);
+////			name = called_scope->name;
+//			if ((backslash = zend_memrchr(name, '\\', Z_STRLEN_P(name)))
+//				&& backslash > Z_STRVAL_P(name))
+//			{
+////				RETURN_STRINGL(Z_STRVAL_P(name), backslash - Z_STRVAL_P(name));
+//				strncpy(namespace_name, Z_STRVAL_P(name), backslash - Z_STRVAL_P(name));
+//				namespace_name[backslash - Z_STRVAL_P(name)] = '\0'; // place the null terminator
+//			}
+		}
+//		if (!called_scope) {
+//			if (error) *error = estrdup("cannot access static:: when no class scope is active");
+//		} else {
+//			fcc->called_scope = called_scope;
+//			fcc->calling_scope = called_scope;
+//			if (!fcc->object) {
+//				fcc->object = zend_get_this_object(EG(current_execute_data));
+//			}
+//			*strict_class = 1;
+//			ret = 1;
+//		}
+
+//		if (!EG(scope)) {
+//			if (error) *error = estrdup("cannot access self:: when no class scope is active");
+//		} else {
+//			fcc->called_scope = zend_get_called_scope(EG(current_execute_data));
+//			fcc->calling_scope = EG(scope);
+//			if (!fcc->object) {
+//				fcc->object = zend_get_this_object(EG(current_execute_data));
+//			}
+//			ret = 1;
+//		}
+
+//		zend_throw_error(NULL, "Cannot instantiate package class %s", ZSTR_VAL(class_type->name));
+	}
+
 	if (class_type->create_object == NULL) {
 		ZVAL_OBJ(arg, zend_objects_new(class_type));
 		if (properties) {

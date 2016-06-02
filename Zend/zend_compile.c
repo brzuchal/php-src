@@ -791,6 +791,9 @@ uint32_t zend_add_class_modifier(uint32_t flags, uint32_t new_flag) /* {{{ */
 	if ((flags & ZEND_ACC_EXPLICIT_ABSTRACT_CLASS) && (new_flag & ZEND_ACC_EXPLICIT_ABSTRACT_CLASS)) {
 		zend_error_noreturn(E_COMPILE_ERROR, "Multiple abstract modifiers are not allowed");
 	}
+	if ((flags & ZEND_ACC_PACKAGE) && (new_flag & ZEND_ACC_PACKAGE)) {
+		zend_error_noreturn(E_COMPILE_ERROR, "Multiple package modifiers are not allowed");
+	}
 	if ((flags & ZEND_ACC_FINAL) && (new_flag & ZEND_ACC_FINAL)) {
 		zend_error_noreturn(E_COMPILE_ERROR, "Multiple final modifiers are not allowed");
 	}
@@ -5814,6 +5817,18 @@ void zend_compile_class_decl(zend_ast *ast) /* {{{ */
 		if (implements_ast) {
 			zend_emit_op(NULL, ZEND_VERIFY_ABSTRACT_CLASS, &declare_node, NULL);
 		}
+	}
+
+	if (!(ce->ce_flags & ZEND_ACC_PACKAGE)
+		&& (extends_ast || implements_ast)
+	) {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Cannot extends or implement package class %s for now",
+				ZSTR_VAL(ce->name), ZSTR_VAL(ce->constructor->common.function_name));
+//		zend_verify_abstract_class(ce);
+//		if (implements_ast) {
+//			zend_emit_op(NULL, ZEND_VERIFY_ABSTRACT_CLASS, &declare_node, NULL);
+//		}
 	}
 
 	/* Inherit interfaces; reset number to zero, we need it for above check and

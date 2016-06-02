@@ -769,7 +769,7 @@ ZEND_API void zend_do_inheritance(zend_class_entry *ce, zend_class_entry *parent
 			zend_error_noreturn(E_COMPILE_ERROR, "Class %s may not inherit from final class (%s)", ZSTR_VAL(ce->name), ZSTR_VAL(parent_ce->name));
 		}
 	}
-
+//TODO: tutaj sprawdzać czy nie extenduje klasy poza zasięgiem
 	ce->parent = parent_ce;
 
 	/* Inherit interfaces */

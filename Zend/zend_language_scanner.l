@@ -1406,6 +1406,10 @@ NEWLINE ("\r"|"\n"|"\r\n")
 	RETURN_TOKEN(T_ABSTRACT);
 }
 
+<ST_IN_SCRIPTING>"package" {
+	RETURN_TOKEN(T_PACKAGE);
+}
+
 <ST_IN_SCRIPTING>"final" {
 	RETURN_TOKEN(T_FINAL);
 }
