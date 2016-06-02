@@ -1293,16 +1293,37 @@ ZEND_API int _object_and_properties_init(zval *arg, zend_class_entry *class_type
 	}
 
 	if (UNEXPECTED(class_type->ce_flags & ZEND_ACC_PACKAGE)) {
-		zend_class_entry *called_scope = zend_get_called_scope(EG(current_execute_data));
+		zend_class_entry *called_scope = EG(current_execute_data) ? EG(scope) : CG(active_class_entry);
+		zend_string *class_namespace = zend_string_init(ZSTR_VAL(class_type->name), ZSTR_LEN(class_type->name) - strlen(zend_memrchr(ZSTR_VAL(class_type->name), '\\', ZSTR_LEN(class_type->name))), 1);
+
 		if (!called_scope) {
-			zend_throw_error(NULL, "Cannot instantiate package class %s in global scope", ZSTR_VAL(class_type->name));
-			return FAILURE;
+			zend_object *object;
+			zend_function *func;
+			zend_string *func_name;
+			
+			if (EG(current_execute_data) && EG(current_execute_data)->func) {
+				func = EG(current_execute_data)->func;
+				func_name = (func->common.scope && func->common.scope->trait_aliases) ?
+					zend_resolve_method_name((object ? object->ce : func->common.scope), func) :
+					func->common.function_name;
+					
+				zend_string *called_namespace = zend_string_init(ZSTR_VAL(func_name), ZSTR_LEN(func_name) - strlen(zend_memrchr(ZSTR_VAL(func_name), '\\', ZSTR_LEN(func_name))), 1);
+				zend_string *called_subnamespace = zend_string_init(ZSTR_VAL(called_namespace), ZSTR_LEN(class_namespace), 1);
+
+				if (!(zend_string_equals(class_namespace, called_namespace) || 
+					zend_string_equals(class_namespace, called_subnamespace))
+				) {
+					zend_throw_error(NULL, "Cannot instantiate package class %s in %s", ZSTR_VAL(class_type->name), ZSTR_VAL(func_name));
+					return FAILURE;
+				}				
+			} else {
+				zend_throw_error(NULL, "Cannot instantiate package class %s out of package scope", ZSTR_VAL(class_type->name));
+				return FAILURE;
+			}
 		} else {
-			zend_string *class_namespace;
 			zend_string *called_namespace;
 			zend_string *called_subnamespace;
 
-			class_namespace = zend_string_init(ZSTR_VAL(class_type->name), ZSTR_LEN(class_type->name) - strlen(zend_memrchr(ZSTR_VAL(class_type->name), '\\', ZSTR_LEN(class_type->name))), 1);
 			called_namespace = zend_string_init(ZSTR_VAL(called_scope->name), ZSTR_LEN(called_scope->name) - strlen(zend_memrchr(ZSTR_VAL(called_scope->name), '\\', ZSTR_LEN(called_scope->name))), 1);
 			called_subnamespace = zend_string_init(ZSTR_VAL(called_namespace), ZSTR_LEN(class_namespace), 1);
 
