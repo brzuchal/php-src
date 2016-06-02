@@ -172,8 +172,8 @@ char *get_token_type_name(int token_type)
 		case T_REQUIRE_ONCE: return "T_REQUIRE_ONCE";
 		case T_REQUIRE: return "T_REQUIRE";
 		case T_EVAL: return "T_EVAL";
-		case T_INCLUDE: return "T_INCLUDE";
 		case T_INCLUDE_ONCE: return "T_INCLUDE_ONCE";
+		case T_INCLUDE: return "T_INCLUDE";
 		case T_LOGICAL_OR: return "T_LOGICAL_OR";
 		case T_LOGICAL_XOR: return "T_LOGICAL_XOR";
 		case T_LOGICAL_AND: return "T_LOGICAL_AND";
