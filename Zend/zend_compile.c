@@ -5711,7 +5711,7 @@ void zend_compile_class_decl(zend_ast *ast) /* {{{ */
 				"Cannot use '%s' as class name as it is reserved", ZSTR_VAL(extends_name));
 		}
 
-		zend_compile_class_ref(&extends_node, extends_ast, 0);		
+		zend_compile_class_ref(&extends_node, extends_ast, 0);
 	}
 
 	opline = get_next_op(CG(active_op_array));
