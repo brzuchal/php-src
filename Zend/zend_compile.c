@@ -5647,6 +5647,7 @@ void zend_compile_class_decl(zend_ast *ast) /* {{{ */
 	zend_ast *stmt_ast = decl->child[2];
 	zend_string *name, *lcname, *import_name = NULL;
 	zend_class_entry *ce = zend_arena_alloc(&CG(arena), sizeof(zend_class_entry));
+	zend_class_entry *parent_ce;
 	zend_op *opline;
 	znode declare_node, extends_node;
 
@@ -5710,8 +5711,7 @@ void zend_compile_class_decl(zend_ast *ast) /* {{{ */
 			zend_error_noreturn(E_COMPILE_ERROR,
 				"Cannot use '%s' as class name as it is reserved", ZSTR_VAL(extends_name));
 		}
-
-		zend_compile_class_ref(&extends_node, extends_ast, 0);
+		zend_compile_class_ref(&extends_node, extends_ast, 0);		
 	}
 
 	opline = get_next_op(CG(active_op_array));
@@ -5817,18 +5817,6 @@ void zend_compile_class_decl(zend_ast *ast) /* {{{ */
 		if (implements_ast) {
 			zend_emit_op(NULL, ZEND_VERIFY_ABSTRACT_CLASS, &declare_node, NULL);
 		}
-	}
-
-	if (!(ce->ce_flags & ZEND_ACC_PACKAGE)
-		&& (extends_ast || implements_ast)
-	) {
-			zend_error_noreturn(E_COMPILE_ERROR,
-				"Cannot extends or implement package class %s for now",
-				ZSTR_VAL(ce->name), ZSTR_VAL(ce->constructor->common.function_name));
-//		zend_verify_abstract_class(ce);
-//		if (implements_ast) {
-//			zend_emit_op(NULL, ZEND_VERIFY_ABSTRACT_CLASS, &declare_node, NULL);
-//		}
 	}
 
 	/* Inherit interfaces; reset number to zero, we need it for above check and

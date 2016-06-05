@@ -23,9 +23,4 @@ namespace ErrorTest {
 }
 ?>
 --EXPECTF--
-Fatal error: Uncaught Error: Cannot instantiate package class Test\PackagePrivateClass in class ErrorTest\ErrorPackageClass in %s:%d
-Stack trace:
-#0 %s(%d): ErrorTest\ErrorPackageClass->create()
-#1 {main}
-  thrown in %s on line %d
-
+Fatal error: Class %s may not inherit from package class %s in %s on line %d
