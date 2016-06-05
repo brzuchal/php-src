@@ -5647,7 +5647,6 @@ void zend_compile_class_decl(zend_ast *ast) /* {{{ */
 	zend_ast *stmt_ast = decl->child[2];
 	zend_string *name, *lcname, *import_name = NULL;
 	zend_class_entry *ce = zend_arena_alloc(&CG(arena), sizeof(zend_class_entry));
-	zend_class_entry *parent_ce;
 	zend_op *opline;
 	znode declare_node, extends_node;
 
@@ -5711,6 +5710,7 @@ void zend_compile_class_decl(zend_ast *ast) /* {{{ */
 			zend_error_noreturn(E_COMPILE_ERROR,
 				"Cannot use '%s' as class name as it is reserved", ZSTR_VAL(extends_name));
 		}
+
 		zend_compile_class_ref(&extends_node, extends_ast, 0);		
 	}
 
