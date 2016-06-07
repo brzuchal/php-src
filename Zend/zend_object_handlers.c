@@ -1066,6 +1066,21 @@ ZEND_API int zend_check_protected(zend_class_entry *ce, zend_class_entry *scope)
 }
 /* }}} */
 
+ZEND_API int zend_check_package_scope(zend_class_entry *ce, zend_class_entry *scope) /* {{{ */
+{
+	zend_string *ce_namespace = zend_string_init(ZSTR_VAL(ce->name), ZSTR_LEN(ce->name) - strlen(zend_memrchr(ZSTR_VAL(ce->name), '\\', ZSTR_LEN(ce->name))) + 1, 1);
+	if (scope) {
+		zend_string *scope_namespace = zend_string_init(ZSTR_VAL(scope->name), ZSTR_LEN(scope->name) - strlen(zend_memrchr(ZSTR_VAL(scope->name), '\\', ZSTR_LEN(scope->name))) + 1, 1);
+		zend_string *scope_subnamespace = zend_string_init(ZSTR_VAL(scope_namespace), ZSTR_LEN(ce_namespace), 1);
+
+		if (zend_string_equals(ce_namespace, scope_namespace) || zend_string_equals(ce_namespace, scope_subnamespace)) {
+			return 1;
+		}
+	}
+	return 0;
+}
+/* }}} */
+
 ZEND_API zend_function *zend_get_call_trampoline_func(zend_class_entry *ce, zend_string *method_name, int is_static) /* {{{ */
 {
 	zend_op_array *func;

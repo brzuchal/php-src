@@ -23,4 +23,4 @@ namespace ErrorTest {
 }
 ?>
 --EXPECTF--
-Fatal error: Class %s may not inherit from package class %s in %s on line %d
+Fatal error: Class ErrorTest\ErrorPackageClass may not inherit from package class Test\PackagePrivateClass in %s on line %d

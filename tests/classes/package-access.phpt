@@ -1,53 +1,52 @@
 --TEST--
-ZE2 An package-private class access from non (sub)package namespace
+ZE2 An package-private class object access in (sub)package namespace and error from different package namespace
 --SKIPIF--
 <?php if (version_compare(zend_version(), '2.0.0-dev', '<')) die('skip ZendEngine 2 needed'); ?>
 --FILE--
 <?php
 namespace Test {
 	package class PackagePrivateClass {
+		public $message = "Call to function show() from package private class\n";
 		function show() {
-			echo "Call to function show() from package private class\n";
+			echo $this->message;
 		}
 	}
-	class PackageClass {
-		function create() {
-			$this->test = new PackagePrivateClass();
+	class PackageClass extends PackagePrivateClass {
+		function get() {
+			return new PackagePrivateClass();
 		}
 	}
     $packageTest = new PackageClass();
-    $packageTest->create();
-    $packageTest->test->show();
+	$packagePrivateObject = $packageTest->get();
+	$packagePrivateObject->show();
+	var_dump($packagePrivateObject->message);
 }
 namespace Test\SubTest {
-    class SubPackageClass {
-        function create() {
-            $this->test = new \Test\PackagePrivateClass();
-        }
+    class SubPackageClass extends \Test\PackageClass {
     }
     $subPackageTest = new SubPackageClass();
-    $subPackageTest->create();
-    $subPackageTest->test->show();
+	$packagePrivateObject = $subPackageTest->get();
+	$packagePrivateObject->show();
+	var_dump($packagePrivateObject->message);
 }
 namespace ErrorTest {
     class ErrorPackageClass {
-        function create() {
-            $this->subtest = new \Test\SubTest\SubPackageClass();
-            $this->subtest->create();
-        }
+		function get() {
+			return new \Test\SubTest\SubPackageClass();
+		}
     }
-    $subPackageTest = new ErrorPackageClass();
-    $subPackageTest->create();
-    $subPackageTest->subtest->test->show();
+    $errorPackageTest = new ErrorPackageClass();
+	$subPackageObject = $errorPackageTest->get();
+	$packagePrivateObject = $subPackageObject->get();
+	$packagePrivateObject->show();
+	var_dump($packagePrivateObject->message);
 }
 ?>
 --EXPECTF--
 Call to function show() from package private class
+
+string(51) "Call to function show() from package private class
+"
 Call to function show() from package private class
-
-Fatal error: Uncaught Error: Cannot instantiate package class Test\PackagePrivateClass in class ErrorTest\ErrorPackageClass in %s:%d
-Stack trace:
-#0 %s(%d): ErrorTest\ErrorPackageClass->create()
-#1 {main}
-  thrown in %s on line %d
-
+string(51) "Call to function show() from package private class
+"

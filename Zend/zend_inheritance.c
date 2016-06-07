@@ -772,16 +772,8 @@ ZEND_API void zend_do_inheritance(zend_class_entry *ce, zend_class_entry *parent
 
 	ce->parent = parent_ce;
 
-	if (parent_ce->ce_flags & ZEND_ACC_PACKAGE) {
-		zend_string *parent_class_namespace = zend_string_init(ZSTR_VAL(parent_ce->name), ZSTR_LEN(parent_ce->name) - strlen(zend_memrchr(ZSTR_VAL(parent_ce->name), '\\', ZSTR_LEN(parent_ce->name))), 1);
-		zend_string *called_namespace = zend_string_init(ZSTR_VAL(ce->name), ZSTR_LEN(ce->name) - strlen(zend_memrchr(ZSTR_VAL(ce->name), '\\', ZSTR_LEN(ce->name))), 1);
-		zend_string *called_subnamespace = zend_string_init(ZSTR_VAL(called_namespace), ZSTR_LEN(parent_class_namespace), 1);
-
-		if (!(zend_string_equals(parent_class_namespace, called_namespace) || 
-			zend_string_equals(parent_class_namespace, called_subnamespace))
-		) {
-			zend_error_noreturn(E_COMPILE_ERROR, "Class %s may not inherit from package class %s", ZSTR_VAL(parent_ce->name), ZSTR_VAL(ce->name));
-		}
+	if ((parent_ce->ce_flags & ZEND_ACC_PACKAGE) && !zend_check_package_scope(parent_ce, ce)) {
+		zend_error_noreturn(E_COMPILE_ERROR, "Class %s may not inherit from package class %s", ZSTR_VAL(ce->name), ZSTR_VAL(parent_ce->name));
 	}
 
 	/* Inherit interfaces */

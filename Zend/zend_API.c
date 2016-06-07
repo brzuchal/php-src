@@ -1320,19 +1320,9 @@ ZEND_API int _object_and_properties_init(zval *arg, zend_class_entry *class_type
 				zend_throw_error(NULL, "Cannot instantiate package class %s out of package scope", ZSTR_VAL(class_type->name));
 				return FAILURE;
 			}
-		} else {
-			zend_string *called_namespace;
-			zend_string *called_subnamespace;
-
-			called_namespace = zend_string_init(ZSTR_VAL(called_scope->name), ZSTR_LEN(called_scope->name) - strlen(zend_memrchr(ZSTR_VAL(called_scope->name), '\\', ZSTR_LEN(called_scope->name))), 1);
-			called_subnamespace = zend_string_init(ZSTR_VAL(called_namespace), ZSTR_LEN(class_namespace), 1);
-
-			if (!(zend_string_equals(class_namespace, called_namespace) || 
-				zend_string_equals(class_namespace, called_subnamespace))
-			) {
-				zend_throw_error(NULL, "Cannot instantiate package class %s in class %s", ZSTR_VAL(class_type->name), ZSTR_VAL(called_scope->name));
-				return FAILURE;
-			}
+		} else if (!zend_check_package_scope(class_type, called_scope)) {
+			zend_throw_error(NULL, "Cannot instantiate package class %s in class %s", ZSTR_VAL(class_type->name), ZSTR_VAL(called_scope->name));
+			return FAILURE;
 		}
 	}
 
