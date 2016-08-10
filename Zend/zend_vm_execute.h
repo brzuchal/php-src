@@ -493,7 +493,11 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL zend_leave_helper_SPEC(ZEND_OPCODE_
 #endif
 				GC_REFCOUNT(object)--;
 				zend_object_store_ctor_failed(object);
-			}
+			} else {
+				if (EXPECTED(object->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+   					object->ce->ce_flags |= ZEND_OBJ_FROZEN;
+   				}
+   			}
 			OBJ_RELEASE(object);
 		} else if (UNEXPECTED(call_info & ZEND_CALL_CLOSURE)) {
 			OBJ_RELEASE((zend_object*)execute_data->func->op_array.prototype);

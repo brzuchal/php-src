@@ -1423,6 +1423,10 @@ NEWLINE ("\r"|"\n"|"\r\n")
 	RETURN_TOKEN(T_FINAL);
 }
 
+<ST_IN_SCRIPTING>"immutable" {
+	RETURN_TOKEN(T_IMMUTABLE);
+}
+
 <ST_IN_SCRIPTING>"private" {
 	RETURN_TOKEN(T_PRIVATE);
 }
