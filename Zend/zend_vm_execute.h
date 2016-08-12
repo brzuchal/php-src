@@ -3283,6 +3283,12 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_CLONE_SPEC_CONST_HANDLER(ZEND_
 		}
 	}
 
+	if (EXPECTED(ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		zend_throw_error(NULL, "Cloning instance of immutable class (%s) is not allowed", ZSTR_VAL(ce->name));
+
+		HANDLE_EXCEPTION();
+	}
+
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(obj));
 	if (UNEXPECTED(EG(exception) != NULL)) {
 		OBJ_RELEASE(Z_OBJ_P(EX_VAR(opline->result.var)));
@@ -27698,6 +27704,12 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_CLONE_SPEC_UNUSED_HANDLER(ZEND
 		}
 	}
 
+	if (EXPECTED(ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		zend_throw_error(NULL, "Cloning instance of immutable class (%s) is not allowed", ZSTR_VAL(ce->name));
+
+		HANDLE_EXCEPTION();
+	}
+
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(obj));
 	if (UNEXPECTED(EG(exception) != NULL)) {
 		OBJ_RELEASE(Z_OBJ_P(EX_VAR(opline->result.var)));
@@ -35051,6 +35063,12 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_CLONE_SPEC_CV_HANDLER(ZEND_OPC
 				HANDLE_EXCEPTION();
 			}
 		}
+	}
+
+	if (EXPECTED(ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		zend_throw_error(NULL, "Cloning instance of immutable class (%s) is not allowed", ZSTR_VAL(ce->name));
+
+		HANDLE_EXCEPTION();
 	}
 
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(obj));
@@ -51081,6 +51099,12 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_CLONE_SPEC_TMPVAR_HANDLER(ZEND
 				HANDLE_EXCEPTION();
 			}
 		}
+	}
+
+	if (EXPECTED(ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		zend_throw_error(NULL, "Cloning instance of immutable class (%s) is not allowed", ZSTR_VAL(ce->name));
+		zval_ptr_dtor_nogc(free_op1);
+		HANDLE_EXCEPTION();
 	}
 
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(obj));

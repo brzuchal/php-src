@@ -5034,6 +5034,12 @@ ZEND_VM_HANDLER(110, ZEND_CLONE, CONST|TMPVAR|UNUSED|THIS|CV, ANY)
 		}
 	}
 
+	if (EXPECTED(ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		zend_throw_error(NULL, "Cloning instance of immutable class (%s) is not allowed", ZSTR_VAL(ce->name));
+		FREE_OP1();
+		HANDLE_EXCEPTION();
+	}
+
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(obj));
 	if (UNEXPECTED(EG(exception) != NULL)) {
 		OBJ_RELEASE(Z_OBJ_P(EX_VAR(opline->result.var)));
