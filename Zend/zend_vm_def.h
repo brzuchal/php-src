@@ -2504,7 +2504,7 @@ ZEND_VM_HELPER(zend_leave_helper, ANY, ANY)
 				zend_object_store_ctor_failed(object);
 			} else {
 				if (EXPECTED(object->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
-   					object->ce->ce_flags |= ZEND_OBJ_FROZEN;
+   					object->zobj_flags |= ZEND_OBJ_FROZEN;
    				}
    			}
 			OBJ_RELEASE(object);

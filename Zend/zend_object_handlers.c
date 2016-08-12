@@ -701,7 +701,7 @@ ZEND_API void zend_std_write_property(zval *object, zval *member, zval *value, v
 
 	zobj = Z_OBJ_P(object);
 
-	if ((zobj->ce->ce_flags & ZEND_ACC_IMMUTABLE) && (zobj->ce->ce_flags & ZEND_OBJ_FROZEN)){
+	if ((zobj->ce->ce_flags & ZEND_ACC_IMMUTABLE) && (zobj->zobj_flags & ZEND_OBJ_FROZEN)){
 		zend_throw_error(NULL, "Can not modify state of immutable object after constructor");
 	}
 
