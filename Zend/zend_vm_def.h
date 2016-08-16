@@ -1969,6 +1969,13 @@ ZEND_VM_HANDLER(85, ZEND_FETCH_OBJ_W, VAR|UNUSED|THIS|CV, CONST|TMPVAR|CV)
 		HANDLE_EXCEPTION();
 	}
 
+	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
+		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+			zend_throw_error(NULL, "Can not assign by reference to immutable property");
+			HANDLE_EXCEPTION();
+		}
+	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, OP1_TYPE, property, OP2_TYPE, ((OP2_TYPE == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_W);
 	FREE_OP2();
 	if (OP1_TYPE == IS_VAR && READY_TO_DESTROY(free_op1)) {
