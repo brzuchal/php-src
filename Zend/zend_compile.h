@@ -203,7 +203,6 @@ typedef struct _zend_oparray_context {
 #define ZEND_ACC_ABSTRACT		0x02
 #define ZEND_ACC_FINAL			0x04
 #define ZEND_ACC_IMPLEMENTED_ABSTRACT		0x08
-#define ZEND_ACC_IMMUTABLE 0x09
 
 /* class flags (types) */
 /* ZEND_ACC_IMPLICIT_ABSTRACT_CLASS is used for abstract classes (since it is set by any abstract method even interfaces MAY have it set, too). */
@@ -214,6 +213,7 @@ typedef struct _zend_oparray_context {
 #define ZEND_ACC_TRAIT						0x80
 #define ZEND_ACC_ANON_CLASS                 0x100
 #define ZEND_ACC_ANON_BOUND                 0x200
+#define ZEND_ACC_IMMUTABLE                  0x400
 
 /* method flags (visibility) */
 /* The order of those must be kept - public < protected < private */
