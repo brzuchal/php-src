@@ -1970,7 +1970,7 @@ ZEND_VM_HANDLER(85, ZEND_FETCH_OBJ_W, VAR|UNUSED|THIS|CV, CONST|TMPVAR|CV)
 	}
 
 	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
-		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		if (EXPECTED(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(container)))) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
 				case ZEND_SEND_REF:
@@ -2517,7 +2517,7 @@ ZEND_VM_HELPER(zend_leave_helper, ANY, ANY)
 				GC_REFCOUNT(object)--;
 				zend_object_store_ctor_failed(object);
 			} else {
-				if (EXPECTED(object->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+				if (EXPECTED(Z_OBJ_IS_IMMUTABLE(object))) {
    					object->zobj_flags |= ZEND_OBJ_FROZEN;
    				}
    			}
@@ -5048,7 +5048,7 @@ ZEND_VM_HANDLER(110, ZEND_CLONE, CONST|TMPVAR|UNUSED|THIS|CV, ANY)
 		}
 	}
 
-	if (EXPECTED(ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+	if (EXPECTED(Z_CE_IS_IMMUTABLE(ce))) {
 		zend_throw_error(NULL, "Cloning instance of immutable class (%s) is not allowed", ZSTR_VAL(ce->name));
 		FREE_OP1();
 		HANDLE_EXCEPTION();

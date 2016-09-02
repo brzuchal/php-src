@@ -494,7 +494,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL zend_leave_helper_SPEC(ZEND_OPCODE_
 				GC_REFCOUNT(object)--;
 				zend_object_store_ctor_failed(object);
 			} else {
-				if (EXPECTED(object->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+				if (EXPECTED(Z_OBJ_IS_IMMUTABLE(object))) {
    					object->zobj_flags |= ZEND_OBJ_FROZEN;
    				}
    			}
@@ -3283,7 +3283,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_CLONE_SPEC_CONST_HANDLER(ZEND_
 		}
 	}
 
-	if (EXPECTED(ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+	if (EXPECTED(Z_CE_IS_IMMUTABLE(ce))) {
 		zend_throw_error(NULL, "Cloning instance of immutable class (%s) is not allowed", ZSTR_VAL(ce->name));
 
 		HANDLE_EXCEPTION();
@@ -18335,10 +18335,9 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_VAR_CONST_HAN
 	}
 
 	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
-		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		if (EXPECTED(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(container)))) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
-				case ZEND_YIELD:
 				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
@@ -23137,10 +23136,9 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_VAR_CV_HANDLE
 	}
 
 	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
-		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		if (EXPECTED(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(container)))) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
-				case ZEND_YIELD:
 				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
@@ -26098,10 +26096,9 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_VAR_TMPVAR_HA
 	}
 
 	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
-		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		if (EXPECTED(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(container)))) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
-				case ZEND_YIELD:
 				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
@@ -27749,7 +27746,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_CLONE_SPEC_UNUSED_HANDLER(ZEND
 		}
 	}
 
-	if (EXPECTED(ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+	if (EXPECTED(Z_CE_IS_IMMUTABLE(ce))) {
 		zend_throw_error(NULL, "Cloning instance of immutable class (%s) is not allowed", ZSTR_VAL(ce->name));
 
 		HANDLE_EXCEPTION();
@@ -28324,10 +28321,9 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_UNUSED_CONST_
 	}
 
 	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
-		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		if (EXPECTED(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(container)))) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
-				case ZEND_YIELD:
 				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
@@ -31029,10 +31025,9 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_UNUSED_CV_HAN
 	}
 
 	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
-		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		if (EXPECTED(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(container)))) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
-				case ZEND_YIELD:
 				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
@@ -32934,10 +32929,9 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_UNUSED_TMPVAR
 	}
 
 	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
-		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		if (EXPECTED(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(container)))) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
-				case ZEND_YIELD:
 				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
@@ -35155,7 +35149,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_CLONE_SPEC_CV_HANDLER(ZEND_OPC
 		}
 	}
 
-	if (EXPECTED(ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+	if (EXPECTED(Z_CE_IS_IMMUTABLE(ce))) {
 		zend_throw_error(NULL, "Cloning instance of immutable class (%s) is not allowed", ZSTR_VAL(ce->name));
 
 		HANDLE_EXCEPTION();
@@ -38031,10 +38025,9 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_CV_CONST_HAND
 	}
 
 	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
-		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		if (EXPECTED(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(container)))) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
-				case ZEND_YIELD:
 				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
@@ -44904,10 +44897,9 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_CV_CV_HANDLER
 	}
 
 	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
-		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		if (EXPECTED(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(container)))) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
-				case ZEND_YIELD:
 				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
@@ -48922,10 +48914,9 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_CV_TMPVAR_HAN
 	}
 
 	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
-		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+		if (EXPECTED(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(container)))) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
-				case ZEND_YIELD:
 				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
@@ -51236,7 +51227,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_CLONE_SPEC_TMPVAR_HANDLER(ZEND
 		}
 	}
 
-	if (EXPECTED(ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+	if (EXPECTED(Z_CE_IS_IMMUTABLE(ce))) {
 		zend_throw_error(NULL, "Cloning instance of immutable class (%s) is not allowed", ZSTR_VAL(ce->name));
 		zval_ptr_dtor_nogc(free_op1);
 		HANDLE_EXCEPTION();
