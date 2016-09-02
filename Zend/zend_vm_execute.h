@@ -18334,6 +18334,18 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_VAR_CONST_HAN
 		HANDLE_EXCEPTION();
 	}
 
+	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
+		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+			switch ((opline + 1)->opcode) {
+				case ZEND_RETURN_BY_REF:
+				case ZEND_ASSIGN_REF: {
+					zend_throw_error(NULL, "Can not reference property of immutable object");
+					HANDLE_EXCEPTION();
+				} break;
+			}
+		}
+	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_VAR, property, IS_CONST, ((IS_CONST == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_W);
 
 	if (IS_VAR == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -18359,6 +18371,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_RW_SPEC_VAR_CONST_HA
 
 		HANDLE_EXCEPTION();
 	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_VAR, property, IS_CONST, ((IS_CONST == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_RW);
 
 	if (IS_VAR == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -23121,6 +23134,18 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_VAR_CV_HANDLE
 		HANDLE_EXCEPTION();
 	}
 
+	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
+		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+			switch ((opline + 1)->opcode) {
+				case ZEND_RETURN_BY_REF:
+				case ZEND_ASSIGN_REF: {
+					zend_throw_error(NULL, "Can not reference property of immutable object");
+					HANDLE_EXCEPTION();
+				} break;
+			}
+		}
+	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_VAR, property, IS_CV, ((IS_CV == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_W);
 
 	if (IS_VAR == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -23146,6 +23171,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_RW_SPEC_VAR_CV_HANDL
 
 		HANDLE_EXCEPTION();
 	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_VAR, property, IS_CV, ((IS_CV == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_RW);
 
 	if (IS_VAR == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -26067,6 +26093,18 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_VAR_TMPVAR_HA
 		HANDLE_EXCEPTION();
 	}
 
+	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
+		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+			switch ((opline + 1)->opcode) {
+				case ZEND_RETURN_BY_REF:
+				case ZEND_ASSIGN_REF: {
+					zend_throw_error(NULL, "Can not reference property of immutable object");
+					HANDLE_EXCEPTION();
+				} break;
+			}
+		}
+	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_VAR, property, (IS_TMP_VAR|IS_VAR), (((IS_TMP_VAR|IS_VAR) == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_W);
 	zval_ptr_dtor_nogc(free_op2);
 	if (IS_VAR == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -26092,6 +26130,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_RW_SPEC_VAR_TMPVAR_H
 		zval_ptr_dtor_nogc(free_op2);
 		HANDLE_EXCEPTION();
 	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_VAR, property, (IS_TMP_VAR|IS_VAR), (((IS_TMP_VAR|IS_VAR) == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_RW);
 	zval_ptr_dtor_nogc(free_op2);
 	if (IS_VAR == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -28278,6 +28317,18 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_UNUSED_CONST_
 		HANDLE_EXCEPTION();
 	}
 
+	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
+		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+			switch ((opline + 1)->opcode) {
+				case ZEND_RETURN_BY_REF:
+				case ZEND_ASSIGN_REF: {
+					zend_throw_error(NULL, "Can not reference property of immutable object");
+					HANDLE_EXCEPTION();
+				} break;
+			}
+		}
+	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_UNUSED, property, IS_CONST, ((IS_CONST == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_W);
 
 	if (IS_UNUSED == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -28303,6 +28354,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_RW_SPEC_UNUSED_CONST
 
 		HANDLE_EXCEPTION();
 	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_UNUSED, property, IS_CONST, ((IS_CONST == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_RW);
 
 	if (IS_UNUSED == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -30968,6 +31020,18 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_UNUSED_CV_HAN
 		HANDLE_EXCEPTION();
 	}
 
+	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
+		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+			switch ((opline + 1)->opcode) {
+				case ZEND_RETURN_BY_REF:
+				case ZEND_ASSIGN_REF: {
+					zend_throw_error(NULL, "Can not reference property of immutable object");
+					HANDLE_EXCEPTION();
+				} break;
+			}
+		}
+	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_UNUSED, property, IS_CV, ((IS_CV == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_W);
 
 	if (IS_UNUSED == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -30993,6 +31057,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_RW_SPEC_UNUSED_CV_HA
 
 		HANDLE_EXCEPTION();
 	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_UNUSED, property, IS_CV, ((IS_CV == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_RW);
 
 	if (IS_UNUSED == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -32858,6 +32923,18 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_UNUSED_TMPVAR
 		HANDLE_EXCEPTION();
 	}
 
+	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
+		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+			switch ((opline + 1)->opcode) {
+				case ZEND_RETURN_BY_REF:
+				case ZEND_ASSIGN_REF: {
+					zend_throw_error(NULL, "Can not reference property of immutable object");
+					HANDLE_EXCEPTION();
+				} break;
+			}
+		}
+	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_UNUSED, property, (IS_TMP_VAR|IS_VAR), (((IS_TMP_VAR|IS_VAR) == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_W);
 	zval_ptr_dtor_nogc(free_op2);
 	if (IS_UNUSED == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -32883,6 +32960,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_RW_SPEC_UNUSED_TMPVA
 		zval_ptr_dtor_nogc(free_op2);
 		HANDLE_EXCEPTION();
 	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_UNUSED, property, (IS_TMP_VAR|IS_VAR), (((IS_TMP_VAR|IS_VAR) == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_RW);
 	zval_ptr_dtor_nogc(free_op2);
 	if (IS_UNUSED == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -37940,6 +38018,18 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_CV_CONST_HAND
 		HANDLE_EXCEPTION();
 	}
 
+	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
+		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+			switch ((opline + 1)->opcode) {
+				case ZEND_RETURN_BY_REF:
+				case ZEND_ASSIGN_REF: {
+					zend_throw_error(NULL, "Can not reference property of immutable object");
+					HANDLE_EXCEPTION();
+				} break;
+			}
+		}
+	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_CV, property, IS_CONST, ((IS_CONST == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_W);
 
 	if (IS_CV == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -37965,6 +38055,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_RW_SPEC_CV_CONST_HAN
 
 		HANDLE_EXCEPTION();
 	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_CV, property, IS_CONST, ((IS_CONST == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_RW);
 
 	if (IS_CV == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -44798,6 +44889,18 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_CV_CV_HANDLER
 		HANDLE_EXCEPTION();
 	}
 
+	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
+		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+			switch ((opline + 1)->opcode) {
+				case ZEND_RETURN_BY_REF:
+				case ZEND_ASSIGN_REF: {
+					zend_throw_error(NULL, "Can not reference property of immutable object");
+					HANDLE_EXCEPTION();
+				} break;
+			}
+		}
+	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_CV, property, IS_CV, ((IS_CV == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_W);
 
 	if (IS_CV == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -44823,6 +44926,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_RW_SPEC_CV_CV_HANDLE
 
 		HANDLE_EXCEPTION();
 	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_CV, property, IS_CV, ((IS_CV == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_RW);
 
 	if (IS_CV == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -48801,6 +48905,18 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_CV_TMPVAR_HAN
 		HANDLE_EXCEPTION();
 	}
 
+	if (EXPECTED(Z_TYPE_P(container) == IS_OBJECT)) {
+		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
+			switch ((opline + 1)->opcode) {
+				case ZEND_RETURN_BY_REF:
+				case ZEND_ASSIGN_REF: {
+					zend_throw_error(NULL, "Can not reference property of immutable object");
+					HANDLE_EXCEPTION();
+				} break;
+			}
+		}
+	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_CV, property, (IS_TMP_VAR|IS_VAR), (((IS_TMP_VAR|IS_VAR) == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_W);
 	zval_ptr_dtor_nogc(free_op2);
 	if (IS_CV == IS_VAR && READY_TO_DESTROY(free_op1)) {
@@ -48826,6 +48942,7 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_RW_SPEC_CV_TMPVAR_HA
 		zval_ptr_dtor_nogc(free_op2);
 		HANDLE_EXCEPTION();
 	}
+
 	zend_fetch_property_address(EX_VAR(opline->result.var), container, IS_CV, property, (IS_TMP_VAR|IS_VAR), (((IS_TMP_VAR|IS_VAR) == IS_CONST) ? CACHE_ADDR(Z_CACHE_SLOT_P(property)) : NULL), BP_VAR_RW);
 	zval_ptr_dtor_nogc(free_op2);
 	if (IS_CV == IS_VAR && READY_TO_DESTROY(free_op1)) {
