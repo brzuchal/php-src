@@ -1973,6 +1973,7 @@ ZEND_VM_HANDLER(85, ZEND_FETCH_OBJ_W, VAR|UNUSED|THIS|CV, CONST|TMPVAR|CV)
 		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
+				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
 					HANDLE_EXCEPTION();

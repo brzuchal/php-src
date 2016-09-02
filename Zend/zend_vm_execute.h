@@ -18338,6 +18338,8 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_VAR_CONST_HAN
 		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
+				case ZEND_YIELD:
+				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
 					HANDLE_EXCEPTION();
@@ -23138,6 +23140,8 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_VAR_CV_HANDLE
 		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
+				case ZEND_YIELD:
+				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
 					HANDLE_EXCEPTION();
@@ -26097,6 +26101,8 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_VAR_TMPVAR_HA
 		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
+				case ZEND_YIELD:
+				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
 					HANDLE_EXCEPTION();
@@ -28321,6 +28327,8 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_UNUSED_CONST_
 		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
+				case ZEND_YIELD:
+				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
 					HANDLE_EXCEPTION();
@@ -31024,6 +31032,8 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_UNUSED_CV_HAN
 		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
+				case ZEND_YIELD:
+				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
 					HANDLE_EXCEPTION();
@@ -32927,6 +32937,8 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_UNUSED_TMPVAR
 		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
+				case ZEND_YIELD:
+				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
 					HANDLE_EXCEPTION();
@@ -38022,6 +38034,8 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_CV_CONST_HAND
 		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
+				case ZEND_YIELD:
+				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
 					HANDLE_EXCEPTION();
@@ -44893,6 +44907,8 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_CV_CV_HANDLER
 		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
+				case ZEND_YIELD:
+				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
 					HANDLE_EXCEPTION();
@@ -48909,6 +48925,8 @@ static ZEND_OPCODE_HANDLER_RET ZEND_FASTCALL ZEND_FETCH_OBJ_W_SPEC_CV_TMPVAR_HAN
 		if (EXPECTED(Z_OBJ_P(container)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
 			switch ((opline + 1)->opcode) {
 				case ZEND_RETURN_BY_REF:
+				case ZEND_YIELD:
+				case ZEND_SEND_REF:
 				case ZEND_ASSIGN_REF: {
 					zend_throw_error(NULL, "Can not reference property of immutable object");
 					HANDLE_EXCEPTION();
