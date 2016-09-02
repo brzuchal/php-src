@@ -5526,6 +5526,14 @@ ZEND_METHOD(reflection_property, isStatic)
 }
 /* }}} */
 
+/* {{{ proto public bool ReflectionProperty::isImmutable()
+   Returns whether this property is immutable */
+ZEND_METHOD(reflection_property, isImmutable)
+{
+	_property_check_flag(INTERNAL_FUNCTION_PARAM_PASSTHRU, ZEND_ACC_IMMUTABLE);
+}
+/* }}} */
+
 /* {{{ proto public bool ReflectionProperty::isDefault()
    Returns whether this property is default (declared at compilation time). */
 ZEND_METHOD(reflection_property, isDefault)
@@ -6608,6 +6616,7 @@ static const zend_function_entry reflection_property_functions[] = {
 	ZEND_ME(reflection_property, isPrivate, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_property, isProtected, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_property, isStatic, arginfo_reflection__void, 0)
+	ZEND_ME(reflection_property, isImmutable, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_property, isDefault, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_property, getModifiers, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_property, getDeclaringClass, arginfo_reflection__void, 0)
