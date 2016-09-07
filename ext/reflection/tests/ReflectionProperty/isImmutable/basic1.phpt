@@ -8,4 +8,4 @@ var_dump(method_exists(ReflectionProperty::class, 'isImmutable'));
 ?>
 --EXPECT--
 
-bool(true);
+bool(true)
