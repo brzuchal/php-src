@@ -29,3 +29,4 @@ for ($name = 'a'; $name <= 'd'; ++$name) {
 bool(false)
 bool(false)
 bool(false)
+bool(false)
