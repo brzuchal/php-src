@@ -1,11 +1,11 @@
 --TEST--
-Reflection::getModifierNames includes the immutable modifier on immutable classes.
+Reflection::getModifierNames does not include the immutable modifier on nonimmutable classes.
 --FILE--
 <?php
 
-immutable abstract class A {}
-immutable class B {}
-immutable final class C {}
+abstract class A {}
+class B {}
+final class C {}
 
 foreach (['A', 'B', 'C'] as $name) {
 	$reflector = new ReflectionClass($name);
@@ -15,6 +15,6 @@ foreach (['A', 'B', 'C'] as $name) {
 ?>
 --EXPECT--
 
-bool(true)
-bool(true)
-bool(true)
+bool(false)
+bool(false)
+bool(false)

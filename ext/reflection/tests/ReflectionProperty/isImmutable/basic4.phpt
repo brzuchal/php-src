@@ -1,5 +1,5 @@
 --TEST--
-ReflectionProperty::isImmutable does not report properties of immutable class as immutable.
+ReflectionProperty::isImmutable does not report properties of nonimmutable class as immutable.
 --FILE--
 <?php
 

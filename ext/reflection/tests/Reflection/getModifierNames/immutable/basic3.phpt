@@ -1,5 +1,5 @@
 --TEST--
-Reflection::getModifierNames includes the immutable modifier on classes.
+Reflection::getModifierNames includes the immutable modifier on immutable classes.
 --FILE--
 <?php
 

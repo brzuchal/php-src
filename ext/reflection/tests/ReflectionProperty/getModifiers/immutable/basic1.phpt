@@ -20,7 +20,7 @@ class A {
 }
 
 for ($name = 'a'; $name < 'i'; ++$name) {
-	$reflector = new ReflectionClass($name);
+	$reflector = new ReflectionProperty(A::class, $name);
 	$modifiers = $reflector->getModifiers();
 
 	var_dump(($modifiers & T_IMMUTABLE) === T_IMMUTABLE);

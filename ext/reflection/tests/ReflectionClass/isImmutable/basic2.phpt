@@ -4,9 +4,7 @@ ReflectionClass::isImmutable reports immutable classes as such.
 <?php
 
 immutable abstract class A {}
-
 immutable class B {}
-
 immutable final class C {}
 
 foreach (['A', 'B', 'C'] as $name) {
