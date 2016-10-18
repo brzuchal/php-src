@@ -152,8 +152,8 @@ void init_executor(void) /* {{{ */
 
 	zend_vm_stack_init();
 
-	zend_hash_init(&EG(symbol_table), 64, NULL, ZVAL_PTR_DTOR, 0);
-	EG(valid_symbol_table) = 1;
+	zend_hash_init(&EG(variable_table), 64, NULL, ZVAL_PTR_DTOR, 0);
+	EG(valid_variable_table) = 1;
 
 	zend_llist_apply(&zend_extensions, (llist_apply_func_t) zend_extension_activator);
 
@@ -233,14 +233,14 @@ static void zend_throw_or_error(int fetch_type, zend_class_entry *exception_ce, 
 void shutdown_destructors(void) /* {{{ */
 {
 	if (CG(unclean_shutdown)) {
-		EG(symbol_table).pDestructor = zend_unclean_zval_ptr_dtor;
+		EG(variable_table).pDestructor = zend_unclean_zval_ptr_dtor;
 	}
 	zend_try {
 		uint32_t symbols;
 		do {
-			symbols = zend_hash_num_elements(&EG(symbol_table));
-			zend_hash_reverse_apply(&EG(symbol_table), (apply_func_t) zval_call_destructor);
-		} while (symbols != zend_hash_num_elements(&EG(symbol_table)));
+			symbols = zend_hash_num_elements(&EG(variable_table));
+			zend_hash_reverse_apply(&EG(variable_table), (apply_func_t) zval_call_destructor);
+		} while (symbols != zend_hash_num_elements(&EG(variable_table)));
 		zend_objects_store_call_destructors(&EG(objects_store));
 	} zend_catch {
 		/* if we couldn't destruct cleanly, mark all objects as destructed anyway */
@@ -274,11 +274,11 @@ void shutdown_executor(void) /* {{{ */
 		zend_llist_apply(&zend_extensions, (llist_apply_func_t) zend_extension_deactivator);
 
 		if (CG(unclean_shutdown)) {
-			EG(symbol_table).pDestructor = zend_unclean_zval_ptr_dtor;
+			EG(variable_table).pDestructor = zend_unclean_zval_ptr_dtor;
 		}
-		zend_hash_graceful_reverse_destroy(&EG(symbol_table));
+		zend_hash_graceful_reverse_destroy(&EG(variable_table));
 	} zend_end_try();
-	EG(valid_symbol_table) = 0;
+	EG(valid_variable_table) = 0;
 
 	zend_try {
 		zval *zeh;
@@ -1516,14 +1516,14 @@ void zend_verify_abstract_class(zend_class_entry *ce) /* {{{ */
 
 ZEND_API int zend_delete_global_variable(zend_string *name) /* {{{ */
 {
-    return zend_hash_del_ind(&EG(symbol_table), name);
+    return zend_hash_del_ind(&EG(variable_table), name);
 }
 /* }}} */
 
-ZEND_API zend_array *zend_rebuild_symbol_table(void) /* {{{ */
+ZEND_API zend_array *zend_rebuild_variable_table(void) /* {{{ */
 {
 	zend_execute_data *ex;
-	zend_array *symbol_table;
+	zend_array *variable_table;
 
 	/* Search for last called user function */
 	ex = EG(current_execute_data);
@@ -1533,26 +1533,26 @@ ZEND_API zend_array *zend_rebuild_symbol_table(void) /* {{{ */
 	if (!ex) {
 		return NULL;
 	}
-	if (ZEND_CALL_INFO(ex) & ZEND_CALL_HAS_SYMBOL_TABLE) {
-		return ex->symbol_table;
+	if (ZEND_CALL_INFO(ex) & ZEND_CALL_HAS_VARIABLE_TABLE) {
+		return ex->variable_table;
 	}
 
-	ZEND_ADD_CALL_FLAG(ex, ZEND_CALL_HAS_SYMBOL_TABLE);
+	ZEND_ADD_CALL_FLAG(ex, ZEND_CALL_HAS_VARIABLE_TABLE);
 	if (EG(symtable_cache_ptr) >= EG(symtable_cache)) {
 		/*printf("Cache hit!  Reusing %x\n", symtable_cache[symtable_cache_ptr]);*/
-		symbol_table = ex->symbol_table = *(EG(symtable_cache_ptr)--);
+		variable_table = ex->variable_table = *(EG(symtable_cache_ptr)--);
 		if (!ex->func->op_array.last_var) {
-			return symbol_table;
+			return variable_table;
 		}
-		zend_hash_extend(symbol_table, ex->func->op_array.last_var, 0);
+		zend_hash_extend(variable_table, ex->func->op_array.last_var, 0);
 	} else {
-		symbol_table = ex->symbol_table = emalloc(sizeof(zend_array));
-		zend_hash_init(symbol_table, ex->func->op_array.last_var, NULL, ZVAL_PTR_DTOR, 0);
+		variable_table = ex->variable_table = emalloc(sizeof(zend_array));
+		zend_hash_init(variable_table, ex->func->op_array.last_var, NULL, ZVAL_PTR_DTOR, 0);
 		if (!ex->func->op_array.last_var) {
-			return symbol_table;
+			return variable_table;
 		}
-		zend_hash_real_init(symbol_table, 0);
-		/*printf("Cache miss!  Initialized %x\n", EG(active_symbol_table));*/
+		zend_hash_real_init(variable_table, 0);
+		/*printf("Cache miss!  Initialized %x\n", EG(active_variable_table));*/
 	}
 	if (EXPECTED(ex->func->op_array.last_var)) {
 		zend_string **str = ex->func->op_array.vars;
@@ -1560,19 +1560,19 @@ ZEND_API zend_array *zend_rebuild_symbol_table(void) /* {{{ */
 		zval *var = ZEND_CALL_VAR_NUM(ex, 0);
 
 		do {
-			_zend_hash_append_ind(symbol_table, *str, var);
+			_zend_hash_append_ind(variable_table, *str, var);
 			str++;
 			var++;
 		} while (str != end);
 	}
-	return symbol_table;
+	return variable_table;
 }
 /* }}} */
 
-ZEND_API void zend_attach_symbol_table(zend_execute_data *execute_data) /* {{{ */
+ZEND_API void zend_attach_variable_table(zend_execute_data *execute_data) /* {{{ */
 {
 	zend_op_array *op_array = &execute_data->func->op_array;
-	HashTable *ht = execute_data->symbol_table;
+	HashTable *ht = execute_data->variable_table;
 
 	/* copy real values from symbol table into CV slots and create
 	   INDIRECT references to CV in symbol table  */
@@ -1604,10 +1604,10 @@ ZEND_API void zend_attach_symbol_table(zend_execute_data *execute_data) /* {{{ *
 }
 /* }}} */
 
-ZEND_API void zend_detach_symbol_table(zend_execute_data *execute_data) /* {{{ */
+ZEND_API void zend_detach_variable_table(zend_execute_data *execute_data) /* {{{ */
 {
 	zend_op_array *op_array = &execute_data->func->op_array;
-	HashTable *ht = execute_data->symbol_table;
+	HashTable *ht = execute_data->variable_table;
 
 	/* copy real values from CV slots into symbol table */
 	if (EXPECTED(op_array->last_var)) {
@@ -1638,7 +1638,7 @@ ZEND_API int zend_set_local_var(zend_string *name, zval *value, int force) /* {{
 	}
 
 	if (execute_data) {
-		if (!(EX_CALL_INFO() & ZEND_CALL_HAS_SYMBOL_TABLE)) {
+		if (!(EX_CALL_INFO() & ZEND_CALL_HAS_VARIABLE_TABLE)) {
 			zend_ulong h = zend_string_hash_val(name);
 			zend_op_array *op_array = &execute_data->func->op_array;
 
@@ -1658,13 +1658,13 @@ ZEND_API int zend_set_local_var(zend_string *name, zval *value, int force) /* {{
 				} while (str != end);
 			}
 			if (force) {
-				zend_array *symbol_table = zend_rebuild_symbol_table();
-				if (symbol_table) {
-					return zend_hash_update(symbol_table, name, value) ? SUCCESS : FAILURE;;
+				zend_array *variable_table = zend_rebuild_variable_table();
+				if (variable_table) {
+					return zend_hash_update(variable_table, name, value) ? SUCCESS : FAILURE;;
 				}
 			}
 		} else {
-			return (zend_hash_update_ind(execute_data->symbol_table, name, value) != NULL) ? SUCCESS : FAILURE;
+			return (zend_hash_update_ind(execute_data->variable_table, name, value) != NULL) ? SUCCESS : FAILURE;
 		}
 	}
 	return FAILURE;
@@ -1680,7 +1680,7 @@ ZEND_API int zend_set_local_var_str(const char *name, size_t len, zval *value, i
 	}
 
 	if (execute_data) {
-		if (!(EX_CALL_INFO() & ZEND_CALL_HAS_SYMBOL_TABLE)) {
+		if (!(EX_CALL_INFO() & ZEND_CALL_HAS_VARIABLE_TABLE)) {
 			zend_ulong h = zend_hash_func(name, len);
 			zend_op_array *op_array = &execute_data->func->op_array;
 			if (EXPECTED(op_array->last_var)) {
@@ -1700,13 +1700,13 @@ ZEND_API int zend_set_local_var_str(const char *name, size_t len, zval *value, i
 				} while (str != end);
 			}
 			if (force) {
-				zend_array *symbol_table = zend_rebuild_symbol_table();
-				if (symbol_table) {
-					return zend_hash_str_update(symbol_table, name, len, value) ? SUCCESS : FAILURE;;
+				zend_array *variable_table = zend_rebuild_variable_table();
+				if (variable_table) {
+					return zend_hash_str_update(variable_table, name, len, value) ? SUCCESS : FAILURE;;
 				}
 			}
 		} else {
-			return (zend_hash_str_update_ind(execute_data->symbol_table, name, len, value) != NULL) ? SUCCESS : FAILURE;
+			return (zend_hash_str_update_ind(execute_data->variable_table, name, len, value) != NULL) ? SUCCESS : FAILURE;
 		}
 	}
 	return FAILURE;

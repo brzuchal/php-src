@@ -476,7 +476,7 @@ ZEND_API int _call_user_function_ex(zval *object, zval *function_name, zval *ret
 
 #define call_user_function(function_table, object, function_name, retval_ptr, param_count, params) \
 	_call_user_function_ex(object, function_name, retval_ptr, param_count, params, 1)
-#define call_user_function_ex(function_table, object, function_name, retval_ptr, param_count, params, no_separation, symbol_table) \
+#define call_user_function_ex(function_table, object, function_name, retval_ptr, param_count, params, no_separation, variable_table) \
 	_call_user_function_ex(object, function_name, retval_ptr, param_count, params, no_separation)
 
 ZEND_API extern const zend_fcall_info empty_fcall_info;
@@ -538,13 +538,13 @@ ZEND_API int zend_fcall_info_call(zend_fcall_info *fci, zend_fcall_info_cache *f
 
 ZEND_API int zend_call_function(zend_fcall_info *fci, zend_fcall_info_cache *fci_cache);
 
-ZEND_API int zend_set_hash_symbol(zval *symbol, const char *name, int name_length, zend_bool is_ref, int num_symbol_tables, ...);
+ZEND_API int zend_set_hash_symbol(zval *symbol, const char *name, int name_length, zend_bool is_ref, int num_variable_tables, ...);
 
 ZEND_API int zend_delete_global_variable(zend_string *name);
 
-ZEND_API zend_array *zend_rebuild_symbol_table(void);
-ZEND_API void zend_attach_symbol_table(zend_execute_data *execute_data);
-ZEND_API void zend_detach_symbol_table(zend_execute_data *execute_data);
+ZEND_API zend_array *zend_rebuild_variable_table(void);
+ZEND_API void zend_attach_variable_table(zend_execute_data *execute_data);
+ZEND_API void zend_detach_variable_table(zend_execute_data *execute_data);
 ZEND_API int zend_set_local_var(zend_string *name, zval *value, int force);
 ZEND_API int zend_set_local_var_str(const char *name, size_t len, zval *value, int force);
 ZEND_API int zend_forbid_dynamic_call(const char *func_name);

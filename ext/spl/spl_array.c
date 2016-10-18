@@ -548,7 +548,7 @@ try_again:
 	switch (Z_TYPE_P(offset)) {
 	case IS_STRING:
 		ht = spl_array_get_hash_table(intern);
-		if (ht == &EG(symbol_table)) {
+		if (ht == &EG(variable_table)) {
 			if (zend_delete_global_variable(Z_STR_P(offset))) {
 				zend_error(E_NOTICE,"Undefined index: %s", Z_STRVAL_P(offset));
 			}
@@ -942,7 +942,7 @@ static int spl_array_compare_objects(zval *o1, zval *o2) /* {{{ */
 	ht1		= spl_array_get_hash_table(intern1);
 	ht2		= spl_array_get_hash_table(intern2);
 
-	result = zend_compare_symbol_tables(ht1, ht2);
+	result = zend_compare_variable_tables(ht1, ht2);
 	/* if we just compared std.properties, don't do it again */
 	if (result == 0 &&
 			!(ht1 == intern1->std.properties && ht2 == intern2->std.properties)) {

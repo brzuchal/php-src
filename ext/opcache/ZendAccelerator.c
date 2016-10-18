@@ -1386,7 +1386,7 @@ static int zend_accel_get_auto_globals(void)
 	int mask = 0;
 
 	for (i = 0; i < ag_size ; i++) {
-		if (zend_hash_exists(&EG(symbol_table), jit_auto_globals_str[i])) {
+		if (zend_hash_exists(&EG(variable_table), jit_auto_globals_str[i])) {
 			mask |= n;
 		}
 		n += n;
@@ -1396,7 +1396,7 @@ static int zend_accel_get_auto_globals(void)
 
 static int zend_accel_get_auto_globals_no_jit(void)
 {
-	if (zend_hash_exists(&EG(symbol_table), jit_auto_globals_str[3])) {
+	if (zend_hash_exists(&EG(variable_table), jit_auto_globals_str[3])) {
 		return 8;
 	}
 	return 0;
@@ -2157,7 +2157,7 @@ tail_call:
 	switch (Z_TYPE_P(zvalue)) {
 		case IS_ARRAY:
 			GC_REMOVE_FROM_BUFFER(Z_ARR_P(zvalue));
-			if (Z_ARR_P(zvalue) != &EG(symbol_table)) {
+			if (Z_ARR_P(zvalue) != &EG(variable_table)) {
 				/* break possible cycles */
 				ZVAL_NULL(zvalue);
 				accel_fast_hash_destroy(Z_ARRVAL_P(zvalue));
@@ -2223,14 +2223,14 @@ static void zend_accel_fast_shutdown(void)
 	if (EG(objects_store).top > 1 || zend_hash_num_elements(&EG(regular_list)) > 0) {
 		/* We don't have to destroy all zvals if they cannot call any destructors */
 		zend_try {
-			ZEND_HASH_REVERSE_FOREACH(&EG(symbol_table), 0) {
+			ZEND_HASH_REVERSE_FOREACH(&EG(variable_table), 0) {
 				if (Z_REFCOUNTED(_p->val) && Z_DELREF(_p->val) == 0) {
 					accel_fast_zval_dtor(&_p->val);
 				}
-				zend_accel_fast_del_bucket(&EG(symbol_table), HT_IDX_TO_HASH(_idx-1), _p);
+				zend_accel_fast_del_bucket(&EG(variable_table), HT_IDX_TO_HASH(_idx-1), _p);
 			} ZEND_HASH_FOREACH_END();
 		} zend_end_try();
-		zend_hash_init(&EG(symbol_table), 8, NULL, NULL, 0);
+		zend_hash_init(&EG(variable_table), 8, NULL, NULL, 0);
 
 		ZEND_HASH_REVERSE_FOREACH(EG(function_table), 0) {
 			zend_function *func = Z_PTR(_p->val);
@@ -2289,7 +2289,7 @@ static void zend_accel_fast_shutdown(void)
 
 	} else {
 
-		zend_hash_init(&EG(symbol_table), 8, NULL, NULL, 0);
+		zend_hash_init(&EG(variable_table), 8, NULL, NULL, 0);
 
 		ZEND_HASH_REVERSE_FOREACH(EG(function_table), 0) {
 			zend_function *func = Z_PTR(_p->val);

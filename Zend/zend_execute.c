@@ -1538,19 +1538,19 @@ static void zend_extension_fcall_end_handler(const zend_extension *extension, ze
 }
 
 
-static zend_always_inline HashTable *zend_get_target_symbol_table(zend_execute_data *execute_data, int fetch_type)
+static zend_always_inline HashTable *zend_get_target_variable_table(zend_execute_data *execute_data, int fetch_type)
 {
 	HashTable *ht;
 
 	if (EXPECTED(fetch_type == ZEND_FETCH_GLOBAL_LOCK) ||
 	    EXPECTED(fetch_type == ZEND_FETCH_GLOBAL)) {
-		ht = &EG(symbol_table);
+		ht = &EG(variable_table);
 	} else {
 		ZEND_ASSERT(fetch_type == ZEND_FETCH_LOCAL);
-		if (!(EX_CALL_INFO() & ZEND_CALL_HAS_SYMBOL_TABLE)) {
-			zend_rebuild_symbol_table();
+		if (!(EX_CALL_INFO() & ZEND_CALL_HAS_VARIABLE_TABLE)) {
+			zend_rebuild_variable_table();
 		}
-		ht = EX(symbol_table);
+		ht = EX(variable_table);
 	}
 	return ht;
 }
@@ -2032,10 +2032,10 @@ use_read_property:
 
 #if ZEND_INTENSIVE_DEBUGGING
 
-#define CHECK_SYMBOL_TABLES()													\
-	zend_hash_apply(&EG(symbol_table), zend_check_symbol);			\
-	if (&EG(symbol_table)!=EX(symbol_table)) {							\
-		zend_hash_apply(EX(symbol_table), zend_check_symbol);	\
+#define CHECK_VARIABLE_TABLES()													\
+	zend_hash_apply(&EG(variable_table), zend_check_symbol);			\
+	if (&EG(variable_table)!=EX(variable_table)) {							\
+		zend_hash_apply(EX(variable_table), zend_check_symbol);	\
 	}
 
 static int zend_check_symbol(zval *pz)
@@ -2061,7 +2061,7 @@ static int zend_check_symbol(zval *pz)
 
 
 #else
-#define CHECK_SYMBOL_TABLES()
+#define CHECK_VARIABLE_TABLES()
 #endif
 
 ZEND_API void execute_internal(zend_execute_data *execute_data, zval *return_value)
@@ -2069,15 +2069,15 @@ ZEND_API void execute_internal(zend_execute_data *execute_data, zval *return_val
 	execute_data->func->internal_function.handler(execute_data, return_value);
 }
 
-ZEND_API void zend_clean_and_cache_symbol_table(zend_array *symbol_table) /* {{{ */
+ZEND_API void zend_clean_and_cache_variable_table(zend_array *variable_table) /* {{{ */
 {
 	if (EG(symtable_cache_ptr) >= EG(symtable_cache_limit)) {
-		zend_array_destroy(symbol_table);
+		zend_array_destroy(variable_table);
 	} else {
 		/* clean before putting into the cache, since clean
 		   could call dtors, which could use cached hash */
-		zend_symtable_clean(symbol_table);
-		*(++EG(symtable_cache_ptr)) = symbol_table;
+		zend_symtable_clean(variable_table);
+		*(++EG(symtable_cache_ptr)) = variable_table;
 	}
 }
 /* }}} */
@@ -2220,7 +2220,7 @@ static zend_always_inline void i_init_code_execute_data(zend_execute_data *execu
 	EX(call) = NULL;
 	EX(return_value) = return_value;
 
-	zend_attach_symbol_table(execute_data);
+	zend_attach_variable_table(execute_data);
 
 	if (!op_array->run_time_cache) {
 		op_array->run_time_cache = emalloc(op_array->cache_size);
@@ -2241,8 +2241,8 @@ static zend_always_inline void i_init_execute_data(zend_execute_data *execute_da
 	EX(call) = NULL;
 	EX(return_value) = return_value;
 
-	if (EX_CALL_INFO() & ZEND_CALL_HAS_SYMBOL_TABLE) {
-		zend_attach_symbol_table(execute_data);
+	if (EX_CALL_INFO() & ZEND_CALL_HAS_VARIABLE_TABLE) {
+		zend_attach_variable_table(execute_data);
 	} else {
 		uint32_t first_extra_arg, num_args;
 
@@ -2936,7 +2936,7 @@ static zend_never_inline int zend_do_fcall_overloaded(zend_function *fbc, zend_e
 #endif
 
 #define ZEND_VM_NEXT_OPCODE_EX(check_exception, skip) \
-	CHECK_SYMBOL_TABLES() \
+	CHECK_VARIABLE_TABLES() \
 	if (check_exception) { \
 		OPLINE = EX(opline) + (skip); \
 	} else { \
@@ -2951,11 +2951,11 @@ static zend_never_inline int zend_do_fcall_overloaded(zend_function *fbc, zend_e
 	ZEND_VM_NEXT_OPCODE_EX(0, 1)
 
 #define ZEND_VM_SET_NEXT_OPCODE(new_op) \
-	CHECK_SYMBOL_TABLES() \
+	CHECK_VARIABLE_TABLES() \
 	OPLINE = new_op
 
 #define ZEND_VM_SET_OPCODE(new_op) \
-	CHECK_SYMBOL_TABLES() \
+	CHECK_VARIABLE_TABLES() \
 	OPLINE = new_op; \
 	ZEND_VM_INTERRUPT_CHECK()
 

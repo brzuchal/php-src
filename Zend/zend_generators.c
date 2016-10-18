@@ -118,8 +118,8 @@ ZEND_API void zend_generator_close(zend_generator *generator, zend_bool finished
 	if (EXPECTED(generator->execute_data)) {
 		zend_execute_data *execute_data = generator->execute_data;
 
-		if (EX_CALL_INFO() & ZEND_CALL_HAS_SYMBOL_TABLE) {
-			zend_clean_and_cache_symbol_table(execute_data->symbol_table);
+		if (EX_CALL_INFO() & ZEND_CALL_HAS_VARIABLE_TABLE) {
+			zend_clean_and_cache_variable_table(execute_data->variable_table);
 		}
 		/* always free the CV's, in the symtable are only not-free'd IS_INDIRECT's */
 		zend_free_compiled_variables(execute_data);
@@ -262,7 +262,7 @@ static uint32_t calc_gc_buffer_size(zend_generator *generator) /* {{{ */
 		zend_op_array *op_array = &EX(func)->op_array;
 
 		/* Compiled variables */
-		if (!(EX_CALL_INFO() & ZEND_CALL_HAS_SYMBOL_TABLE)) {
+		if (!(EX_CALL_INFO() & ZEND_CALL_HAS_VARIABLE_TABLE)) {
 			size += op_array->last_var;
 		}
 		/* Extra args */
@@ -316,7 +316,7 @@ static HashTable *zend_generator_get_gc(zval *object, zval **table, int *n) /* {
 	ZVAL_COPY_VALUE(gc_buffer++, &generator->retval);
 	ZVAL_COPY_VALUE(gc_buffer++, &generator->values);
 
-	if (!(EX_CALL_INFO() & ZEND_CALL_HAS_SYMBOL_TABLE)) {
+	if (!(EX_CALL_INFO() & ZEND_CALL_HAS_VARIABLE_TABLE)) {
 		uint32_t i, num_cvs = EX(func)->op_array.last_var;
 		for (i = 0; i < num_cvs; i++) {
 			ZVAL_COPY_VALUE(gc_buffer++, EX_VAR_NUM(i));
@@ -346,8 +346,8 @@ static HashTable *zend_generator_get_gc(zval *object, zval **table, int *n) /* {
 		}
 	}
 
-	if (EX_CALL_INFO() & ZEND_CALL_HAS_SYMBOL_TABLE) {
-		return execute_data->symbol_table;
+	if (EX_CALL_INFO() & ZEND_CALL_HAS_VARIABLE_TABLE) {
+		return execute_data->variable_table;
 	} else {
 		return NULL;
 	}

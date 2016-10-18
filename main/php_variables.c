@@ -114,7 +114,7 @@ PHPAPI void php_register_variable_ex(char *var_name, zval *val, zval *track_vars
 
 		while (ex) {
 			if (ex->func && ZEND_USER_CODE(ex->func->common.type)) {
-				if (ex->symbol_table == symtable1) {
+				if (ex->variable_table == symtable1) {
 					if (memcmp(var, "this", sizeof("this")-1) == 0) {
 						zend_throw_error(NULL, "Cannot re-assign $this");
 						zval_dtor(val);
@@ -129,7 +129,7 @@ PHPAPI void php_register_variable_ex(char *var_name, zval *val, zval *track_vars
 	}
 
 	/* GLOBALS hijack attempt, reject parameter */
-	if (symtable1 == &EG(symbol_table) &&
+	if (symtable1 == &EG(variable_table) &&
 		var_len == sizeof("GLOBALS")-1 &&
 		!memcmp(var, "GLOBALS", sizeof("GLOBALS")-1)) {
 		zval_dtor(val);
@@ -595,8 +595,8 @@ PHPAPI void php_build_argv(char *s, zval *track_vars_array)
 
 	if (SG(request_info).argc) {
 		Z_ADDREF(arr);
-		zend_hash_str_update(&EG(symbol_table), "argv", sizeof("argv")-1, &arr);
-		zend_hash_str_add(&EG(symbol_table), "argc", sizeof("argc")-1, &argc);
+		zend_hash_str_update(&EG(variable_table), "argv", sizeof("argv")-1, &arr);
+		zend_hash_str_add(&EG(variable_table), "argc", sizeof("argc")-1, &argc);
 	}
 	if (track_vars_array && Z_TYPE_P(track_vars_array) == IS_ARRAY) {
 		Z_ADDREF(arr);
@@ -647,7 +647,7 @@ static void php_autoglobal_merge(HashTable *dest, HashTable *src)
 	zval *src_entry, *dest_entry;
 	zend_string *string_key;
 	zend_ulong num_key;
-	int globals_check = (dest == (&EG(symbol_table)));
+	int globals_check = (dest == (&EG(variable_table)));
 
 	ZEND_HASH_FOREACH_KEY_VAL(src, num_key, string_key, src_entry) {
 		if (Z_TYPE_P(src_entry) != IS_ARRAY
@@ -697,7 +697,7 @@ static zend_bool php_auto_globals_create_get(zend_string *name)
 		array_init(&PG(http_globals)[TRACK_VARS_GET]);
 	}
 
-	zend_hash_update(&EG(symbol_table), name, &PG(http_globals)[TRACK_VARS_GET]);
+	zend_hash_update(&EG(variable_table), name, &PG(http_globals)[TRACK_VARS_GET]);
 	Z_ADDREF(PG(http_globals)[TRACK_VARS_GET]);
 
 	return 0; /* don't rearm */
@@ -716,7 +716,7 @@ static zend_bool php_auto_globals_create_post(zend_string *name)
 		array_init(&PG(http_globals)[TRACK_VARS_POST]);
 	}
 
-	zend_hash_update(&EG(symbol_table), name, &PG(http_globals)[TRACK_VARS_POST]);
+	zend_hash_update(&EG(variable_table), name, &PG(http_globals)[TRACK_VARS_POST]);
 	Z_ADDREF(PG(http_globals)[TRACK_VARS_POST]);
 
 	return 0; /* don't rearm */
@@ -731,7 +731,7 @@ static zend_bool php_auto_globals_create_cookie(zend_string *name)
 		array_init(&PG(http_globals)[TRACK_VARS_COOKIE]);
 	}
 
-	zend_hash_update(&EG(symbol_table), name, &PG(http_globals)[TRACK_VARS_COOKIE]);
+	zend_hash_update(&EG(variable_table), name, &PG(http_globals)[TRACK_VARS_COOKIE]);
 	Z_ADDREF(PG(http_globals)[TRACK_VARS_COOKIE]);
 
 	return 0; /* don't rearm */
@@ -743,7 +743,7 @@ static zend_bool php_auto_globals_create_files(zend_string *name)
 		array_init(&PG(http_globals)[TRACK_VARS_FILES]);
 	}
 
-	zend_hash_update(&EG(symbol_table), name, &PG(http_globals)[TRACK_VARS_FILES]);
+	zend_hash_update(&EG(variable_table), name, &PG(http_globals)[TRACK_VARS_FILES]);
 	Z_ADDREF(PG(http_globals)[TRACK_VARS_FILES]);
 
 	return 0; /* don't rearm */
@@ -774,8 +774,8 @@ static zend_bool php_auto_globals_create_server(zend_string *name)
 			if (SG(request_info).argc) {
 				zval *argc, *argv;
 
-				if ((argc = zend_hash_str_find_ind(&EG(symbol_table), "argc", sizeof("argc")-1)) != NULL &&
-					(argv = zend_hash_str_find_ind(&EG(symbol_table), "argv", sizeof("argv")-1)) != NULL) {
+				if ((argc = zend_hash_str_find_ind(&EG(variable_table), "argc", sizeof("argc")-1)) != NULL &&
+					(argv = zend_hash_str_find_ind(&EG(variable_table), "argv", sizeof("argv")-1)) != NULL) {
 					Z_ADDREF_P(argv);
 					zend_hash_str_update(Z_ARRVAL(PG(http_globals)[TRACK_VARS_SERVER]), "argv", sizeof("argv")-1, argv);
 					zend_hash_str_update(Z_ARRVAL(PG(http_globals)[TRACK_VARS_SERVER]), "argc", sizeof("argc")-1, argc);
@@ -791,7 +791,7 @@ static zend_bool php_auto_globals_create_server(zend_string *name)
 	}
 
 	check_http_proxy(Z_ARRVAL(PG(http_globals)[TRACK_VARS_SERVER]));
-	zend_hash_update(&EG(symbol_table), name, &PG(http_globals)[TRACK_VARS_SERVER]);
+	zend_hash_update(&EG(variable_table), name, &PG(http_globals)[TRACK_VARS_SERVER]);
 	Z_ADDREF(PG(http_globals)[TRACK_VARS_SERVER]);
 
 	return 0; /* don't rearm */
@@ -807,7 +807,7 @@ static zend_bool php_auto_globals_create_env(zend_string *name)
 	}
 
 	check_http_proxy(Z_ARRVAL(PG(http_globals)[TRACK_VARS_ENV]));
-	zend_hash_update(&EG(symbol_table), name, &PG(http_globals)[TRACK_VARS_ENV]);
+	zend_hash_update(&EG(variable_table), name, &PG(http_globals)[TRACK_VARS_ENV]);
 	Z_ADDREF(PG(http_globals)[TRACK_VARS_ENV]);
 
 	return 0; /* don't rearm */
@@ -853,7 +853,7 @@ static zend_bool php_auto_globals_create_request(zend_string *name)
 		}
 	}
 
-	zend_hash_update(&EG(symbol_table), name, &form_variables);
+	zend_hash_update(&EG(variable_table), name, &form_variables);
 	return 0;
 }
 

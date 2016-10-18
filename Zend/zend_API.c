@@ -2732,26 +2732,26 @@ ZEND_API int zend_register_class_alias_ex(const char *name, size_t name_len, zen
 }
 /* }}} */
 
-ZEND_API int zend_set_hash_symbol(zval *symbol, const char *name, int name_length, zend_bool is_ref, int num_symbol_tables, ...) /* {{{ */
+ZEND_API int zend_set_hash_symbol(zval *symbol, const char *name, int name_length, zend_bool is_ref, int num_variable_tables, ...) /* {{{ */
 {
-	HashTable *symbol_table;
-	va_list symbol_table_list;
+	HashTable *variable_table;
+	va_list variable_table_list;
 
-	if (num_symbol_tables <= 0) return FAILURE;
+	if (num_variable_tables <= 0) return FAILURE;
 
 	if (is_ref) {
 		ZVAL_MAKE_REF(symbol);
 	}
 
-	va_start(symbol_table_list, num_symbol_tables);
-	while (num_symbol_tables-- > 0) {
-		symbol_table = va_arg(symbol_table_list, HashTable *);
-		zend_hash_str_update(symbol_table, name, name_length, symbol);
+	va_start(variable_table_list, num_variable_tables);
+	while (num_variable_tables-- > 0) {
+		variable_table = va_arg(variable_table_list, HashTable *);
+		zend_hash_str_update(variable_table, name, name_length, symbol);
 		if (Z_REFCOUNTED_P(symbol)) {
 			Z_ADDREF_P(symbol);
 		}
 	}
-	va_end(symbol_table_list);
+	va_end(variable_table_list);
 	return SUCCESS;
 }
 /* }}} */

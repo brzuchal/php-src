@@ -1298,7 +1298,7 @@ static int phpdbg_watchpoint_parse_symtables(char *input, size_t len, int (*call
 	int ret;
 
 	if (scope && len >= 5 && !memcmp("$this", input, 5)) {
-		zend_hash_str_add(EG(current_execute_data)->symbol_table, ZEND_STRL("this"), &EG(current_execute_data)->This);
+		zend_hash_str_add(EG(current_execute_data)->variable_table, ZEND_STRL("this"), &EG(current_execute_data)->This);
 	}
 
 	if (callback == phpdbg_create_array_watchpoint) {
@@ -1308,12 +1308,12 @@ static int phpdbg_watchpoint_parse_symtables(char *input, size_t len, int (*call
 	}
 	info.callback = callback;
 
-	if (phpdbg_is_auto_global(input, len) && phpdbg_watchpoint_parse_input(input, len, &EG(symbol_table), 0, &info, 1) != FAILURE) {
+	if (phpdbg_is_auto_global(input, len) && phpdbg_watchpoint_parse_input(input, len, &EG(variable_table), 0, &info, 1) != FAILURE) {
 		zend_string_release(info.str);
 		return SUCCESS;
 	}
 
-	ret = phpdbg_parse_variable_with_arg(input, len, EG(current_execute_data)->symbol_table, 0, (phpdbg_parse_var_with_arg_func) phpdbg_watchpoint_parse_wrapper, (phpdbg_parse_var_with_arg_func) phpdbg_watchpoint_parse_step, 0, &info);
+	ret = phpdbg_parse_variable_with_arg(input, len, EG(current_execute_data)->variable_table, 0, (phpdbg_parse_var_with_arg_func) phpdbg_watchpoint_parse_wrapper, (phpdbg_parse_var_with_arg_func) phpdbg_watchpoint_parse_step, 0, &info);
 
 	zend_string_release(info.str);
 	return ret;

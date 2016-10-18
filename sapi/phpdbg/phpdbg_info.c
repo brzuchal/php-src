@@ -187,9 +187,9 @@ static int phpdbg_print_symbols(zend_bool show_globals) {
 	if (show_globals) {
 		/* that array should only be manipulated during init, so safe for async access during execution */
 		zend_hash_apply(CG(auto_globals), (apply_func_t) phpdbg_arm_auto_global);
-		symtable = &EG(symbol_table);
-	} else if (!(symtable = zend_rebuild_symbol_table())) {
-		phpdbg_error("inactive", "type=\"symbol_table\"", "No active symbol table!");
+		symtable = &EG(variable_table);
+	} else if (!(symtable = zend_rebuild_variable_table())) {
+		phpdbg_error("inactive", "type=\"variable_table\"", "No active symbol table!");
 		return SUCCESS;
 	}
 

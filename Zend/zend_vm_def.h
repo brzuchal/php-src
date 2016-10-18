@@ -1447,7 +1447,7 @@ ZEND_VM_HELPER(zend_fetch_var_address_helper, CONST|TMPVAR|CV, UNUSED, int type)
 	zval *varname;
 	zval *retval;
 	zend_string *name;
-	HashTable *target_symbol_table;
+	HashTable *target_variable_table;
 
 	SAVE_OPLINE();
 	varname = GET_OP1_ZVAL_PTR_UNDEF(BP_VAR_R);
@@ -1464,8 +1464,8 @@ ZEND_VM_HELPER(zend_fetch_var_address_helper, CONST|TMPVAR|CV, UNUSED, int type)
 		name = zval_get_string(varname);
 	}
 
-	target_symbol_table = zend_get_target_symbol_table(execute_data, opline->extended_value & ZEND_FETCH_TYPE_MASK);
-	retval = zend_hash_find(target_symbol_table, name);
+	target_variable_table = zend_get_target_variable_table(execute_data, opline->extended_value & ZEND_FETCH_TYPE_MASK);
+	retval = zend_hash_find(target_variable_table, name);
 	if (retval == NULL) {
 		if (UNEXPECTED(zend_string_equals(name, CG(known_strings)[ZEND_STR_THIS]))) {
 			zval *result;
@@ -1514,10 +1514,10 @@ ZEND_VM_C_LABEL(fetch_this):
 				break;
 			case BP_VAR_RW:
 				zend_error(E_NOTICE,"Undefined variable: %s", ZSTR_VAL(name));
-				retval = zend_hash_update(target_symbol_table, name, &EG(uninitialized_zval));
+				retval = zend_hash_update(target_variable_table, name, &EG(uninitialized_zval));
 				break;
 			case BP_VAR_W:
-				retval = zend_hash_add_new(target_symbol_table, name, &EG(uninitialized_zval));
+				retval = zend_hash_add_new(target_variable_table, name, &EG(uninitialized_zval));
 				break;
 			EMPTY_SWITCH_DEFAULT_CASE()
 		}
@@ -2489,7 +2489,7 @@ ZEND_VM_HELPER(zend_leave_helper, ANY, ANY)
 	zend_execute_data *old_execute_data;
 	uint32_t call_info = EX_CALL_INFO();
 
-	if (EXPECTED((call_info & (ZEND_CALL_CODE|ZEND_CALL_TOP|ZEND_CALL_HAS_SYMBOL_TABLE|ZEND_CALL_FREE_EXTRA_ARGS|ZEND_CALL_ALLOCATED)) == 0)) {
+	if (EXPECTED((call_info & (ZEND_CALL_CODE|ZEND_CALL_TOP|ZEND_CALL_HAS_VARIABLE_TABLE|ZEND_CALL_FREE_EXTRA_ARGS|ZEND_CALL_ALLOCATED)) == 0)) {
 		i_free_compiled_variables(execute_data);
 
 		EG(current_execute_data) = EX(prev_execute_data);
@@ -2524,8 +2524,8 @@ ZEND_VM_HELPER(zend_leave_helper, ANY, ANY)
 	} else if (EXPECTED((call_info & (ZEND_CALL_CODE|ZEND_CALL_TOP)) == 0)) {
 		i_free_compiled_variables(execute_data);
 
-		if (UNEXPECTED(call_info & ZEND_CALL_HAS_SYMBOL_TABLE)) {
-			zend_clean_and_cache_symbol_table(EX(symbol_table));
+		if (UNEXPECTED(call_info & ZEND_CALL_HAS_VARIABLE_TABLE)) {
+			zend_clean_and_cache_variable_table(EX(variable_table));
 		}
 		EG(current_execute_data) = EX(prev_execute_data);
 		if (UNEXPECTED(call_info & ZEND_CALL_RELEASE_THIS)) {
@@ -2560,14 +2560,14 @@ ZEND_VM_HELPER(zend_leave_helper, ANY, ANY)
 		LOAD_NEXT_OPLINE();
 		ZEND_VM_LEAVE();
 	} else if (EXPECTED((call_info & ZEND_CALL_TOP) == 0)) {
-		zend_detach_symbol_table(execute_data);
+		zend_detach_variable_table(execute_data);
 		destroy_op_array(&EX(func)->op_array);
 		efree_size(EX(func), sizeof(zend_op_array));
 		old_execute_data = execute_data;
 		execute_data = EG(current_execute_data) = EX(prev_execute_data);
 		zend_vm_stack_free_call_frame_ex(call_info, old_execute_data);
 
-		zend_attach_symbol_table(execute_data);
+		zend_attach_variable_table(execute_data);
 		if (UNEXPECTED(EG(exception) != NULL)) {
 			zend_throw_exception_internal(NULL);
 			HANDLE_EXCEPTION_LEAVE();
@@ -2578,9 +2578,9 @@ ZEND_VM_HELPER(zend_leave_helper, ANY, ANY)
 	} else {
 		if (EXPECTED((call_info & ZEND_CALL_CODE) == 0)) {
 			i_free_compiled_variables(execute_data);
-			if (UNEXPECTED(call_info & (ZEND_CALL_HAS_SYMBOL_TABLE|ZEND_CALL_FREE_EXTRA_ARGS))) {
-				if (UNEXPECTED(call_info & ZEND_CALL_HAS_SYMBOL_TABLE)) {
-					zend_clean_and_cache_symbol_table(EX(symbol_table));
+			if (UNEXPECTED(call_info & (ZEND_CALL_HAS_VARIABLE_TABLE|ZEND_CALL_FREE_EXTRA_ARGS))) {
+				if (UNEXPECTED(call_info & ZEND_CALL_HAS_VARIABLE_TABLE)) {
+					zend_clean_and_cache_variable_table(EX(variable_table));
 				}
 				zend_vm_stack_free_extra_args_ex(call_info, execute_data);
 			}
@@ -2590,14 +2590,14 @@ ZEND_VM_HELPER(zend_leave_helper, ANY, ANY)
 			}
 			ZEND_VM_RETURN();
 		} else /* if (call_kind == ZEND_CALL_TOP_CODE) */ {
-			zend_array *symbol_table = EX(symbol_table);
+			zend_array *variable_table = EX(variable_table);
 
-			zend_detach_symbol_table(execute_data);
+			zend_detach_variable_table(execute_data);
 			old_execute_data = EX(prev_execute_data);
 			while (old_execute_data) {
-				if (old_execute_data->func && (ZEND_CALL_INFO(old_execute_data) & ZEND_CALL_HAS_SYMBOL_TABLE)) {
-					if (old_execute_data->symbol_table == symbol_table) {
-						zend_attach_symbol_table(old_execute_data);
+				if (old_execute_data->func && (ZEND_CALL_INFO(old_execute_data) & ZEND_CALL_HAS_VARIABLE_TABLE)) {
+					if (old_execute_data->variable_table == variable_table) {
+						zend_attach_variable_table(old_execute_data);
 					}
 					break;
 				}
@@ -5414,15 +5414,15 @@ ZEND_VM_HANDLER(73, ZEND_INCLUDE_OR_EVAL, CONST|TMPVAR|CV, ANY, EVAL)
 
 		new_op_array->scope = EX(func)->op_array.scope;
 
-		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_CODE | ZEND_CALL_HAS_SYMBOL_TABLE,
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_CODE | ZEND_CALL_HAS_VARIABLE_TABLE,
 			(zend_function*)new_op_array, 0,
 			Z_TYPE(EX(This)) != IS_OBJECT ? Z_CE(EX(This)) : NULL,
 			Z_TYPE(EX(This)) == IS_OBJECT ? Z_OBJ(EX(This)) : NULL);
 
-		if (EX_CALL_INFO() & ZEND_CALL_HAS_SYMBOL_TABLE) {
-			call->symbol_table = EX(symbol_table);
+		if (EX_CALL_INFO() & ZEND_CALL_HAS_VARIABLE_TABLE) {
+			call->variable_table = EX(variable_table);
 		} else {
-			call->symbol_table = zend_rebuild_symbol_table();
+			call->variable_table = zend_rebuild_variable_table();
 		}
 
 		call->prev_execute_data = execute_data;
@@ -5452,7 +5452,7 @@ ZEND_VM_HANDLER(74, ZEND_UNSET_VAR, CONST|TMPVAR|CV, UNUSED, VAR_FETCH|ISSET)
 {
 	USE_OPLINE
 	zval tmp, *varname;
-	HashTable *target_symbol_table;
+	HashTable *target_variable_table;
 	zend_free_op free_op1;
 
 	SAVE_OPLINE();
@@ -5493,8 +5493,8 @@ ZEND_VM_HANDLER(74, ZEND_UNSET_VAR, CONST|TMPVAR|CV, UNUSED, VAR_FETCH|ISSET)
 		varname = &tmp;
 	}
 
-	target_symbol_table = zend_get_target_symbol_table(execute_data, opline->extended_value & ZEND_FETCH_TYPE_MASK);
-	zend_hash_del_ind(target_symbol_table, Z_STR_P(varname));
+	target_variable_table = zend_get_target_variable_table(execute_data, opline->extended_value & ZEND_FETCH_TYPE_MASK);
+	zend_hash_del_ind(target_variable_table, Z_STR_P(varname));
 
 	if (OP1_TYPE != IS_CONST && Z_TYPE(tmp) != IS_UNDEF) {
 		zend_string_release(Z_STR(tmp));
@@ -5590,7 +5590,7 @@ ZEND_VM_C_LABEL(offset_again):
 					}
 				}
 ZEND_VM_C_LABEL(str_index_dim):
-				if (ht == &EG(symbol_table)) {
+				if (ht == &EG(variable_table)) {
 					zend_delete_global_variable(key);
 				} else {
 					zend_hash_del(ht, key);
@@ -6376,7 +6376,7 @@ ZEND_VM_HANDLER(114, ZEND_ISSET_ISEMPTY_VAR, CONST|TMPVAR|CV, UNUSED, VAR_FETCH|
 	} else {
 		zend_free_op free_op1;
 		zval tmp, *varname;
-		HashTable *target_symbol_table;
+		HashTable *target_variable_table;
 
 		SAVE_OPLINE();
 		varname = GET_OP1_ZVAL_PTR(BP_VAR_IS);
@@ -6386,8 +6386,8 @@ ZEND_VM_HANDLER(114, ZEND_ISSET_ISEMPTY_VAR, CONST|TMPVAR|CV, UNUSED, VAR_FETCH|
 			varname = &tmp;
 		}
 
-		target_symbol_table = zend_get_target_symbol_table(execute_data, opline->extended_value & ZEND_FETCH_TYPE_MASK);
-		value = zend_hash_find_ind(target_symbol_table, Z_STR_P(varname));
+		target_variable_table = zend_get_target_variable_table(execute_data, opline->extended_value & ZEND_FETCH_TYPE_MASK);
+		value = zend_hash_find_ind(target_variable_table, Z_STR_P(varname));
 
 		if (OP1_TYPE != IS_CONST && Z_TYPE(tmp) != IS_UNDEF) {
 			zend_string_release(Z_STR(tmp));
@@ -7645,8 +7645,8 @@ ZEND_VM_HANDLER(168, ZEND_BIND_GLOBAL, CV, CONST)
 
 	/* We store "hash slot index" + 1 (NULL is a mark of uninitialized cache slot) */
 	idx = (uint32_t)(uintptr_t)CACHED_PTR(Z_CACHE_SLOT_P(varname)) - 1;
-	if (EXPECTED(idx < EG(symbol_table).nNumUsed)) {
-		Bucket *p = EG(symbol_table).arData + idx;
+	if (EXPECTED(idx < EG(variable_table).nNumUsed)) {
+		Bucket *p = EG(variable_table).arData + idx;
 
 		if (EXPECTED(Z_TYPE(p->val) != IS_UNDEF) &&
 	        (EXPECTED(p->key == Z_STR_P(varname)) ||
@@ -7655,19 +7655,19 @@ ZEND_VM_HANDLER(168, ZEND_BIND_GLOBAL, CV, CONST)
 	          EXPECTED(ZSTR_LEN(p->key) == Z_STRLEN_P(varname)) &&
 	          EXPECTED(memcmp(ZSTR_VAL(p->key), Z_STRVAL_P(varname), Z_STRLEN_P(varname)) == 0)))) {
 
-			value = &EG(symbol_table).arData[idx].val;
+			value = &EG(variable_table).arData[idx].val;
 			ZEND_VM_C_GOTO(check_indirect);
 		}
 	}
 
-	value = zend_hash_find(&EG(symbol_table), Z_STR_P(varname));
+	value = zend_hash_find(&EG(variable_table), Z_STR_P(varname));
 	if (UNEXPECTED(value == NULL)) {
-		value = zend_hash_add_new(&EG(symbol_table), Z_STR_P(varname), &EG(uninitialized_zval));
-		idx = ((char*)value - (char*)EG(symbol_table).arData) / sizeof(Bucket);
+		value = zend_hash_add_new(&EG(variable_table), Z_STR_P(varname), &EG(uninitialized_zval));
+		idx = ((char*)value - (char*)EG(variable_table).arData) / sizeof(Bucket);
 		/* Store "hash slot index" + 1 (NULL is a mark of uninitialized cache slot) */
 		CACHE_PTR(Z_CACHE_SLOT_P(varname), (void*)(uintptr_t)(idx + 1));
 	} else {
-		idx = ((char*)value - (char*)EG(symbol_table).arData) / sizeof(Bucket);
+		idx = ((char*)value - (char*)EG(variable_table).arData) / sizeof(Bucket);
 		/* Store "hash slot index" + 1 (NULL is a mark of uninitialized cache slot) */
 		CACHE_PTR(Z_CACHE_SLOT_P(varname), (void*)(uintptr_t)(idx + 1));
 ZEND_VM_C_LABEL(check_indirect):

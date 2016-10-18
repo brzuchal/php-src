@@ -1515,7 +1515,7 @@ static int zend_std_compare_objects(zval *o1, zval *o2) /* {{{ */
 		if (!zobj2->properties) {
 			rebuild_object_properties(zobj2);
 		}
-		return zend_compare_symbol_tables(zobj1->properties, zobj2->properties);
+		return zend_compare_variable_tables(zobj1->properties, zobj2->properties);
 	}
 }
 /* }}} */

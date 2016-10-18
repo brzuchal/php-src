@@ -2036,17 +2036,17 @@ ZEND_FUNCTION(get_defined_functions)
    Returns an associative array of names and values of all currently defined variable names (variables in the current scope) */
 ZEND_FUNCTION(get_defined_vars)
 {
-	zend_array *symbol_table;
+	zend_array *variable_table;
 	if (zend_forbid_dynamic_call("get_defined_vars()") == FAILURE) {
 		return;
 	}
 
-	symbol_table = zend_rebuild_symbol_table();
-	if (UNEXPECTED(symbol_table == NULL)) {
+	variable_table = zend_rebuild_variable_table();
+	if (UNEXPECTED(variable_table == NULL)) {
 		return;
 	}
 
-	RETURN_ARR(zend_array_dup(symbol_table));
+	RETURN_ARR(zend_array_dup(variable_table));
 }
 /* }}} */
 

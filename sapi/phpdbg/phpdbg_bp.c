@@ -1074,7 +1074,7 @@ static inline phpdbg_breakbase_t *phpdbg_find_conditional_breakpoint(zend_execut
 
 		EG(no_extensions) = 1;
 
-		zend_rebuild_symbol_table();
+		zend_rebuild_variable_table();
 
 		zend_try {
 			PHPDBG_G(flags) |= PHPDBG_IN_COND_BP;

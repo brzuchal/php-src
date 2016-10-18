@@ -325,8 +325,8 @@ int phpdbg_rebuild_symtable(void) {
 		return FAILURE;
 	}
 
-	if (!zend_rebuild_symbol_table()) {
-		phpdbg_error("inactive", "type=\"symbol_table\"", "No active symbol table!");
+	if (!zend_rebuild_variable_table()) {
+		phpdbg_error("inactive", "type=\"variable_table\"", "No active symbol table!");
 		return FAILURE;
 	}
 

@@ -146,7 +146,7 @@ struct _zend_executor_globals {
 	zend_array **symtable_cache_limit;
 	zend_array **symtable_cache_ptr;
 
-	zend_array symbol_table;		/* main symbol table */
+	zend_array variable_table;		/* main symbol table */
 
 	HashTable included_files;	/* files already included */
 
@@ -215,7 +215,7 @@ struct _zend_executor_globals {
 	struct _zend_module_entry *current_module;
 
 	zend_bool active;
-	zend_bool valid_symbol_table;
+	zend_bool valid_variable_table;
 
 	zend_long assertions;
 

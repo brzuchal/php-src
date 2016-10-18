@@ -120,7 +120,7 @@ static inline int phpdbg_call_register(phpdbg_param_t *stack) /* {{{ */
 
 			ZVAL_STRINGL(&fci.function_name, lc_name, name->len);
 			fci.size = sizeof(zend_fcall_info);
-			//???fci.symbol_table = zend_rebuild_symbol_table();
+			//???fci.variable_table = zend_rebuild_variable_table();
 			fci.object = NULL;
 			fci.retval = &fretval;
 			fci.no_separation = 1;
@@ -687,10 +687,10 @@ PHPDBG_COMMAND(run) /* {{{ */
 		}
 
 		/* clean up from last execution */
-		if (ex && (ZEND_CALL_INFO(ex) & ZEND_CALL_HAS_SYMBOL_TABLE)) {
-			zend_hash_clean(ex->symbol_table);
+		if (ex && (ZEND_CALL_INFO(ex) & ZEND_CALL_HAS_VARIABLE_TABLE)) {
+			zend_hash_clean(ex->variable_table);
 		} else {
-			zend_rebuild_symbol_table();
+			zend_rebuild_variable_table();
 		}
 		PHPDBG_G(handled_exception) = NULL;
 
@@ -806,7 +806,7 @@ PHPDBG_COMMAND(ev) /* {{{ */
 
 	if (PHPDBG_G(flags) & PHPDBG_IN_SIGNAL_HANDLER) {
 		phpdbg_try_access {
-			phpdbg_parse_variable(param->str, param->len, &EG(symbol_table), 0, phpdbg_output_ev_variable, 0);
+			phpdbg_parse_variable(param->str, param->len, &EG(variable_table), 0, phpdbg_output_ev_variable, 0);
 		} phpdbg_catch_access {
 			phpdbg_error("signalsegv", "", "Could not fetch data, invalid data source");
 		} phpdbg_end_try_access();

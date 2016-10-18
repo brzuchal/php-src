@@ -2117,14 +2117,14 @@ PHP_FUNCTION(mb_parse_str)
 		detected = _php_mb_encoding_handler_ex(&info, track_vars_array, encstr);
 	} else {
 		zval tmp;
-		zend_array *symbol_table;
+		zend_array *variable_table;
 		if (zend_forbid_dynamic_call("mb_parse_str() with a single argument") == FAILURE) {
 			efree(encstr);
 			return;
 		}
 
-		symbol_table = zend_rebuild_symbol_table();
-		ZVAL_ARR(&tmp, symbol_table);
+		variable_table = zend_rebuild_variable_table();
+		ZVAL_ARR(&tmp, variable_table);
 		detected = _php_mb_encoding_handler_ex(&info, &tmp, encstr);
 	}
 

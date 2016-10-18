@@ -140,7 +140,7 @@ php_stream *php_stream_url_wrap_http_ex(php_stream_wrapper *wrapper,
 	zend_bool follow_location = 1;
 	php_stream_filter *transfer_encoding = NULL;
 	int response_code;
-	zend_array *symbol_table;
+	zend_array *variable_table;
 	smart_str req_buf = {0};
 	zend_bool custom_request_method;
 
@@ -662,7 +662,7 @@ finish:
 
 	location[0] = '\0';
 
-	symbol_table = zend_rebuild_symbol_table();
+	variable_table = zend_rebuild_variable_table();
 
 	if (header_init) {
 		zval ztmp;
@@ -671,7 +671,7 @@ finish:
 	}
 
 	{
-		zval *response_header_ptr = zend_hash_str_find_ind(symbol_table, "http_response_header", sizeof("http_response_header")-1);
+		zval *response_header_ptr = zend_hash_str_find_ind(variable_table, "http_response_header", sizeof("http_response_header")-1);
 		if (!response_header_ptr || Z_TYPE_P(response_header_ptr) != IS_ARRAY) {
 			ZVAL_UNDEF(&response_header);
 			goto out;

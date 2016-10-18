@@ -907,7 +907,7 @@ PHPAPI ZEND_COLD void php_verror(const char *docref, const char *params, int typ
 		efree(docref_buf);
 	}
 
-	if (PG(track_errors) && module_initialized && EG(valid_symbol_table) &&
+	if (PG(track_errors) && module_initialized && EG(valid_variable_table) &&
 			(Z_TYPE(EG(user_error_handler)) == IS_UNDEF || !(EG(user_error_handler_error_reporting) & type))) {
 		zval tmp;
 		ZVAL_STRINGL(&tmp, buffer, buffer_len);
@@ -916,7 +916,7 @@ PHPAPI ZEND_COLD void php_verror(const char *docref, const char *params, int typ
 				zval_ptr_dtor(&tmp);
 			}
 		} else {
-			zend_hash_str_update_ind(&EG(symbol_table), "php_errormsg", sizeof("php_errormsg")-1, &tmp);
+			zend_hash_str_update_ind(&EG(variable_table), "php_errormsg", sizeof("php_errormsg")-1, &tmp);
 		}
 	}
 	if (replace_buffer) {
@@ -1236,7 +1236,7 @@ static ZEND_COLD void php_error_cb(int type, const char *error_filename, const u
 		return;
 	}
 
-	if (PG(track_errors) && module_initialized && EG(valid_symbol_table)) {
+	if (PG(track_errors) && module_initialized && EG(valid_variable_table)) {
 		zval tmp;
 
 		ZVAL_STRINGL(&tmp, buffer, buffer_len);
@@ -1245,7 +1245,7 @@ static ZEND_COLD void php_error_cb(int type, const char *error_filename, const u
 				zval_ptr_dtor(&tmp);
 			}
 		} else {
-			zend_hash_str_update_ind(&EG(symbol_table), "php_errormsg", sizeof("php_errormsg")-1, &tmp);
+			zend_hash_str_update_ind(&EG(variable_table), "php_errormsg", sizeof("php_errormsg")-1, &tmp);
 		}
 	}
 

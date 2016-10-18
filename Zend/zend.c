@@ -638,10 +638,10 @@ static zend_bool php_auto_globals_create_globals(zend_string *name) /* {{{ */
 {
 	zval globals;
 
-	ZVAL_ARR(&globals, &EG(symbol_table));
+	ZVAL_ARR(&globals, &EG(variable_table));
 	Z_TYPE_INFO_P(&globals) = IS_ARRAY;
 	ZVAL_NEW_REF(&globals, &globals);
-	zend_hash_update(&EG(symbol_table), name, &globals);
+	zend_hash_update(&EG(variable_table), name, &globals);
 	return 0;
 }
 /* }}} */
@@ -1069,7 +1069,7 @@ static ZEND_COLD void zend_error_va_list(int type, const char *format, va_list a
 	zend_class_entry *saved_class_entry;
 	zend_stack loop_var_stack;
 	zend_stack delayed_oplines_stack;
-	zend_array *symbol_table;
+	zend_array *variable_table;
 
 	/* Report about uncaught exception in case of fatal errors */
 	if (EG(exception)) {
@@ -1213,13 +1213,13 @@ static ZEND_COLD void zend_error_va_list(int type, const char *format, va_list a
 
 			ZVAL_LONG(&params[3], error_lineno);
 
-			symbol_table = zend_rebuild_symbol_table();
+			variable_table = zend_rebuild_variable_table();
 
 			/* during shutdown the symbol table table can be still null */
-			if (!symbol_table) {
+			if (!variable_table) {
 				ZVAL_NULL(&params[4]);
 			} else {
-				ZVAL_ARR(&params[4], zend_array_dup(symbol_table));
+				ZVAL_ARR(&params[4], zend_array_dup(variable_table));
 			}
 
 			ZVAL_COPY_VALUE(&orig_user_error_handler, &EG(user_error_handler));

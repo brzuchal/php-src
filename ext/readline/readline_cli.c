@@ -432,9 +432,9 @@ static char *cli_completion_generator_ht(const char *text, int textlen, int *sta
 static char *cli_completion_generator_var(const char *text, int textlen, int *state) /* {{{ */
 {
 	char *retval, *tmp;
-	zend_array *symbol_table = &EG(symbol_table);
+	zend_array *variable_table = &EG(variable_table);
 
-	tmp = retval = cli_completion_generator_ht(text + 1, textlen - 1, state, symbol_table, NULL);
+	tmp = retval = cli_completion_generator_ht(text + 1, textlen - 1, state, variable_table, NULL);
 	if (retval) {
 		retval = malloc(strlen(tmp) + 2);
 		retval[0] = '$';

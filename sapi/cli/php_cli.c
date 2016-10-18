@@ -1040,9 +1040,9 @@ static int do_cli(int argc, char **argv) /* {{{ */
 						input[len] = '\0';
 					}
 					ZVAL_STRINGL(&argn, input, len + 1);
-					zend_hash_str_update(&EG(symbol_table), "argn", sizeof("argn")-1, &argn);
+					zend_hash_str_update(&EG(variable_table), "argn", sizeof("argn")-1, &argn);
 					ZVAL_LONG(&argi, ++index);
-					zend_hash_str_update(&EG(symbol_table), "argi", sizeof("argi")-1, &argi);
+					zend_hash_str_update(&EG(variable_table), "argi", sizeof("argi")-1, &argi);
 					if (exec_run) {
 						if (zend_eval_string_ex(exec_run, NULL, "Command line run code", 1) == FAILURE) {
 							exit_status=254;

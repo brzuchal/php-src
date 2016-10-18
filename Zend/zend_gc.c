@@ -399,7 +399,7 @@ tail_call:
 			return;
 		}
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
-		if ((zend_array*)ref != &EG(symbol_table)) {
+		if ((zend_array*)ref != &EG(variable_table)) {
 			ht = (zend_array*)ref;
 		} else {
 			return;
@@ -504,7 +504,7 @@ tail_call:
 				return;
 			}
 		} else if (GC_TYPE(ref) == IS_ARRAY) {
-			if (((zend_array*)ref) == &EG(symbol_table)) {
+			if (((zend_array*)ref) == &EG(variable_table)) {
 				GC_REF_SET_BLACK(ref);
 				return;
 			} else {
@@ -630,7 +630,7 @@ tail_call:
 					return;
 				}
 			} else if (GC_TYPE(ref) == IS_ARRAY) {
-				if ((zend_array*)ref == &EG(symbol_table)) {
+				if ((zend_array*)ref == &EG(variable_table)) {
 					GC_REF_SET_BLACK(ref);
 					return;
 				} else {
