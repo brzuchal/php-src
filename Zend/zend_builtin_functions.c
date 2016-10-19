@@ -2295,7 +2295,7 @@ static void debug_backtrace_get_args(zend_execute_data *call, zval *arg_array) /
 			if (call->func->type == ZEND_USER_FUNCTION) {
 				uint32_t first_extra_arg = MIN(num_args, call->func->op_array.num_args);
 
-				if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_HAS_SYMBOL_TABLE)) {
+				if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_HAS_VARIABLE_TABLE)) {
 					/* In case of attached symbol_table, values on stack may be invalid
 					 * and we have to access them through symbol_table
 					 * See: https://bugs.php.net/bug.php?id=73156
@@ -2305,7 +2305,7 @@ static void debug_backtrace_get_args(zend_execute_data *call, zval *arg_array) /
 
 					while (i < first_extra_arg) {
 						arg_name = call->func->op_array.vars[i];
-						arg = zend_hash_find_ind(call->symbol_table, arg_name);
+						arg = zend_hash_find_ind(call->variable_table, arg_name);
 						if (arg) {
 							if (Z_OPT_REFCOUNTED_P(arg)) {
 								Z_ADDREF_P(arg);

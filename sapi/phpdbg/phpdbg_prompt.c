@@ -892,10 +892,10 @@ free_cmd:
 		}
 
 		/* clean up from last execution */
-		if (ex && (ZEND_CALL_INFO(ex) & ZEND_CALL_HAS_SYMBOL_TABLE)) {
-			zend_hash_clean(ex->symbol_table);
+		if (ex && (ZEND_CALL_INFO(ex) & ZEND_CALL_HAS_VARIABLE_TABLE)) {
+			zend_hash_clean(ex->variable_table);
 		} else {
-			zend_rebuild_symbol_table();
+			zend_rebuild_variable_table();
 		}
 		PHPDBG_G(handled_exception) = NULL;
 

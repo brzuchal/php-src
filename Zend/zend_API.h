@@ -539,7 +539,7 @@ ZEND_API int zend_fcall_info_call(zend_fcall_info *fci, zend_fcall_info_cache *f
 
 ZEND_API int zend_call_function(zend_fcall_info *fci, zend_fcall_info_cache *fci_cache);
 
-ZEND_API int zend_set_hash_symbol(zval *symbol, const char *name, int name_length, zend_bool is_ref, int num_variable_tables, ...);
+ZEND_API int zend_set_hash_variable(zval *variable, const char *name, int name_length, zend_bool is_ref, int num_variable_tables, ...);
 
 ZEND_API int zend_delete_global_variable(zend_string *name);
 
