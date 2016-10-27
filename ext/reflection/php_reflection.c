@@ -68,6 +68,7 @@ PHPAPI zend_class_entry *reflection_property_ptr;
 PHPAPI zend_class_entry *reflection_class_constant_ptr;
 PHPAPI zend_class_entry *reflection_extension_ptr;
 PHPAPI zend_class_entry *reflection_zend_extension_ptr;
+PHPAPI zend_class_entry *reflection_namespace_ptr;
 
 #if MBO_0
 ZEND_BEGIN_MODULE_GLOBALS(reflection)
@@ -376,6 +377,233 @@ static void _class_const_string(string *str, char *name, zend_class_constant *c,
 static void _class_string(string *str, zend_class_entry *ce, zval *obj, char *indent);
 static void _extension_string(string *str, zend_module_entry *module, char *indent);
 static void _zend_extension_string(string *str, zend_extension *extension, char *indent);
+
+/* {{{ _namespace_string */
+static void _namespace_string(string *str, zend_namespace_entry *ne, zval *obj, char *indent)
+{
+	int count, count_static_props = 0, count_static_funcs = 0, count_shadow_props = 0;
+	string sub_indent;
+
+	string_init(&sub_indent);
+	string_printf(&sub_indent, "%s    ", indent);
+
+	char *kind = "Namespace";
+	string_printf(str, "%s%s [ ", indent, kind);
+	string_printf(str, (ne->type == ZEND_USER_CLASS) ? "<user" : "<internal");
+	// if (ce->type == ZEND_INTERNAL_CLASS && ce->info.internal.module) {
+	// 	string_printf(str, ":%s", ce->info.internal.module->name);
+	// }
+	// string_printf(str, "> ");
+	// if (ce->get_iterator != NULL) {
+	// 	string_printf(str, "<iterateable> ");
+	// }
+	// if (ce->ce_flags & ZEND_ACC_INTERFACE) {
+	// 	string_printf(str, "interface ");
+	// } else if (ce->ce_flags & ZEND_ACC_TRAIT) {
+	// 	string_printf(str, "trait ");
+	// } else {
+	// 	if (ce->ce_flags & (ZEND_ACC_IMPLICIT_ABSTRACT_CLASS|ZEND_ACC_EXPLICIT_ABSTRACT_CLASS)) {
+	// 		string_printf(str, "abstract ");
+	// 	}
+	// 	if (ce->ce_flags & ZEND_ACC_FINAL) {
+	// 		string_printf(str, "final ");
+	// 	}
+	// 	string_printf(str, "class ");
+	// }
+	// string_printf(str, "%s", ZSTR_VAL(ce->name));
+	// if (ce->parent) {
+	// 	string_printf(str, " extends %s", ZSTR_VAL(ce->parent->name));
+	// }
+
+	// if (ce->num_interfaces) {
+	// 	uint32_t i;
+
+	// 	if (ce->ce_flags & ZEND_ACC_INTERFACE) {
+	// 		string_printf(str, " extends %s", ZSTR_VAL(ce->interfaces[0]->name));
+	// 	} else {
+	// 		string_printf(str, " implements %s", ZSTR_VAL(ce->interfaces[0]->name));
+	// 	}
+	// 	for (i = 1; i < ce->num_interfaces; ++i) {
+	// 		string_printf(str, ", %s", ZSTR_VAL(ce->interfaces[i]->name));
+	// 	}
+	// }
+	// string_printf(str, " ] {\n");
+
+	// /* The information where a class is declared is only available for user classes */
+	// if (ce->type == ZEND_USER_CLASS) {
+	// 	string_printf(str, "%s  @@ %s %d-%d\n", indent, ZSTR_VAL(ce->info.user.filename),
+	// 					ce->info.user.line_start, ce->info.user.line_end);
+	// }
+
+	// /* Constants */
+	// string_printf(str, "\n");
+	// count = zend_hash_num_elements(&ce->constants_table);
+	// string_printf(str, "%s  - Constants [%d] {\n", indent, count);
+	// if (count > 0) {
+	// 	zend_string *key;
+	// 	zend_class_constant *c;
+
+	// 	ZEND_HASH_FOREACH_STR_KEY_PTR(&ce->constants_table, key, c) {
+	// 		_class_const_string(str, ZSTR_VAL(key), c, ZSTR_VAL(sub_indent.buf));
+	// 	} ZEND_HASH_FOREACH_END();
+	// }
+	// string_printf(str, "%s  }\n", indent);
+
+	// /* Static properties */
+	// /* counting static properties */
+	// count = zend_hash_num_elements(&ce->properties_info);
+	// if (count > 0) {
+	// 	zend_property_info *prop;
+
+	// 	ZEND_HASH_FOREACH_PTR(&ce->properties_info, prop) {
+	// 		if(prop->flags & ZEND_ACC_SHADOW) {
+	// 			count_shadow_props++;
+	// 		} else if (prop->flags & ZEND_ACC_STATIC) {
+	// 			count_static_props++;
+	// 		}
+	// 	} ZEND_HASH_FOREACH_END();
+	// }
+
+	// /* static properties */
+	// string_printf(str, "\n%s  - Static properties [%d] {\n", indent, count_static_props);
+	// if (count_static_props > 0) {
+	// 	zend_property_info *prop;
+
+	// 	ZEND_HASH_FOREACH_PTR(&ce->properties_info, prop) {
+	// 		if ((prop->flags & ZEND_ACC_STATIC) && !(prop->flags & ZEND_ACC_SHADOW)) {
+	// 			_property_string(str, prop, NULL, ZSTR_VAL(sub_indent.buf));
+	// 		}
+	// 	} ZEND_HASH_FOREACH_END();
+	// }
+	// string_printf(str, "%s  }\n", indent);
+
+	// /* Static methods */
+	// /* counting static methods */
+	// count = zend_hash_num_elements(&ce->function_table);
+	// if (count > 0) {
+	// 	zend_function *mptr;
+
+	// 	ZEND_HASH_FOREACH_PTR(&ce->function_table, mptr) {
+	// 		if (mptr->common.fn_flags & ZEND_ACC_STATIC
+	// 			&& ((mptr->common.fn_flags & ZEND_ACC_PRIVATE) == 0 || mptr->common.scope == ce))
+	// 		{
+	// 			count_static_funcs++;
+	// 		}
+	// 	} ZEND_HASH_FOREACH_END();
+	// }
+
+	// /* static methods */
+	// string_printf(str, "\n%s  - Static methods [%d] {", indent, count_static_funcs);
+	// if (count_static_funcs > 0) {
+	// 	zend_function *mptr;
+
+	// 	ZEND_HASH_FOREACH_PTR(&ce->function_table, mptr) {
+	// 		if (mptr->common.fn_flags & ZEND_ACC_STATIC
+	// 			&& ((mptr->common.fn_flags & ZEND_ACC_PRIVATE) == 0 || mptr->common.scope == ce))
+	// 		{
+	// 			string_printf(str, "\n");
+	// 			_function_string(str, mptr, ce, ZSTR_VAL(sub_indent.buf));
+	// 		}
+	// 	} ZEND_HASH_FOREACH_END();
+	// } else {
+	// 	string_printf(str, "\n");
+	// }
+	// string_printf(str, "%s  }\n", indent);
+
+	// /* Default/Implicit properties */
+	// count = zend_hash_num_elements(&ce->properties_info) - count_static_props - count_shadow_props;
+	// string_printf(str, "\n%s  - Properties [%d] {\n", indent, count);
+	// if (count > 0) {
+	// 	zend_property_info *prop;
+
+	// 	ZEND_HASH_FOREACH_PTR(&ce->properties_info, prop) {
+	// 		if (!(prop->flags & (ZEND_ACC_STATIC|ZEND_ACC_SHADOW))) {
+	// 			_property_string(str, prop, NULL, ZSTR_VAL(sub_indent.buf));
+	// 		}
+	// 	} ZEND_HASH_FOREACH_END();
+	// }
+	// string_printf(str, "%s  }\n", indent);
+
+	// if (obj && Z_TYPE_P(obj) == IS_OBJECT && Z_OBJ_HT_P(obj)->get_properties) {
+	// 	string       dyn;
+	// 	HashTable    *properties = Z_OBJ_HT_P(obj)->get_properties(obj);
+	// 	zend_string  *prop_name;
+
+	// 	string_init(&dyn);
+	// 	count = 0;
+
+	// 	if (properties && zend_hash_num_elements(properties)) {
+	// 		ZEND_HASH_FOREACH_STR_KEY(properties, prop_name) {
+	// 			if (prop_name && ZSTR_LEN(prop_name) && ZSTR_VAL(prop_name)[0]) { /* skip all private and protected properties */
+	// 				if (!zend_hash_exists(&ce->properties_info, prop_name)) {
+	// 					count++;
+	// 					_property_string(&dyn, NULL, ZSTR_VAL(prop_name), ZSTR_VAL(sub_indent.buf));
+	// 				}
+	// 			}
+	// 		} ZEND_HASH_FOREACH_END();
+	// 	}
+
+	// 	string_printf(str, "\n%s  - Dynamic properties [%d] {\n", indent, count);
+	// 	string_append(str, &dyn);
+	// 	string_printf(str, "%s  }\n", indent);
+	// 	string_free(&dyn);
+	// }
+
+	// /* Non static methods */
+	// count = zend_hash_num_elements(&ce->function_table) - count_static_funcs;
+	// if (count > 0) {
+	// 	zend_function *mptr;
+	// 	zend_string *key;
+	// 	string dyn;
+
+	// 	count = 0;
+	// 	string_init(&dyn);
+
+	// 	ZEND_HASH_FOREACH_STR_KEY_PTR(&ce->function_table, key, mptr) {
+	// 		if ((mptr->common.fn_flags & ZEND_ACC_STATIC) == 0
+	// 			&& ((mptr->common.fn_flags & ZEND_ACC_PRIVATE) == 0 || mptr->common.scope == ce))
+	// 		{
+	// 			size_t len = ZSTR_LEN(mptr->common.function_name);
+
+	// 			/* Do not display old-style inherited constructors */
+	// 			if ((mptr->common.fn_flags & ZEND_ACC_CTOR) == 0
+	// 				|| mptr->common.scope == ce
+	// 				|| !key
+	// 				|| zend_binary_strcasecmp(ZSTR_VAL(key), ZSTR_LEN(key), ZSTR_VAL(mptr->common.function_name), len) == 0)
+	// 			{
+	// 				zend_function *closure;
+	// 				/* see if this is a closure */
+	// 				if (ce == zend_ce_closure && obj && (len == sizeof(ZEND_INVOKE_FUNC_NAME)-1)
+	// 					&& memcmp(ZSTR_VAL(mptr->common.function_name), ZEND_INVOKE_FUNC_NAME, sizeof(ZEND_INVOKE_FUNC_NAME)-1) == 0
+	// 					&& (closure = zend_get_closure_invoke_method(Z_OBJ_P(obj))) != NULL)
+	// 				{
+	// 					mptr = closure;
+	// 				} else {
+	// 					closure = NULL;
+	// 				}
+	// 				string_printf(&dyn, "\n");
+	// 				_function_string(&dyn, mptr, ce, ZSTR_VAL(sub_indent.buf));
+	// 				count++;
+	// 				_free_function(closure);
+	// 			}
+	// 		}
+	// 	} ZEND_HASH_FOREACH_END();
+	// 	string_printf(str, "\n%s  - Methods [%d] {", indent, count);
+	// 	if (!count) {
+	// 		string_printf(str, "\n");
+	// 	}
+	// 	string_append(str, &dyn);
+	// 	string_free(&dyn);
+	// } else {
+	// 	string_printf(str, "\n%s  - Methods [0] {\n", indent);
+	// }
+	string_printf(str, "%s  }\n", indent);
+
+	string_printf(str, "%s}\n", indent);
+	string_free(&sub_indent);
+}
+/* }}} */
+
 
 /* {{{ _class_string */
 static void _class_string(string *str, zend_class_entry *ce, zval *obj, char *indent)
@@ -6291,6 +6519,110 @@ ZEND_METHOD(reflection_zend_extension, getCopyright)
 }
 /* }}} */
 
+/* {{{ proto public static mixed ReflectionNamespace::export(mixed argument [, bool return]) throws ReflectionException
+   Exports a reflection object. Returns the output if TRUE is specified for return, printing it otherwise. */
+ZEND_METHOD(reflection_namespace, export)
+{
+	_reflection_export(INTERNAL_FUNCTION_PARAM_PASSTHRU, reflection_namespace_ptr, 1);
+}
+/* }}} */
+
+/* {{{ reflection_namespace_object_ctor */
+static void reflection_namespace_object_ctor(INTERNAL_FUNCTION_PARAMETERS)
+{
+	zval *argument;
+	zval *object;
+	zval nsname;
+	reflection_object *intern;
+	zend_namespace_entry *ne;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "z/", &argument) == FAILURE) {
+		return;
+	}
+
+	object = getThis();
+	intern = Z_REFLECTION_P(object);
+
+	convert_to_string_ex(argument);
+	if ((ne = zend_lookup_namespace(Z_STR_P(argument))) == NULL) {
+		if (!EG(exception)) {
+			zend_throw_exception_ex(reflection_exception_ptr, -1, "Namespace %s does not exist", Z_STRVAL_P(argument));
+		}
+		return;
+	}
+
+	ZVAL_STR_COPY(&nsname, ne->name);
+	reflection_update_property(object, "name", &nsname);
+
+	intern->ptr = ne;
+	intern->ref_type = REF_TYPE_OTHER;
+}
+/* }}} */
+
+/* {{{ proto public void ReflectionNamespace::__construct(mixed argument) throws ReflectionException
+   Constructor. Takes a string as an argument */
+ZEND_METHOD(reflection_namespace, __construct)
+{
+	reflection_namespace_object_ctor(INTERNAL_FUNCTION_PARAM_PASSTHRU);
+}
+/* }}} */
+
+/* {{{ proto public string ReflectionNamespace::__toString()
+   Returns a string representation */
+ZEND_METHOD(reflection_namespace, __toString)
+{
+	reflection_object *intern;
+	zend_namespace_entry *ne;
+	string str;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+	GET_REFLECTION_OBJECT_PTR(ne);
+	string_init(&str);
+	_namespace_string(&str, ne, &intern->obj, "");
+	RETURN_NEW_STR(str.buf);
+}
+/* }}} */
+
+/* {{{ proto public string ReflectionNamespace::getName()
+   Returns the namespace' name */
+ZEND_METHOD(reflection_namespace, getName)
+{
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+	_default_get_entry(getThis(), "name", sizeof("name")-1, return_value);
+}
+/* }}} */
+
+/* {{{ proto public string ReflectionNamespace::getClasses()
+   Returns the namespace' classes */
+ZEND_METHOD(reflection_namespace, getClasses)
+{
+	reflection_object *intern;
+	zend_namespace_entry *ne;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+	GET_REFLECTION_OBJECT_PTR(ne);
+
+	/* Return an empty array if this class implements no interfaces */
+	array_init(return_value);
+
+	if (ne->num_classes) {
+		uint32_t i;
+
+		for (i=0; i < ne->num_classes; i++) {
+			zval class;
+			zend_reflection_class_factory(ne->classes[i], &class);
+			zend_hash_update(Z_ARRVAL_P(return_value), ne->classes[i]->name, &class);
+		}
+	}
+}
+/* }}} */
+
 /* {{{ method tables */
 static const zend_function_entry reflection_exception_functions[] = {
 	PHP_FE_END
@@ -6772,6 +7104,29 @@ const zend_function_entry reflection_ext_functions[] = { /* {{{ */
 	PHP_FE_END
 }; /* }}} */
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_reflection_namespace_export, 0, 0, 1)
+	ZEND_ARG_INFO(0, argument)
+	ZEND_ARG_INFO(0, return)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(arginfo_reflection_namespace___construct, 0)
+	ZEND_ARG_INFO(0, argument)
+ZEND_END_ARG_INFO()
+
+static const zend_function_entry reflection_namespace_functions[] = {
+	ZEND_ME(reflection, __clone, arginfo_reflection__void, ZEND_ACC_PRIVATE|ZEND_ACC_FINAL)
+	ZEND_ME(reflection_namespace, export, arginfo_reflection_namespace_export, ZEND_ACC_STATIC|ZEND_ACC_PUBLIC)
+	ZEND_ME(reflection_namespace, __construct, arginfo_reflection_namespace___construct, 0)
+	ZEND_ME(reflection_namespace, __toString, arginfo_reflection__void, 0)
+	ZEND_ME(reflection_namespace, getName, arginfo_reflection__void, 0)
+	// ZEND_ME(reflection_class, isInternal, arginfo_reflection__void, 0)
+	// ZEND_ME(reflection_class, isUserDefined, arginfo_reflection__void, 0)
+	// ZEND_ME(reflection_class, getNamespaceName, arginfo_reflection__void, 0)
+	// ZEND_ME(reflection_class, getShortName, arginfo_reflection__void, 0)
+	ZEND_ME(reflection_namespace, getClasses, arginfo_reflection__void, 0)
+	PHP_FE_END
+};
+
 static zend_object_handlers *zend_std_obj_handlers;
 
 /* {{{ _reflection_write_property */
@@ -6865,6 +7220,12 @@ PHP_MINIT_FUNCTION(reflection) /* {{{ */
 	REGISTER_REFLECTION_CLASS_CONST_LONG(class, "IS_IMPLICIT_ABSTRACT", ZEND_ACC_IMPLICIT_ABSTRACT_CLASS);
 	REGISTER_REFLECTION_CLASS_CONST_LONG(class, "IS_EXPLICIT_ABSTRACT", ZEND_ACC_EXPLICIT_ABSTRACT_CLASS);
 	REGISTER_REFLECTION_CLASS_CONST_LONG(class, "IS_FINAL", ZEND_ACC_FINAL);
+
+	INIT_CLASS_ENTRY(_reflection_entry, "ReflectionNamespace", reflection_namespace_functions);
+	_reflection_entry.create_object = reflection_objects_new;
+	reflection_namespace_ptr = zend_register_internal_class(&_reflection_entry);
+	zend_class_implements(reflection_namespace_ptr, 1, reflector_ptr);
+	zend_declare_property_string(reflection_namespace_ptr, "name", sizeof("name")-1, "", ZEND_ACC_PUBLIC);
 
 	INIT_CLASS_ENTRY(_reflection_entry, "ReflectionObject", reflection_object_functions);
 	_reflection_entry.create_object = reflection_objects_new;

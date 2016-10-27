@@ -40,6 +40,7 @@ ZEND_API void zend_init_execute_data(zend_execute_data *execute_data, zend_op_ar
 ZEND_API void zend_execute(zend_op_array *op_array, zval *return_value);
 ZEND_API void execute_ex(zend_execute_data *execute_data);
 ZEND_API void execute_internal(zend_execute_data *execute_data, zval *return_value);
+ZEND_API zend_namespace_entry *zend_lookup_namespace(zend_string *name);
 ZEND_API zend_class_entry *zend_lookup_class(zend_string *name);
 ZEND_API zend_class_entry *zend_lookup_class_ex(zend_string *name, const zval *key, int use_autoload);
 ZEND_API zend_class_entry *zend_get_called_scope(zend_execute_data *ex);

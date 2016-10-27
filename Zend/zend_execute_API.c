@@ -143,6 +143,7 @@ void init_executor(void) /* {{{ */
 	EG(symtable_cache_limit) = EG(symtable_cache) + SYMTABLE_CACHE_SIZE - 1;
 	EG(no_extensions) = 0;
 
+	EG(namespace_table) = CG(namespace_table);
 	EG(function_table) = CG(function_table);
 	EG(class_table) = CG(class_table);
 
@@ -1026,6 +1027,18 @@ ZEND_API zend_class_entry *zend_lookup_class_ex(zend_string *name, const zval *k
 ZEND_API zend_class_entry *zend_lookup_class(zend_string *name) /* {{{ */
 {
 	return zend_lookup_class_ex(name, NULL, 1);
+}
+/* }}} */
+
+ZEND_API zend_namespace_entry *zend_lookup_namespace(zend_string *name) /* {{{ */
+{
+	zend_string *lc_name = zend_string_tolower(name);
+	zend_namespace_entry *ne = NULL;
+	if (zend_hash_exists(CG(namespace_table), lc_name)) {
+		ne = zend_hash_find_ptr(CG(namespace_table), lc_name);
+	}
+	zend_string_release(lc_name);
+	return ne;
 }
 /* }}} */
 

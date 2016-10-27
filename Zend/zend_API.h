@@ -1252,6 +1252,8 @@ static zend_always_inline void zend_parse_arg_zval_deref(zval *arg, zval **dest,
 	*dest = (check_null && UNEXPECTED(Z_TYPE_P(arg) == IS_NULL)) ? NULL : arg;
 }
 
+ZEND_API zend_namespace_entry *zend_register_class_namespace(zend_class_entry *ce);
+
 END_EXTERN_C()
 
 #endif /* ZEND_API_H */

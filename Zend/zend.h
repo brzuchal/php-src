@@ -113,6 +113,8 @@ typedef struct _zend_trait_alias {
 	uint32_t modifiers;
 } zend_trait_alias;
 
+typedef struct _zend_namespace_entry zend_namespace_entry;
+
 struct _zend_class_entry {
 	char type;
 	zend_string *name;
@@ -175,7 +177,26 @@ struct _zend_class_entry {
 			struct _zend_module_entry *module;
 		} internal;
 	} info;
+	zend_namespace_entry *namespace;
 };
+
+typedef struct _zend_namespace_entry {
+	char type;
+	zend_string *name;
+	uint32_t ne_flags;
+	uint32_t num_classes;
+	uint32_t num_interfaces;
+	uint32_t num_traits;
+	uint32_t num_functions;
+	uint32_t num_constants;
+	zend_class_entry** classes;
+	zend_class_entry** interfaces;
+	zend_class_entry** traits;
+	zend_function** functions;
+	struct _zend_constant** constants;
+	struct _zend_namespace_entry* parent;
+	struct _zend_namespace_entry** childs;
+} zend_namespace_entry;
 
 typedef struct _zend_utility_functions {
 	void (*error_function)(int type, const char *error_filename, const uint error_lineno, const char *format, va_list args) ZEND_ATTRIBUTE_PTR_FORMAT(printf, 4, 0);

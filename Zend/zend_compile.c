@@ -5944,6 +5944,7 @@ void zend_compile_class_decl(zend_ast *ast) /* {{{ */
 	ce->type = ZEND_USER_CLASS;
 	ce->name = name;
 	zend_initialize_class_data(ce, 1);
+	zend_register_class_namespace(ce);
 
 	ce->ce_flags |= decl->flags;
 	ce->info.user.filename = zend_get_compiled_filename();

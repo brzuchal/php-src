@@ -78,6 +78,7 @@ struct _zend_compiler_globals {
 
 	zend_op_array *active_op_array;
 
+	HashTable *namespace_table; /* namespace symbol table */
 	HashTable *function_table;	/* function symbol table */
 	HashTable *class_table;		/* class table */
 
@@ -153,6 +154,7 @@ struct _zend_executor_globals {
 	int error_reporting;
 	int exit_status;
 
+	HashTable *namespace_table; /* namespace symbol table */
 	HashTable *function_table;	/* function symbol table */
 	HashTable *class_table;		/* class table */
 	HashTable *zend_constants;	/* constants table */

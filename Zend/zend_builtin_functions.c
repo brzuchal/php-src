@@ -79,6 +79,7 @@ static ZEND_FUNCTION(set_error_handler);
 static ZEND_FUNCTION(restore_error_handler);
 static ZEND_FUNCTION(set_exception_handler);
 static ZEND_FUNCTION(restore_exception_handler);
+static ZEND_FUNCTION(get_declared_namespaces);
 static ZEND_FUNCTION(get_declared_classes);
 static ZEND_FUNCTION(get_declared_traits);
 static ZEND_FUNCTION(get_declared_interfaces);
@@ -363,6 +364,7 @@ static const zend_function_entry builtin_functions[] = { /* {{{ */
 	ZEND_FE(restore_error_handler,		arginfo_zend__void)
 	ZEND_FE(set_exception_handler,		arginfo_set_exception_handler)
 	ZEND_FE(restore_exception_handler,	arginfo_zend__void)
+	ZEND_FE(get_declared_namespaces,	arginfo_zend__void)
 	ZEND_FE(get_declared_classes, 		arginfo_zend__void)
 	ZEND_FE(get_declared_traits, 		arginfo_zend__void)
 	ZEND_FE(get_declared_interfaces, 	arginfo_zend__void)
@@ -1870,6 +1872,31 @@ ZEND_FUNCTION(restore_exception_handler)
 		zend_stack_del_top(&EG(user_exception_handlers));
 	}
 	RETURN_TRUE;
+}
+/* }}} */
+
+static int copy_namespace_name(zval *el, int num_args, va_list args, zend_hash_key *hash_key) /* {{{ */
+{
+	zend_namespace_entry *ne = (zend_namespace_entry *)Z_PTR_P(el);
+	zval *array = va_arg(args, zval *);
+
+	if (hash_key->key && ZSTR_VAL(hash_key->key)[0] != 0) {
+		add_next_index_str(array, zend_string_copy(ne->name));
+	}
+	return ZEND_HASH_APPLY_KEEP;
+}
+/* }}} */
+
+/* {{{ proto array get_declared_namespaces()
+   Returns an array of all declared namespaces. */
+ZEND_FUNCTION(get_declared_namespaces)
+{
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+
+	array_init(return_value);
+	zend_hash_apply_with_arguments(EG(namespace_table), copy_namespace_name, 1, return_value);
 }
 /* }}} */
 

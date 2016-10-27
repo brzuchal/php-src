@@ -2656,6 +2656,7 @@ static zend_class_entry *do_register_internal_class(zend_class_entry *orig_class
 	zend_str_tolower_copy(ZSTR_VAL(lowercase_name), ZSTR_VAL(orig_class_entry->name), ZSTR_LEN(class_entry->name));
 	lowercase_name = zend_new_interned_string(lowercase_name);
 	zend_hash_update_ptr(CG(class_table), lowercase_name, class_entry);
+	zend_register_class_namespace(class_entry);
 	zend_string_release(lowercase_name);
 	return class_entry;
 }
@@ -2723,6 +2724,7 @@ ZEND_API int zend_register_class_alias_ex(const char *name, size_t name_len, zen
 	zend_assert_valid_class_name(lcname);
 
 	ce = zend_hash_add_ptr(CG(class_table), lcname, ce);
+	zend_register_class_namespace(ce);
 	zend_string_release(lcname);
 	if (ce) {
 		ce->refcount++;

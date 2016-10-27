@@ -34,11 +34,13 @@
 #include "zend_smart_str.h"
 
 #ifdef ZTS
+# define GLOBAL_NAMESPACE_TABLE		global_namespace_table
 # define GLOBAL_FUNCTION_TABLE		global_function_table
 # define GLOBAL_CLASS_TABLE			global_class_table
 # define GLOBAL_CONSTANTS_TABLE		global_constants_table
 # define GLOBAL_AUTO_GLOBALS_TABLE	global_auto_globals_table
 #else
+# define GLOBAL_NAMESPACE_TABLE		CG(namespace_table)
 # define GLOBAL_FUNCTION_TABLE		CG(function_table)
 # define GLOBAL_CLASS_TABLE			CG(class_table)
 # define GLOBAL_AUTO_GLOBALS_TABLE	CG(auto_globals)
@@ -143,6 +145,7 @@ ZEND_INI_END()
 #ifdef ZTS
 ZEND_API int compiler_globals_id;
 ZEND_API int executor_globals_id;
+static HashTable *global_namespace_table = NULL;
 static HashTable *global_function_table = NULL;
 static HashTable *global_class_table = NULL;
 static HashTable *global_constants_table = NULL;
@@ -491,6 +494,10 @@ static void compiler_globals_ctor(zend_compiler_globals *compiler_globals) /* {{
 {
 	compiler_globals->compiled_filename = NULL;
 
+	compiler_globals->namespace_table = (HashTable *) malloc(sizeof(HashTable));
+	zend_hash_init_ex(compiler_globals->namespace_table, 64, NULL, NULL, 1, 0);
+	zend_hash_copy(compiler_globals->namespace_table, global_namespace_table);
+
 	compiler_globals->function_table = (HashTable *) malloc(sizeof(HashTable));
 	zend_hash_init_ex(compiler_globals->function_table, 1024, NULL, ZEND_FUNCTION_DTOR, 1, 0);
 	zend_hash_copy(compiler_globals->function_table, global_function_table, function_copy_ctor);
@@ -523,6 +530,10 @@ static void compiler_globals_ctor(zend_compiler_globals *compiler_globals) /* {{
 
 static void compiler_globals_dtor(zend_compiler_globals *compiler_globals) /* {{{ */
 {
+	if (compiler_globals->namespace_table != GLOBAL_NAMESPACE_TABLE) {
+		zend_hash_destroy(compiler_globals->namespace_table);
+		free(compiler_globals->namespace_table);
+	}
 	if (compiler_globals->function_table != GLOBAL_FUNCTION_TABLE) {
 		zend_hash_destroy(compiler_globals->function_table);
 		free(compiler_globals->function_table);
@@ -713,11 +724,13 @@ int zend_startup(zend_utility_functions *utility_functions, char **extensions) /
 	zend_version_info = strdup(ZEND_CORE_VERSION_INFO);
 	zend_version_info_length = sizeof(ZEND_CORE_VERSION_INFO) - 1;
 
+	GLOBAL_NAMESPACE_TABLE = (HashTable *) malloc(sizeof(HashTable));
 	GLOBAL_FUNCTION_TABLE = (HashTable *) malloc(sizeof(HashTable));
 	GLOBAL_CLASS_TABLE = (HashTable *) malloc(sizeof(HashTable));
 	GLOBAL_AUTO_GLOBALS_TABLE = (HashTable *) malloc(sizeof(HashTable));
 	GLOBAL_CONSTANTS_TABLE = (HashTable *) malloc(sizeof(HashTable));
 
+	zend_hash_init_ex(GLOBAL_NAMESPACE_TABLE, 1024, NULL, NULL, 1, 0);
 	zend_hash_init_ex(GLOBAL_FUNCTION_TABLE, 1024, NULL, ZEND_FUNCTION_DTOR, 1, 0);
 	zend_hash_init_ex(GLOBAL_CLASS_TABLE, 64, NULL, ZEND_CLASS_DTOR, 1, 0);
 	zend_hash_init_ex(GLOBAL_AUTO_GLOBALS_TABLE, 8, NULL, auto_global_dtor, 1, 0);
@@ -736,9 +749,11 @@ int zend_startup(zend_utility_functions *utility_functions, char **extensions) /
 
 	compiler_globals_dtor(compiler_globals);
 	compiler_globals->in_compilation = 0;
+	compiler_globals->namespace_table = (HashTable *) malloc(sizeof(HashTable));
 	compiler_globals->function_table = (HashTable *) malloc(sizeof(HashTable));
 	compiler_globals->class_table = (HashTable *) malloc(sizeof(HashTable));
 
+	*compiler_globals->namespace_table = *GLOBAL_NAMESPACE_TABLE;
 	*compiler_globals->function_table = *GLOBAL_FUNCTION_TABLE;
 	*compiler_globals->class_table = *GLOBAL_CLASS_TABLE;
 	compiler_globals->auto_globals = GLOBAL_AUTO_GLOBALS_TABLE;
@@ -800,6 +815,7 @@ void zend_post_startup(void) /* {{{ */
 	zend_compiler_globals *compiler_globals = ts_resource(compiler_globals_id);
 	zend_executor_globals *executor_globals = ts_resource(executor_globals_id);
 
+	*GLOBAL_NAMESPACE_TABLE = *compiler_globals->namespace_table;
 	*GLOBAL_FUNCTION_TABLE = *compiler_globals->function_table;
 	*GLOBAL_CLASS_TABLE = *compiler_globals->class_table;
 	*GLOBAL_CONSTANTS_TABLE = *executor_globals->zend_constants;
@@ -808,6 +824,7 @@ void zend_post_startup(void) /* {{{ */
 	compiler_options_default = CG(compiler_options);
 
 	zend_destroy_rsrc_list(&EG(persistent_list));
+	free(compiler_globals->namespace_table);
 	free(compiler_globals->function_table);
 	free(compiler_globals->class_table);
 	if ((script_encoding_list = (zend_encoding **)compiler_globals->script_encoding_list)) {
@@ -862,6 +879,7 @@ void zend_shutdown(void) /* {{{ */
 	virtual_cwd_deactivate();
 	virtual_cwd_shutdown();
 
+	zend_hash_destroy(GLOBAL_NAMESPACE_TABLE);
 	zend_hash_destroy(GLOBAL_FUNCTION_TABLE);
 	zend_hash_destroy(GLOBAL_CLASS_TABLE);
 
@@ -871,6 +889,7 @@ void zend_shutdown(void) /* {{{ */
 	zend_shutdown_extensions();
 	free(zend_version_info);
 
+	free(GLOBAL_NAMESPACE_TABLE);
 	free(GLOBAL_FUNCTION_TABLE);
 	free(GLOBAL_CLASS_TABLE);
 
@@ -879,6 +898,7 @@ void zend_shutdown(void) /* {{{ */
 	zend_shutdown_strtod();
 
 #ifdef ZTS
+	GLOBAL_NAMESPACE_TABLE = NULL;
 	GLOBAL_FUNCTION_TABLE = NULL;
 	GLOBAL_CLASS_TABLE = NULL;
 	GLOBAL_AUTO_GLOBALS_TABLE = NULL;
@@ -1507,6 +1527,69 @@ ZEND_API char *zend_make_compiled_string_description(const char *name) /* {{{ */
 void free_estring(char **str_p) /* {{{ */
 {
 	efree(*str_p);
+}
+/* }}} */
+
+ZEND_API zend_namespace_entry *zend_register_namespace_lc(zend_string *name, zend_string *lc_name) /* {{{ */
+{
+    size_t i, from = ZSTR_VAL(name)[0] == '\\' ? 1 : 0;
+	zend_namespace_entry *ne, *parent_ne;
+
+	if (zend_hash_exists(CG(namespace_table), lc_name)) {
+		return zend_hash_find_ptr(CG(namespace_table), lc_name);
+	}
+	
+	ne = zend_arena_alloc(&CG(arena), sizeof(zend_namespace_entry));
+	zend_hash_update_ptr(CG(namespace_table), lc_name, ne);
+	ne->name = name;
+	ne->ne_flags = 0;
+	ne->num_classes = 0;
+	ne->num_interfaces = 0;
+	ne->num_traits = 0;
+	ne->num_functions = 0;
+	ne->num_constants = 0;
+
+	for (i = ZSTR_LEN(name); i > from; i--) {
+		if (ZSTR_VAL(name)[i] == '\\') {
+			parent_ne = zend_register_namespace_lc(
+				zend_string_init(ZSTR_VAL(name) + from, i - from, 0), 
+				zend_string_init(ZSTR_VAL(lc_name) + from, i - from, 0)
+			);
+			break;
+		}
+	}
+
+	ne->parent = parent_ne;
+
+	return ne;
+}
+/* }}} */
+
+ZEND_API zend_namespace_entry *zend_register_namespace(zend_string *name) /* {{{ */
+{
+	return zend_register_namespace_lc(name, zend_string_tolower(name));
+}
+/* }}} */
+
+ZEND_API zend_namespace_entry *zend_register_class_namespace(zend_class_entry *ce) /* {{{ */
+{
+    size_t i, from = ZSTR_VAL(ce->name)[0] == '\\' ? 1 : 0;
+	for (i = ZSTR_LEN(ce->name); i > from; i--) {
+		if (ZSTR_VAL(ce->name)[i] == '\\') {
+			zend_namespace_entry *ne = zend_register_namespace(zend_string_init(ZSTR_VAL(ce->name) + from, i - from, 0));
+			ce->namespace = ne;
+
+			if (ne->type == ZEND_INTERNAL_CLASS) {
+				ne->classes = (zend_class_entry **) realloc(ne->classes, sizeof(zend_class_entry *) * (ne->num_classes + 1));
+			} else {
+				ne->classes = (zend_class_entry **) erealloc(ne->classes, sizeof(zend_class_entry *) * (ne->num_classes + 1));
+			}
+
+			ne->classes[ne->num_classes++] = ce;
+			return ne;
+		}
+	}
+	return NULL;
 }
 /* }}} */
 
