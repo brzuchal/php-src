@@ -48,6 +48,7 @@
 #endif
 
 /* true multithread-shared globals */
+ZEND_API zend_namespace_entry *zend_root_namespace_def = NULL;
 ZEND_API zend_class_entry *zend_standard_class_def = NULL;
 ZEND_API size_t (*zend_printf)(const char *format, ...);
 ZEND_API zend_write_func_t zend_write;
@@ -1527,69 +1528,6 @@ ZEND_API char *zend_make_compiled_string_description(const char *name) /* {{{ */
 void free_estring(char **str_p) /* {{{ */
 {
 	efree(*str_p);
-}
-/* }}} */
-
-ZEND_API zend_namespace_entry *zend_register_namespace_lc(zend_string *name, zend_string *lc_name) /* {{{ */
-{
-    size_t i, from = ZSTR_VAL(name)[0] == '\\' ? 1 : 0;
-	zend_namespace_entry *ne, *parent_ne;
-
-	if (zend_hash_exists(CG(namespace_table), lc_name)) {
-		return zend_hash_find_ptr(CG(namespace_table), lc_name);
-	}
-	
-	ne = zend_arena_alloc(&CG(arena), sizeof(zend_namespace_entry));
-	zend_hash_update_ptr(CG(namespace_table), lc_name, ne);
-	ne->name = name;
-	ne->ne_flags = 0;
-	ne->num_classes = 0;
-	ne->num_interfaces = 0;
-	ne->num_traits = 0;
-	ne->num_functions = 0;
-	ne->num_constants = 0;
-
-	for (i = ZSTR_LEN(name); i > from; i--) {
-		if (ZSTR_VAL(name)[i] == '\\') {
-			parent_ne = zend_register_namespace_lc(
-				zend_string_init(ZSTR_VAL(name) + from, i - from, 0), 
-				zend_string_init(ZSTR_VAL(lc_name) + from, i - from, 0)
-			);
-			break;
-		}
-	}
-
-	ne->parent = parent_ne;
-
-	return ne;
-}
-/* }}} */
-
-ZEND_API zend_namespace_entry *zend_register_namespace(zend_string *name) /* {{{ */
-{
-	return zend_register_namespace_lc(name, zend_string_tolower(name));
-}
-/* }}} */
-
-ZEND_API zend_namespace_entry *zend_register_class_namespace(zend_class_entry *ce) /* {{{ */
-{
-    size_t i, from = ZSTR_VAL(ce->name)[0] == '\\' ? 1 : 0;
-	for (i = ZSTR_LEN(ce->name); i > from; i--) {
-		if (ZSTR_VAL(ce->name)[i] == '\\') {
-			zend_namespace_entry *ne = zend_register_namespace(zend_string_init(ZSTR_VAL(ce->name) + from, i - from, 0));
-			ce->namespace = ne;
-
-			if (ne->type == ZEND_INTERNAL_CLASS) {
-				ne->classes = (zend_class_entry **) realloc(ne->classes, sizeof(zend_class_entry *) * (ne->num_classes + 1));
-			} else {
-				ne->classes = (zend_class_entry **) erealloc(ne->classes, sizeof(zend_class_entry *) * (ne->num_classes + 1));
-			}
-
-			ne->classes[ne->num_classes++] = ce;
-			return ne;
-		}
-	}
-	return NULL;
 }
 /* }}} */
 

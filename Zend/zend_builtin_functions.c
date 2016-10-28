@@ -396,6 +396,8 @@ static const zend_function_entry builtin_functions[] = { /* {{{ */
 /* }}} */
 
 ZEND_MINIT_FUNCTION(core) { /* {{{ */
+	zend_root_namespace_def = zend_root_namespace();
+
 	zend_class_entry class_entry;
 
 	INIT_CLASS_ENTRY(class_entry, "stdClass", NULL);

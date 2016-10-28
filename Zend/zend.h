@@ -183,18 +183,19 @@ struct _zend_class_entry {
 typedef struct _zend_namespace_entry {
 	char type;
 	zend_string *name;
-	uint32_t ne_flags;
+	// uint32_t ne_flags;
+	struct _zend_namespace_entry* parent;
 	uint32_t num_classes;
 	uint32_t num_interfaces;
 	uint32_t num_traits;
 	uint32_t num_functions;
 	uint32_t num_constants;
+	uint32_t num_childs;
 	zend_class_entry** classes;
 	zend_class_entry** interfaces;
 	zend_class_entry** traits;
 	zend_function** functions;
 	struct _zend_constant** constants;
-	struct _zend_namespace_entry* parent;
 	struct _zend_namespace_entry** childs;
 } zend_namespace_entry;
 
@@ -297,6 +298,7 @@ ZEND_API ZEND_COLD void zend_internal_argument_count_error(zend_bool throw_excep
 ZEND_COLD void zenderror(const char *error);
 
 /* The following #define is used for code duality in PHP for Engine 1 & 2 */
+extern ZEND_API zend_namespace_entry *zend_root_namespace_def;
 #define ZEND_STANDARD_CLASS_DEF_PTR zend_standard_class_def
 extern ZEND_API zend_class_entry *zend_standard_class_def;
 extern ZEND_API zend_utility_values zend_uv;

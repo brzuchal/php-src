@@ -1421,6 +1421,21 @@ static void _function_check_flag(INTERNAL_FUNCTION_PARAMETERS, int mask)
 }
 /* }}} */
 
+/* {{{ zend_reflection_namespace_factory */
+PHPAPI void zend_reflection_namespace_factory(zend_namespace_entry *ne, zval *object)
+{
+	reflection_object *intern;
+	zval name;
+
+	ZVAL_STR_COPY(&name, ne->name);
+	reflection_instantiate(reflection_namespace_ptr, object);
+	intern = Z_REFLECTION_P(object);
+	intern->ptr = ne;
+	intern->ref_type = REF_TYPE_OTHER;
+	reflection_update_property(object, "name", &name);
+}
+/* }}} */
+
 /* {{{ zend_reflection_class_factory */
 PHPAPI void zend_reflection_class_factory(zend_class_entry *ce, zval *object)
 {
@@ -6596,6 +6611,52 @@ ZEND_METHOD(reflection_namespace, getName)
 }
 /* }}} */
 
+/* {{{ proto public string ReflectionNamespace::getChildNamespaces()
+   Returns the namespace' childs */
+ZEND_METHOD(reflection_namespace, getParentNamespace)
+{
+	reflection_object *intern;
+	zend_namespace_entry *ne;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+	GET_REFLECTION_OBJECT_PTR(ne);
+	if (ne->parent == NULL) {
+		return;
+	}
+
+	zend_reflection_namespace_factory(ne->parent, return_value);
+}
+/* }}} */
+
+/* {{{ proto public string ReflectionNamespace::getChildNamespaces()
+   Returns the namespace' childs */
+ZEND_METHOD(reflection_namespace, getChildNamespaces)
+{
+	reflection_object *intern;
+	zend_namespace_entry *ne;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+	GET_REFLECTION_OBJECT_PTR(ne);
+
+	/* Return an empty array if this class implements no interfaces */
+	array_init(return_value);
+
+	if (ne->num_childs) {
+		uint32_t i;
+
+		for (i=0; i < ne->num_childs; i++) {
+			zval child;
+			zend_reflection_namespace_factory(ne->childs[i], &child);
+			zend_hash_update(Z_ARRVAL_P(return_value), ne->childs[i]->name, &child);
+		}
+	}
+}
+/* }}} */
+
 /* {{{ proto public string ReflectionNamespace::getClasses()
    Returns the namespace' classes */
 ZEND_METHOD(reflection_namespace, getClasses)
@@ -6616,10 +6677,43 @@ ZEND_METHOD(reflection_namespace, getClasses)
 
 		for (i=0; i < ne->num_classes; i++) {
 			zval class;
-			zend_reflection_class_factory(ne->classes[i], &class);
-			zend_hash_update(Z_ARRVAL_P(return_value), ne->classes[i]->name, &class);
+			zend_class_entry *ce = ne->classes[i];
+			if (ce) {
+				zend_reflection_class_factory(ne->classes[i], &class);
+				zend_hash_update(Z_ARRVAL_P(return_value), ne->classes[i]->name, &class);
+			}
 		}
 	}
+}
+/* }}} */
+
+/* {{{ proto public bool ReflectionNamespace::isInternal()
+   Returns whether this is an internal namespace */
+ZEND_METHOD(reflection_namespace, isInternal)
+{
+	reflection_object *intern;
+	zend_namespace_entry *ne;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+	GET_REFLECTION_OBJECT_PTR(ne);
+	RETURN_BOOL(ne->type == ZEND_INTERNAL_NAMESPACE);
+}
+/* }}} */
+
+/* {{{ proto public bool ReflectionNamespace::isUserDefined()
+   Returns whether this is a user-defined namespace */
+ZEND_METHOD(reflection_namespace, isUserDefined)
+{
+	reflection_object *intern;
+	zend_namespace_entry *ne;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+	GET_REFLECTION_OBJECT_PTR(ne);
+	RETURN_BOOL(ne->type == ZEND_USER_NAMESPACE);
 }
 /* }}} */
 
@@ -7119,11 +7213,16 @@ static const zend_function_entry reflection_namespace_functions[] = {
 	ZEND_ME(reflection_namespace, __construct, arginfo_reflection_namespace___construct, 0)
 	ZEND_ME(reflection_namespace, __toString, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_namespace, getName, arginfo_reflection__void, 0)
+	ZEND_ME(reflection_namespace, getParentNamespace, arginfo_reflection__void, 0)
+	ZEND_ME(reflection_namespace, getChildNamespaces, arginfo_reflection__void, 0)
 	// ZEND_ME(reflection_class, isInternal, arginfo_reflection__void, 0)
 	// ZEND_ME(reflection_class, isUserDefined, arginfo_reflection__void, 0)
 	// ZEND_ME(reflection_class, getNamespaceName, arginfo_reflection__void, 0)
 	// ZEND_ME(reflection_class, getShortName, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_namespace, getClasses, arginfo_reflection__void, 0)
+	ZEND_ME(reflection_namespace, isInternal, arginfo_reflection__void, 0)
+	ZEND_ME(reflection_namespace, isUserDefined, arginfo_reflection__void, 0)
+
 	PHP_FE_END
 };
 

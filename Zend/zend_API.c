@@ -4240,6 +4240,96 @@ ZEND_API zend_bool zend_is_iterable(zval *iterable) /* {{{ */
 }
 /* }}} */
 
+ZEND_API zend_namespace_entry *zend_init_namespace(zend_string *name, char type) /* {{{ */
+{
+	zend_namespace_entry *ne = (zend_namespace_entry *)malloc(sizeof(zend_namespace_entry));
+	// zend_namespace_entry *ne = zend_arena_alloc(&CG(arena), sizeof(zend_namespace_entry));
+	ne->name = name;
+	ne->type = ZEND_USER_NAMESPACE;
+	ne->num_classes = ne->num_interfaces = ne->num_traits = ne->num_functions = ne->num_constants = ne->num_childs = 0;
+	ne->classes = NULL;
+	ne->interfaces = NULL;
+	ne->traits = NULL;
+	ne->functions = NULL;
+	ne->constants = NULL;
+	ne->childs = NULL;
+	return ne;
+}
+/* }}} */
+
+ZEND_API zend_namespace_entry *zend_root_namespace() /* {{{ */
+{
+	if (zend_hash_exists(CG(namespace_table), CG(empty_string))) {
+		return zend_hash_find_ptr(CG(namespace_table), CG(empty_string));
+	}
+	zend_namespace_entry *ne = zend_init_namespace(CG(empty_string), ZEND_USER_NAMESPACE);
+	zend_hash_update_ptr(CG(namespace_table), CG(empty_string), ne);
+	return ne;
+}
+/* }}} */
+
+ZEND_API zend_namespace_entry *zend_register_namespace_lc(zend_string *name, zend_string *lc_name, char type) /* {{{ */
+{
+
+	if (zend_hash_exists(CG(namespace_table), lc_name)) {
+		return zend_hash_find_ptr(CG(namespace_table), lc_name);
+	}
+
+	zend_namespace_entry *parent_ne = NULL, *ne = zend_init_namespace(name, type);
+	zend_hash_update_ptr(CG(namespace_table), lc_name, ne);
+
+	size_t i, from = ZSTR_VAL(name)[0] == '\\' ? 1 : 0;
+
+	for (i = ZSTR_LEN(name); i > from; i--) {
+		if (ZSTR_VAL(name)[i] == '\\') {
+			parent_ne = zend_register_namespace_lc(
+				zend_string_init(ZSTR_VAL(name) + from, i - from, 0), 
+				zend_string_init(ZSTR_VAL(lc_name) + from, i - from, 0),
+				type
+			);
+			break;
+		}
+	}
+	if (ZSTR_VAL(name)[i] != '\\') {
+		parent_ne = zend_root_namespace();
+	}
+	parent_ne->childs = (zend_namespace_entry **) realloc(parent_ne->childs, sizeof(zend_namespace_entry *) * (parent_ne->num_childs + 1));
+	parent_ne->childs[parent_ne->num_childs++] = ne;
+	ne->parent = parent_ne;
+
+	return ne;
+}
+/* }}} */
+
+ZEND_API zend_namespace_entry *zend_register_namespace(zend_string *name, char type) /* {{{ */
+{
+	return zend_register_namespace_lc(name, zend_string_tolower(name), type);
+}
+/* }}} */
+
+ZEND_API zend_namespace_entry *zend_register_class_namespace(zend_class_entry *ce) /* {{{ */
+{
+	zend_namespace_entry *ne = NULL;
+    size_t i, from = ZSTR_VAL(ce->name)[0] == '\\' ? 1 : 0;
+
+	for (i = ZSTR_LEN(ce->name); i > from; i--) {
+		if (ZSTR_VAL(ce->name)[i] == '\\') {
+			ne = zend_register_namespace(
+				zend_string_init(ZSTR_VAL(ce->name) + from, i - from, 0), 
+				ce->type == ZEND_INTERNAL_CLASS ? ZEND_INTERNAL_NAMESPACE : ZEND_USER_NAMESPACE
+			);
+		}
+	}
+	if (!ne) {
+		ne = zend_root_namespace();
+	}
+	ne->classes = (zend_class_entry **) realloc(ne->classes, sizeof(zend_class_entry *) * (ne->num_classes + 1));
+	ce->namespace = ne;
+	ne->classes[ne->num_classes++] = ce;
+	return ne;
+}
+/* }}} */
+
 /*
  * Local variables:
  * tab-width: 4

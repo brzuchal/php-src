@@ -872,6 +872,9 @@ ZEND_API void zend_assert_valid_class_name(const zend_string *const_name);
 /* A quick check (type == ZEND_USER_FUNCTION || type == ZEND_EVAL_CODE) */
 #define ZEND_USER_CODE(type) ((type & 1) == 0)
 
+#define ZEND_INTERNAL_NAMESPACE		1
+#define ZEND_USER_NAMESPACE			2
+
 #define ZEND_INTERNAL_CLASS         1
 #define ZEND_USER_CLASS             2
 

@@ -26,6 +26,7 @@ int zend_startup_builtin_functions(void);
 
 BEGIN_EXTERN_C()
 ZEND_API void zend_fetch_debug_backtrace(zval *return_value, int skip_last, int options, int limit);
+ZEND_API zend_namespace_entry *zend_root_namespace();
 END_EXTERN_C()
 
 #endif /* ZEND_BUILTIN_FUNCTIONS_H */
