@@ -439,6 +439,7 @@ union _zend_function {
 
 	zend_op_array op_array;
 	zend_internal_function internal_function;
+	zend_namespace_entry *namespace;
 };
 
 typedef enum _zend_call_kind {

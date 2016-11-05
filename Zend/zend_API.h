@@ -1253,6 +1253,8 @@ static zend_always_inline void zend_parse_arg_zval_deref(zval *arg, zval **dest,
 }
 
 ZEND_API zend_namespace_entry *zend_register_class_namespace(zend_class_entry *ce);
+ZEND_API zend_namespace_entry *zend_root_namespace();
+ZEND_API zend_namespace_entry *zend_register_function_namespace(zend_function *fn);
 
 END_EXTERN_C()
 

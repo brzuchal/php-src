@@ -2243,6 +2243,9 @@ ZEND_API int zend_register_functions(zend_class_entry *scope, const zend_functio
 			zend_string_release(lowercase_name);
 			break;
 		}
+		if (!scope) {
+			zend_register_function_namespace(reg_function);
+		}
 
 		/* If types of arguments have to be checked */
 		if (reg_function->common.arg_info && reg_function->common.num_args) {
@@ -4246,13 +4249,12 @@ ZEND_API zend_namespace_entry *zend_init_namespace(zend_string *name, char type)
 	// zend_namespace_entry *ne = zend_arena_alloc(&CG(arena), sizeof(zend_namespace_entry));
 	ne->name = name;
 	ne->type = ZEND_USER_NAMESPACE;
-	ne->num_classes = ne->num_interfaces = ne->num_traits = ne->num_functions = ne->num_constants = ne->num_childs = 0;
+	ne->num_classes = ne->num_functions = ne->num_constants = ne->num_childs = 0;
 	ne->classes = NULL;
-	ne->interfaces = NULL;
-	ne->traits = NULL;
 	ne->functions = NULL;
 	ne->constants = NULL;
 	ne->childs = NULL;
+
 	return ne;
 }
 /* }}} */
@@ -4263,6 +4265,7 @@ ZEND_API zend_namespace_entry *zend_root_namespace() /* {{{ */
 		return zend_hash_find_ptr(CG(namespace_table), CG(empty_string));
 	}
 	zend_namespace_entry *ne = zend_init_namespace(CG(empty_string), ZEND_USER_NAMESPACE);
+	ne->parent = NULL;
 	zend_hash_update_ptr(CG(namespace_table), CG(empty_string), ne);
 	return ne;
 }
@@ -4274,7 +4277,6 @@ ZEND_API zend_namespace_entry *zend_register_namespace_lc(zend_string *name, zen
 	if (zend_hash_exists(CG(namespace_table), lc_name)) {
 		return zend_hash_find_ptr(CG(namespace_table), lc_name);
 	}
-
 	zend_namespace_entry *parent_ne = NULL, *ne = zend_init_namespace(name, type);
 	zend_hash_update_ptr(CG(namespace_table), lc_name, ne);
 
@@ -4326,6 +4328,30 @@ ZEND_API zend_namespace_entry *zend_register_class_namespace(zend_class_entry *c
 	ne->classes = (zend_class_entry **) realloc(ne->classes, sizeof(zend_class_entry *) * (ne->num_classes + 1));
 	ce->namespace = ne;
 	ne->classes[ne->num_classes++] = ce;
+	return ne;
+}
+/* }}} */
+
+ZEND_API zend_namespace_entry *zend_register_function_namespace(zend_function *fn) /* {{{ */
+{
+	zend_namespace_entry *ne = NULL;
+    size_t i, from = ZSTR_VAL(fn->common.function_name)[0] == '\\' ? 1 : 0;
+
+	for (i = ZSTR_LEN(fn->common.function_name); i > from; i--) {
+		if (ZSTR_VAL(fn->common.function_name)[i] == '\\') {
+			ne = zend_register_namespace(
+				zend_string_init(ZSTR_VAL(fn->common.function_name) + from, i - from, 0), 
+				fn->common.type == ZEND_INTERNAL_FUNCTION ? ZEND_INTERNAL_NAMESPACE : ZEND_USER_NAMESPACE
+			);
+		}
+	}
+	if (!ne) {
+		ne = zend_root_namespace();
+	}
+	ne->functions = (zend_function **) realloc(ne->functions, sizeof(zend_function *) * (ne->num_functions + 1));
+	// TODO: unstable
+	// fn->namespace = ne;
+	ne->functions[ne->num_functions++] = fn;
 	return ne;
 }
 /* }}} */

@@ -186,14 +186,10 @@ typedef struct _zend_namespace_entry {
 	// uint32_t ne_flags;
 	struct _zend_namespace_entry* parent;
 	uint32_t num_classes;
-	uint32_t num_interfaces;
-	uint32_t num_traits;
 	uint32_t num_functions;
 	uint32_t num_constants;
 	uint32_t num_childs;
 	zend_class_entry** classes;
-	zend_class_entry** interfaces;
-	zend_class_entry** traits;
 	zend_function** functions;
 	struct _zend_constant** constants;
 	struct _zend_namespace_entry** childs;

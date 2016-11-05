@@ -6678,10 +6678,98 @@ ZEND_METHOD(reflection_namespace, getClasses)
 		for (i=0; i < ne->num_classes; i++) {
 			zval class;
 			zend_class_entry *ce = ne->classes[i];
-			if (ce) {
+			if (!(ce->ce_flags & ZEND_ACC_INTERFACE || ce->ce_flags & ZEND_ACC_TRAIT)) {
 				zend_reflection_class_factory(ne->classes[i], &class);
 				zend_hash_update(Z_ARRVAL_P(return_value), ne->classes[i]->name, &class);
 			}
+		}
+	}
+}
+/* }}} */
+
+/* {{{ proto public string ReflectionNamespace::getInterfaces()
+   Returns the namespace' interfaces */
+ZEND_METHOD(reflection_namespace, getInterfaces)
+{
+	reflection_object *intern;
+	zend_namespace_entry *ne;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+	GET_REFLECTION_OBJECT_PTR(ne);
+
+	/* Return an empty array if this class implements no interfaces */
+	array_init(return_value);
+
+	if (ne->num_classes) {
+		uint32_t i;
+
+		for (i=0; i < ne->num_classes; i++) {
+			zval class;
+			zend_class_entry *ce = ne->classes[i];
+			if (ce->ce_flags & ZEND_ACC_INTERFACE) {
+				zend_reflection_class_factory(ne->classes[i], &class);
+				zend_hash_update(Z_ARRVAL_P(return_value), ne->classes[i]->name, &class);
+			}
+		}
+	}
+}
+/* }}} */
+
+/* {{{ proto public string ReflectionNamespace::getTraits()
+   Returns the namespace' traits */
+ZEND_METHOD(reflection_namespace, getTraits)
+{
+	reflection_object *intern;
+	zend_namespace_entry *ne;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+	GET_REFLECTION_OBJECT_PTR(ne);
+
+	/* Return an empty array if this class implements no interfaces */
+	array_init(return_value);
+
+	if (ne->num_classes) {
+		uint32_t i;
+
+		for (i=0; i < ne->num_classes; i++) {
+			zval class;
+			zend_class_entry *ce = ne->classes[i];
+			if (ce->ce_flags & ZEND_ACC_TRAIT) {
+				zend_reflection_class_factory(ne->classes[i], &class);
+				zend_hash_update(Z_ARRVAL_P(return_value), ne->classes[i]->name, &class);
+			}
+		}
+	}
+}
+/* }}} */
+
+/* {{{ proto public string ReflectionNamespace::getFunctions()
+   Returns the namespace' functions */
+ZEND_METHOD(reflection_namespace, getFunctions)
+{
+	reflection_object *intern;
+	zend_namespace_entry *ne;
+
+	if (zend_parse_parameters_none() == FAILURE) {
+		return;
+	}
+	GET_REFLECTION_OBJECT_PTR(ne);
+
+	/* Return an empty array if this class implements no interfaces */
+	array_init(return_value);
+
+	if (ne->num_functions) {
+		uint32_t i;
+
+		for (i=0; i < ne->num_functions; i++) {
+			zval function;
+			zend_function *func = ne->functions[i];
+			reflection_function_factory(func, NULL, &function);
+			zend_hash_update(Z_ARRVAL_P(return_value), func->common.function_name, &function);
 		}
 	}
 }
@@ -7220,6 +7308,9 @@ static const zend_function_entry reflection_namespace_functions[] = {
 	// ZEND_ME(reflection_class, getNamespaceName, arginfo_reflection__void, 0)
 	// ZEND_ME(reflection_class, getShortName, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_namespace, getClasses, arginfo_reflection__void, 0)
+	ZEND_ME(reflection_namespace, getInterfaces, arginfo_reflection__void, 0)
+	ZEND_ME(reflection_namespace, getTraits, arginfo_reflection__void, 0)
+	ZEND_ME(reflection_namespace, getFunctions, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_namespace, isInternal, arginfo_reflection__void, 0)
 	ZEND_ME(reflection_namespace, isUserDefined, arginfo_reflection__void, 0)
 

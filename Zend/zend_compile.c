@@ -1103,6 +1103,7 @@ ZEND_API int do_bind_function(const zend_op_array *op_array, const zend_op *opli
 		}
 		return FAILURE;
 	} else {
+		zend_register_function_namespace(function);
 		if (function->op_array.refcount) {
 			(*function->op_array.refcount)++;
 		}
