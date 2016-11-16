@@ -2034,8 +2034,8 @@ ZEND_API int ZEND_FASTCALL zend_is_identical(zval *op1, zval *op2) /* {{{ */
 				zend_hash_compare(Z_ARRVAL_P(op1), Z_ARRVAL_P(op2), (compare_func_t) hash_zval_identical_function, 1) == 0);
 		case IS_OBJECT:
 			if (Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(op1)) && Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(op2))) {
-				is_equal_function(&result, op1, op2);
-				return EXPECTED(Z_TYPE_P(&result) == IS_TRUE);
+				is_equal_function(&immutable_cmp_res, op1, op2);
+				return EXPECTED(Z_TYPE_P(&immutable_cmp_res) == IS_TRUE);
 			}
 			return (Z_OBJ_P(op1) == Z_OBJ_P(op2) && Z_OBJ_HT_P(op1) == Z_OBJ_HT_P(op2));
 		default:
