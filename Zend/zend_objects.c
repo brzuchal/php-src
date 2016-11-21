@@ -35,6 +35,7 @@ ZEND_API void zend_object_std_init(zend_object *object, zend_class_entry *ce)
 	GC_TYPE_INFO(object) = IS_OBJECT;
 	object->ce = ce;
 	object->properties = NULL;
+	object->zobj_flags = 0;
 	zend_objects_store_put(object);
 	p = object->properties_table;
 	if (EXPECTED(ce->default_properties_count != 0)) {
