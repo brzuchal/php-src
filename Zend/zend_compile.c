@@ -810,6 +810,18 @@ uint32_t zend_add_class_modifier(uint32_t flags, uint32_t new_flag) /* {{{ */
 	}
 	return new_flags;
 }
+
+uint32_t zend_add_interface_modifier(uint32_t flags, uint32_t new_flag) /* {{{ */
+{
+	uint32_t new_flags = flags | new_flag;
+
+	if ((flags & ZEND_ACC_IMMUTABLE) && (new_flag & ZEND_ACC_IMMUTABLE)) {
+		zend_error_noreturn(E_COMPILE_ERROR, "Multiple immutable modifiers are not allowed");
+	}
+}
+/* }}} */
+
+
 /* }}} */
 
 uint32_t zend_add_member_modifier(uint32_t flags, uint32_t new_flag) /* {{{ */
