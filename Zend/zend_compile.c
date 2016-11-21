@@ -5623,6 +5623,14 @@ void zend_compile_prop_decl(zend_ast *ast) /* {{{ */
 		zend_error_noreturn(E_COMPILE_ERROR, "Properties cannot be declared abstract");
 	}
 
+	if (Z_CE_IS_IMMUTABLE(ce)) {
+		if (flags & ZEND_ACC_STATIC) {
+			zend_error_noreturn(E_COMPILE_ERROR, "Properties of immutable class cannot be declared static");
+		}
+
+		flags |= ZEND_ACC_IMMUTABLE;
+	}
+
 	for (i = 0; i < children; ++i) {
 		zend_ast *prop_ast = list->child[i];
 		zend_ast *name_ast = prop_ast->child[0];

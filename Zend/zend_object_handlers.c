@@ -706,12 +706,6 @@ ZEND_API void zend_std_write_property(zval *object, zval *member, zval *value, v
 		zend_throw_error(NULL, "Can not modify state of immutable object after constructor");
 	}
 
-	if (EXPECTED(Z_TYPE_P(value) == IS_OBJECT)) {
-		if (EXPECTED(Z_OBJ_IS_IMMUTABLE(zobj) && !EXPECTED(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(value))))) {
-			zend_throw_error(NULL, "Immutable property must hold instance of immutable class");
-		}
-	}
-
 	ZVAL_UNDEF(&tmp_member);
  	if (UNEXPECTED(Z_TYPE_P(member) != IS_STRING)) {
 		ZVAL_STR(&tmp_member, zval_get_string(member));
@@ -744,6 +738,10 @@ found:
 						}
 						if ((Z_TYPE_P(value) == IS_OBJECT) && !(Z_OBJ_P(value)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
 							zend_error(E_WARNING, "Cannot change immutable property to non immutable object: %s::$%s", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(member)));
+							goto exit;							
+						}
+						if (Z_TYPE_P(value) == IS_RESOURCE) {
+							zend_error(E_WARNING, "Cannot assign resource to immutable property: %s", ZSTR_VAL(Z_STR_P(member)));
 							goto exit;							
 						}
 					}
