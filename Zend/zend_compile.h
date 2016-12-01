@@ -207,7 +207,7 @@ typedef struct _zend_oparray_context {
 /* class flags (types) */
 /* ZEND_ACC_IMPLICIT_ABSTRACT_CLASS is used for abstract classes (since it is set by any abstract method even interfaces MAY have it set, too). */
 /* ZEND_ACC_EXPLICIT_ABSTRACT_CLASS denotes that a class was explicitly defined as abstract by using the keyword. */
-#define ZEND_ACC_IMMUTABLE                  0x09
+#define ZEND_ACC_IMMUTABLE                  0x2000
 #define ZEND_ACC_IMPLICIT_ABSTRACT_CLASS	0x10
 #define ZEND_ACC_EXPLICIT_ABSTRACT_CLASS	0x20
 #define ZEND_ACC_INTERFACE		            0x40
