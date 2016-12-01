@@ -698,7 +698,7 @@ ZEND_API void zend_std_write_property(zval *object, zval *member, zval *value, v
 	zval tmp_member;
 	zval *variable_ptr;
 	uint32_t property_offset;
-	zend_property_info *property_info = NULL;
+	zend_property_info *property_info;
 
 	zobj = Z_OBJ_P(object);
 
@@ -728,20 +728,19 @@ ZEND_API void zend_std_write_property(zval *object, zval *member, zval *value, v
 				}
 				zobj->properties = zend_array_dup(zobj->properties);
 			}
-			if ((variable_ptr = zend_hash_find(zobj->properties, Z_STR_P(member))) != NULL) {
+			variable_ptr = zend_hash_find(zobj->properties, Z_STR_P(member));
+
+			if (variable_ptr != NULL) {
 found:
-				if ((property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(member))) != NULL) {
+				property_info = zend_hash_find_ptr(&zobj->ce->properties_info, Z_STR_P(member));
+				if (property_info != NULL) {
 					if (EXPECTED((property_info->flags & ZEND_ACC_IMMUTABLE) != 0)) {
-						if (Z_TYPE_P(variable_ptr) != IS_NULL) {
-							zend_error(E_WARNING, "Cannot change immutable property: %s::$%s", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(member)));
-							goto exit;
-						}
-						if ((Z_TYPE_P(value) == IS_OBJECT) && !(Z_OBJ_P(value)->ce->ce_flags & ZEND_ACC_IMMUTABLE)) {
-							zend_error(E_WARNING, "Cannot change immutable property to non immutable object: %s::$%s", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(member)));
+						if ((Z_TYPE_P(value) == IS_OBJECT) && !(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(value)))) {
+							zend_throw_error(NULL, "Cannot change immutable property to non immutable object: %s::$%s", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(member)));
 							goto exit;							
 						}
 						if (Z_TYPE_P(value) == IS_RESOURCE) {
-							zend_error(E_WARNING, "Cannot assign resource to immutable property: %s", ZSTR_VAL(Z_STR_P(member)));
+							zend_throw_error(NULL, "Cannot assign resource to immutable property: %s", ZSTR_VAL(Z_STR_P(member)));
 							goto exit;							
 						}
 					}
@@ -752,6 +751,17 @@ found:
 		}
 	} else if (UNEXPECTED(EG(exception))) {
 		goto exit;
+	}
+
+	if (EXPECTED(Z_OBJ_IS_IMMUTABLE(zobj))) {
+		if ((Z_TYPE_P(value) == IS_OBJECT) && !(Z_OBJ_IS_IMMUTABLE(Z_OBJ_P(value)))) {
+			zend_throw_error(NULL, "Cannot change immutable property to non immutable object: %s::$%s", ZSTR_VAL(zobj->ce->name), ZSTR_VAL(Z_STR_P(member)));
+			goto exit;							
+		}
+		if (Z_TYPE_P(value) == IS_RESOURCE) {
+			zend_throw_error(NULL, "Cannot assign resource to immutable property: %s", ZSTR_VAL(Z_STR_P(member)));
+			goto exit;							
+		}
 	}
 
 	/* magic set */
