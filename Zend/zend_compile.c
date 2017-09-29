@@ -2412,7 +2412,7 @@ static inline zend_bool zend_is_variable(zend_ast *ast) /* {{{ */
 	return ast->kind == ZEND_AST_VAR || ast->kind == ZEND_AST_DIM
 		|| ast->kind == ZEND_AST_PROP || ast->kind == ZEND_AST_STATIC_PROP
 		|| ast->kind == ZEND_AST_CALL || ast->kind == ZEND_AST_METHOD_CALL
-		|| ast->kind == ZEND_AST_STATIC_CALL;
+		|| ast->kind == ZEND_AST_STATIC_CALL;// || ast->kind == ZEND_AST_SHORT_CLOSURE;
 }
 /* }}} */
 
@@ -5983,6 +5983,15 @@ void zend_compile_func_decl(znode *result, zend_ast *ast) /* {{{ */
 }
 /* }}} */
 
+void zend_compile_short_closure(znode *result, zend_ast *ast) /* {{{ */
+{
+	zend_ast *name_ast = ast->child[0];
+	zend_ast *args_ast = ast->child[1];
+	zend_string *name = zend_ast_get_str(name_ast);
+	zend_error_noreturn(E_COMPILE_ERROR, "name '%s'", ZSTR_VAL(name));
+}
+/* }}} */
+
 void zend_compile_prop_decl(zend_ast *ast) /* {{{ */
 {
 	zend_ast_list *list = zend_ast_get_list(ast);
@@ -8309,6 +8318,9 @@ void zend_compile_expr(znode *result, zend_ast *ast) /* {{{ */
 			return;
 		case ZEND_AST_CLOSURE:
 			zend_compile_func_decl(result, ast);
+			return;
+		case ZEND_AST_SHORT_CLOSURE:
+			zend_compile_short_closure(result, ast);
 			return;
 		default:
 			ZEND_ASSERT(0 /* not supported */);

@@ -240,7 +240,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %type <ast> internal_functions_in_yacc
 %type <ast> exit_expr scalar backticks_expr lexical_var function_call member_name property_name
 %type <ast> variable_class_name dereferencable_scalar constant dereferencable
-%type <ast> callable_expr callable_variable static_member new_variable
+%type <ast> callable_expr short_closure callable_variable static_member new_variable
 %type <ast> encaps_var encaps_var_offset isset_variables
 %type <ast> top_statement_list use_declarations const_list inner_statement_list if_stmt
 %type <ast> alt_if_stmt for_exprs switch_case_list global_var_list static_var_list
@@ -420,8 +420,8 @@ inner_statement:
 
 
 statement:
-		'{' inner_statement_list '}' { $$ = $2; }
-	|	if_stmt { $$ = $1; }
+/**		'{' inner_statement_list '}' { $$ = $2; }
+	|*/	if_stmt { $$ = $1; }
 	|	alt_if_stmt { $$ = $1; }
 	|	T_WHILE '(' expr ')' while_statement
 			{ $$ = zend_ast_create(ZEND_AST_WHILE, $3, $5); }
@@ -1124,6 +1124,15 @@ callable_expr:
 	|	dereferencable_scalar	{ $$ = $1; }
 ;
 
+short_closure:
+		name
+			{ $$ = zend_ast_create_ex(ZEND_AST_SHORT_CLOSURE, 0, $1, 0); }
+	|	class_name T_PAAMAYIM_NEKUDOTAYIM identifier
+			{ $$ = zend_ast_create_ex(ZEND_AST_SHORT_CLOSURE, 1, $1, $3); }
+	|	dereferencable T_OBJECT_OPERATOR identifier
+			{ $$ = zend_ast_create_ex(ZEND_AST_SHORT_CLOSURE, 2, $1, $3); }
+;
+
 callable_variable:
 		simple_variable
 			{ $$ = zend_ast_create(ZEND_AST_VAR, $1); }
@@ -1136,6 +1145,7 @@ callable_variable:
 	|	dereferencable T_OBJECT_OPERATOR property_name argument_list
 			{ $$ = zend_ast_create(ZEND_AST_METHOD_CALL, $1, $3, $4); }
 	|	function_call { $$ = $1; }
+	|	'{' short_closure '}' { $$ = $2; }
 ;
 
 variable:

@@ -1170,6 +1170,19 @@ simple_list:
 				smart_str_appends(str, "const ");
 			}
 			goto simple_list;
+		case ZEND_AST_SHORT_CLOSURE:
+			smart_str_appendc(str, '{');
+			zend_ast_export_ex(str, ast->child[0], 0, indent);
+			if (ast->attr == 1) {
+				smart_str_appends(str, "->");
+				zend_ast_export_var(str, ast->child[1], 0, indent);
+			}
+			if (ast->attr == 2) {
+				smart_str_appends(str, "::");
+				zend_ast_export_var(str, ast->child[1], 0, indent);
+			}
+			smart_str_appendc(str, '}');
+			break;
 
 		/* 0 child nodes */
 		case ZEND_AST_MAGIC_CONST:
