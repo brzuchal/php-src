@@ -2412,7 +2412,7 @@ static inline zend_bool zend_is_variable(zend_ast *ast) /* {{{ */
 	return ast->kind == ZEND_AST_VAR || ast->kind == ZEND_AST_DIM
 		|| ast->kind == ZEND_AST_PROP || ast->kind == ZEND_AST_STATIC_PROP
 		|| ast->kind == ZEND_AST_CALL || ast->kind == ZEND_AST_METHOD_CALL
-		|| ast->kind == ZEND_AST_STATIC_CALL;// || ast->kind == ZEND_AST_SHORT_CLOSURE;
+		|| ast->kind == ZEND_AST_STATIC_CALL || ast->kind == ZEND_AST_SHORT_CLOSURE;
 }
 /* }}} */
 

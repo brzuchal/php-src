@@ -420,8 +420,7 @@ inner_statement:
 
 
 statement:
-/**		'{' inner_statement_list '}' { $$ = $2; }
-	|*/	if_stmt { $$ = $1; }
+	if_stmt { $$ = $1; }
 	|	alt_if_stmt { $$ = $1; }
 	|	T_WHILE '(' expr ')' while_statement
 			{ $$ = zend_ast_create(ZEND_AST_WHILE, $3, $5); }
