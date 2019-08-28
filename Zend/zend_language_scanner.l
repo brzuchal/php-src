@@ -1287,13 +1287,11 @@ static zend_bool try_preparse_annotation_name() {
 
 static zend_bool try_preparse_annotation() {
     /* Find corresponding ']' */
-    int token, level = 1;
-	int i = 0;
+	int token, level = 1;
 	if (!try_preparse_annotation_name()) {
 		return 0;
 	}
 restart_annotation:
-	i++;
     for (;;) {
 		NEXT_TOKEN_SKIP_WS();
 		if (level == 1 && token == ']') {
