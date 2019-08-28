@@ -1236,6 +1236,104 @@ static void copy_heredoc_label_stack(void *void_heredoc_label)
 		goto emit_token; \
 	} while (0)
 
+#define NEXT_TOKEN() \
+    if (!(token = next_lookahead_token())) { return 0; }
+#define NEXT_TOKEN_SKIP_WS() \
+    if (!(token = next_lookahead_token_skip_ws())) { return 0; }
+
+static int next_lookahead_token() {
+    zval zv;
+    int retval;
+    ZVAL_UNDEF(&zv);
+    retval = lex_scan(&zv, NULL);
+    zval_ptr_dtor_nogc(&zv);
+    if (EG(exception)) {
+        zend_clear_exception();
+        return 0;
+    }
+    return retval;
+}
+
+ static int next_lookahead_token_skip_ws() {
+    int token;
+    for (;;) {
+        NEXT_TOKEN();
+        if (token == T_WHITESPACE || token == T_COMMENT || token == T_DOC_COMMENT) {
+            continue;
+        }
+        return token;
+    }
+}
+
+static zend_bool try_preparse_annotation_name() {
+    int token;
+    NEXT_TOKEN_SKIP_WS();
+    if (token == '@') {
+        NEXT_TOKEN_SKIP_WS();
+    }
+    if (token == T_NS_SEPARATOR) {
+        NEXT_TOKEN_SKIP_WS();
+    }
+    for (;;) {
+        if (token != T_STRING) {
+            return 0;
+        }
+        if (token != T_NS_SEPARATOR) {
+            return 1;
+        }
+        NEXT_TOKEN_SKIP_WS();
+    }
+}
+
+static zend_bool try_preparse_annotation() {
+    /* Find corresponding ']' */
+    int token, level = 1;
+	int i = 0;
+	if (!try_preparse_annotation_name()) {
+		return 0;
+	}
+restart_annotation:
+	i++;
+    for (;;) {
+		NEXT_TOKEN_SKIP_WS();
+		if (level == 1 && token == ']') {
+			break;
+		}
+        if (token == '[') {
+            level++;
+        } else if (token == ']') {
+            level--;
+            if (level == 0) {
+                break;
+            }
+        }
+    }
+	NEXT_TOKEN_SKIP_WS();
+	if (level == 0 && token == '[') {
+		goto restart_annotation;
+	}
+
+    return token == T_FUNCTION || token == T_CLASS || token == T_TRAIT || token == T_INTERFACE
+		|| token == T_ABSTRACT || token == T_FINAL
+		|| token == T_PUBLIC || token == T_PRIVATE || token == T_PROTECTED;
+}
+
+static zend_bool is_annotation() {
+    // TODO Don't perform nestead scanahead?
+    zend_lex_state current_state;
+    zend_bool retval;
+
+    zend_save_lexical_state(&current_state);
+    zend_exception_save();
+
+    retval = try_preparse_annotation();
+
+    zend_exception_restore();
+    zend_restore_lexical_state(&current_state);
+    CG(increment_lineno) = 0;
+    return retval;
+}
+
 int ZEND_FASTCALL lex_scan(zval *zendlval, zend_parser_stack_elem *elem)
 {
 int token;
@@ -1256,7 +1354,9 @@ BNUM	"0b"[01]+(_[01]+)*
 LABEL	[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*
 WHITESPACE [ \n\r\t]+
 TABS_AND_SPACES [ \t]*
-TOKENS [;:,.\[\]()|^&+-/*=%!~$<>?@]
+// TOKENS [;:,.\[\]()|^&+-/*=%!~$<>?]
+// TOKENS [;:,.\[\]()|^&+-/*=%!~$<>?@]
+TOKENS [;:,.\]()|^&+-/*=%!~$<>?@]
 ANY_CHAR [^]
 NEWLINE ("\r"|"\n"|"\r\n")
 
@@ -1726,6 +1826,13 @@ NEWLINE ("\r"|"\n"|"\r\n")
 
 <ST_IN_SCRIPTING>">>" {
 	RETURN_TOKEN(T_SR);
+}
+
+<ST_IN_SCRIPTING>"[" {
+	if (is_annotation()) {
+        RETURN_TOKEN(T_START_ANNOTATIONS);
+    }
+    RETURN_TOKEN('[');
 }
 
 <ST_IN_SCRIPTING>{TOKENS} {

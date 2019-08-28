@@ -50,6 +50,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 
 %destructor { zend_ast_destroy($$); } <ast>
 %destructor { if ($$) zend_string_release_ex($$, 0); } <str>
+// %destructor { if ($$) zend_array_ptr_dtor($$); } <hash>
 
 %precedence PREC_ARROW_FUNCTION
 %precedence T_INCLUDE T_INCLUDE_ONCE T_REQUIRE T_REQUIRE_ONCE
@@ -223,11 +224,12 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %token T_POW             "** (T_POW)"
 %token T_POW_EQUAL       "**= (T_POW_EQUAL)"
 %token T_BAD_CHARACTER   "invalid character (T_BAD_CHARACTER)"
+%token T_START_ANNOTATIONS	"[ (T_START_ANNOTATIONS)"
 
 /* Token used to force a parse error from the lexer */
 %token T_ERROR
 
-%type <ast> top_statement namespace_name name statement function_declaration_statement
+%type <ast> top_statement namespace_name name statement annotated_declaration_statement annotation function_declaration_statement
 %type <ast> class_declaration_statement trait_declaration_statement
 %type <ast> interface_declaration_statement interface_extends_list
 %type <ast> group_use_declaration inline_use_declarations inline_use_declaration
@@ -263,6 +265,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 
 %type <ptr> backup_lex_pos
 %type <str> backup_doc_comment
+%type <hash> backup_annotations
 
 %% /* Rules */
 
@@ -310,12 +313,41 @@ name:
 	|	T_NS_SEPARATOR namespace_name				{ $$ = $2; $$->attr = ZEND_NAME_FQ; }
 ;
 
+annotation_values:
+		'('  ')'
+	|	/* empty */
+;
+
+annotation:
+		'@' name annotation_values { zend_add_annotation($2, NULL); }
+	|	name annotation_values { zend_add_annotation($1, NULL); }
+;
+
+annotation_list:
+		annotation
+	|	annotation_list ',' annotation
+;
+
+annotation_group:
+		T_START_ANNOTATIONS annotation_list ']'
+;
+
+annotations:
+		annotation_group
+	|	annotations annotation_group
+;
+
+annotated_declaration_statement:
+	 	function_declaration_statement		{ $$ = $1; }
+  	|	class_declaration_statement			{ $$ = $1; }
+  	|	trait_declaration_statement			{ $$ = $1; }
+  	|	interface_declaration_statement		{ $$ = $1; }
+;
+
 top_statement:
 		statement							{ $$ = $1; }
-	|	function_declaration_statement		{ $$ = $1; }
-	|	class_declaration_statement			{ $$ = $1; }
-	|	trait_declaration_statement			{ $$ = $1; }
-	|	interface_declaration_statement		{ $$ = $1; }
+	|	annotated_declaration_statement { $$ = $1; }
+	|	annotations annotated_declaration_statement { $$ = $2; }
 	|	T_HALT_COMPILER '(' ')' ';'
 			{ $$ = zend_ast_create(ZEND_AST_HALT_COMPILER,
 			      zend_ast_create_zval_from_long(zend_get_scanned_file_offset()));
@@ -413,10 +445,8 @@ inner_statement_list:
 
 inner_statement:
 		statement { $$ = $1; }
-	|	function_declaration_statement 		{ $$ = $1; }
-	|	class_declaration_statement 		{ $$ = $1; }
-	|	trait_declaration_statement			{ $$ = $1; }
-	|	interface_declaration_statement		{ $$ = $1; }
+	|	annotated_declaration_statement					{ $$ = $1; }
+	|	annotations annotated_declaration_statement		{ $$ = $2; }
 	|	T_HALT_COMPILER '(' ')' ';'
 			{ $$ = NULL; zend_throw_exception(zend_ce_compile_error,
 			      "__HALT_COMPILER() can only be used from the outermost scope", 0); YYERROR; }
@@ -1028,6 +1058,10 @@ backup_fn_flags:
 
 backup_lex_pos:
 	/* empty */ { $$ = LANG_SCNG(yy_text); }
+;
+
+backup_annotations:
+	/* empty */ { $$ = CG(annotations); CG(annotations) = NULL; }
 ;
 
 returns_ref:

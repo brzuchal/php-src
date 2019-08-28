@@ -745,6 +745,8 @@ zend_ast *zend_negate_num_string(zend_ast *ast);
 uint32_t zend_add_class_modifier(uint32_t flags, uint32_t new_flag);
 uint32_t zend_add_member_modifier(uint32_t flags, uint32_t new_flag);
 zend_bool zend_handle_encoding_declaration(zend_ast *ast);
+void zend_add_annotation(zend_ast *name, zend_ast *value);
+zend_ast *zend_add_annotation_value(zend_ast *list_ast, zend_ast *val_ast);
 
 /* parser-driven code generators */
 void zend_do_free(znode *op1);

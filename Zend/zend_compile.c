@@ -1680,6 +1680,21 @@ zend_ast *zend_ast_append_str(zend_ast *left_ast, zend_ast *right_ast) /* {{{ */
 }
 /* }}} */
 
+void zend_add_annotation(zend_ast *name, zend_ast *value) /* {{{ */
+{
+	zend_string *key = zend_ast_get_str(name);
+	// TODO
+	zend_string_release(key);
+}
+/* }}} */
+
+zend_ast *zend_add_attribute_value(zend_ast *list_ast, zend_ast *val_ast) /* {{{ */
+{
+	// TODO
+ 	return list_ast;
+}
+/* }}} */
+
 zend_ast *zend_negate_num_string(zend_ast *ast) /* {{{ */
 {
 	zval *zv = zend_ast_get_zval(ast);
