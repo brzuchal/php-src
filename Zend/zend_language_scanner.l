@@ -1352,8 +1352,6 @@ BNUM	"0b"[01]+(_[01]+)*
 LABEL	[a-zA-Z_\x80-\xff][a-zA-Z0-9_\x80-\xff]*
 WHITESPACE [ \n\r\t]+
 TABS_AND_SPACES [ \t]*
-// TOKENS [;:,.\[\]()|^&+-/*=%!~$<>?]
-// TOKENS [;:,.\[\]()|^&+-/*=%!~$<>?@]
 TOKENS [;:,.\]()|^&+-/*=%!~$<>?@]
 ANY_CHAR [^]
 NEWLINE ("\r"|"\n"|"\r\n")
