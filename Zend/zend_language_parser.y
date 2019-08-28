@@ -50,7 +50,6 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 
 %destructor { zend_ast_destroy($$); } <ast>
 %destructor { if ($$) zend_string_release_ex($$, 0); } <str>
-// %destructor { if ($$) zend_array_ptr_dtor($$); } <hash>
 
 %precedence PREC_ARROW_FUNCTION
 %precedence T_INCLUDE T_INCLUDE_ONCE T_REQUIRE T_REQUIRE_ONCE
@@ -265,7 +264,6 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 
 %type <ptr> backup_lex_pos
 %type <str> backup_doc_comment
-%type <hash> backup_annotations
 
 %% /* Rules */
 
@@ -1058,10 +1056,6 @@ backup_fn_flags:
 
 backup_lex_pos:
 	/* empty */ { $$ = LANG_SCNG(yy_text); }
-;
-
-backup_annotations:
-	/* empty */ { $$ = CG(annotations); CG(annotations) = NULL; }
 ;
 
 returns_ref:
