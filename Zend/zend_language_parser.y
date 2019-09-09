@@ -228,7 +228,8 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 /* Token used to force a parse error from the lexer */
 %token T_ERROR
 
-%type <ast> top_statement namespace_name name statement annotated_declaration_statement annotation function_declaration_statement
+%type <ast> top_statement namespace_name name statement function_declaration_statement
+%type <ast> annotated_declaration_statement annotation annotation_values non_empty_annotation_values annotation_value
 %type <ast> class_declaration_statement trait_declaration_statement
 %type <ast> interface_declaration_statement interface_extends_list
 %type <ast> group_use_declaration inline_use_declarations inline_use_declaration
@@ -312,9 +313,24 @@ name:
 ;
 
 annotation_values:
-		'('  ')'
+		'(' ')'	{ $$ = zend_ast_create_list(0, ZEND_AST_ARG_LIST); }
+	|	'(' non_empty_annotation_values possible_comma ')' { $$ = $2; }
 	|	/* empty */
 ;
+
+non_empty_annotation_values:
+		annotation_value
+			{ $$ = zend_ast_create_list(1, ZEND_AST_ARG_LIST, $1); }
+	|	non_empty_annotation_values ',' annotation_value
+			{ $$ = zend_ast_list_add($1, $3); }
+;
+
+annotation_value:
+		scalar			{ $$ = $1; }
+	|	inline_function { $$ = $1; }
+	|	T_STATIC inline_function { $$ = $2; ((zend_ast_decl *) $$)->flags |= ZEND_ACC_STATIC; }
+;
+
 
 annotation:
 		'@' name annotation_values { zend_add_annotation($2, NULL); }
@@ -327,7 +343,7 @@ annotation_list:
 ;
 
 annotation_group:
-		T_START_ANNOTATIONS annotation_list ']'
+		T_SL annotation_list T_SR
 ;
 
 annotations:
