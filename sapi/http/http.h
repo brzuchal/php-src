@@ -1,0 +1,3 @@
+#define PHP_MODE_STANDARD      1
+#define PHP_MODE_PROCESS_STDIN 7
+#define PHP_MODE_SHOW_INI_CONFIG        13
