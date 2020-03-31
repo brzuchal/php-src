@@ -1426,6 +1426,10 @@ NEWLINE ("\r"|"\n"|"\r\n")
 	RETURN_TOKEN(T_TRAIT);
 }
 
+<ST_IN_SCRIPTING>"delegate" {
+	RETURN_TOKEN(T_DELEGATE);
+}
+
 <ST_IN_SCRIPTING>"extends" {
 	RETURN_TOKEN(T_EXTENDS);
 }

@@ -223,12 +223,13 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %token T_POW             "** (T_POW)"
 %token T_POW_EQUAL       "**= (T_POW_EQUAL)"
 %token T_BAD_CHARACTER   "invalid character (T_BAD_CHARACTER)"
+%token T_DELEGATE		 "delegate (T_DELEGATE)"
 
 /* Token used to force a parse error from the lexer */
 %token T_ERROR
 
 %type <ast> top_statement namespace_name name statement function_declaration_statement
-%type <ast> class_declaration_statement trait_declaration_statement
+%type <ast> class_declaration_statement trait_declaration_statement delegate_declaration_statement
 %type <ast> interface_declaration_statement interface_extends_list
 %type <ast> group_use_declaration inline_use_declarations inline_use_declaration
 %type <ast> mixed_group_use_declaration use_declaration unprefixed_use_declaration
@@ -278,7 +279,7 @@ reserved_non_modifiers:
 	| T_THROW | T_USE | T_INSTEADOF | T_GLOBAL | T_VAR | T_UNSET | T_ISSET | T_EMPTY | T_CONTINUE | T_GOTO
 	| T_FUNCTION | T_CONST | T_RETURN | T_PRINT | T_YIELD | T_LIST | T_SWITCH | T_ENDSWITCH | T_CASE | T_DEFAULT | T_BREAK
 	| T_ARRAY | T_CALLABLE | T_EXTENDS | T_IMPLEMENTS | T_NAMESPACE | T_TRAIT | T_INTERFACE | T_CLASS
-	| T_CLASS_C | T_TRAIT_C | T_FUNC_C | T_METHOD_C | T_LINE | T_FILE | T_DIR | T_NS_C | T_FN
+	| T_CLASS_C | T_TRAIT_C | T_FUNC_C | T_METHOD_C | T_LINE | T_FILE | T_DIR | T_NS_C | T_FN | T_DELEGATE
 ;
 
 semi_reserved:
@@ -317,6 +318,7 @@ top_statement:
 	|	class_declaration_statement			{ $$ = $1; }
 	|	trait_declaration_statement			{ $$ = $1; }
 	|	interface_declaration_statement		{ $$ = $1; }
+	|	delegate_declaration_statement ';'	{ $$ = $1; }
 	|	T_HALT_COMPILER '(' ')' ';'
 			{ $$ = zend_ast_create(ZEND_AST_HALT_COMPILER,
 			      zend_ast_create_zval_from_long(zend_get_scanned_file_offset()));
@@ -418,6 +420,7 @@ inner_statement:
 	|	class_declaration_statement 		{ $$ = $1; }
 	|	trait_declaration_statement			{ $$ = $1; }
 	|	interface_declaration_statement		{ $$ = $1; }
+	|	delegate_declaration_statement ';'	{ $$ = $1; }
 	|	T_HALT_COMPILER '(' ')' ';'
 			{ $$ = NULL; zend_throw_exception(zend_ce_compile_error,
 			      "__HALT_COMPILER() can only be used from the outermost scope", 0); YYERROR; }
@@ -535,6 +538,13 @@ interface_declaration_statement:
 		T_INTERFACE { $<num>$ = CG(zend_lineno); }
 		T_STRING interface_extends_list backup_doc_comment '{' class_statement_list '}'
 			{ $$ = zend_ast_create_decl(ZEND_AST_CLASS, ZEND_ACC_INTERFACE, $<num>2, $5, zend_ast_get_str($3), NULL, $4, $7, NULL); }
+;
+
+delegate_declaration_statement:
+		T_DELEGATE { $<num>$ = CG(zend_lineno); }
+		returns_ref T_STRING backup_doc_comment '(' parameter_list ')'
+		return_type backup_fn_flags
+			{ $$ = zend_ast_create_decl(ZEND_AST_DELEGATE, $3 | $10, $<num>2, $5, zend_ast_get_str($4), $7, NULL, NULL, $9); }
 ;
 
 extends_from:

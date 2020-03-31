@@ -6363,6 +6363,158 @@ void zend_compile_func_decl(znode *result, zend_ast *ast, zend_bool toplevel) /*
 }
 /* }}} */
 
+void zend_compile_delegate_decl(zend_ast *ast, zend_bool toplevel) /* {{{ */
+{
+	zend_ast_decl *decl = (zend_ast_decl *) ast;
+	zend_ast *params_ast = decl->child[0];
+	zend_ast *return_type_ast = decl->child[3];
+	zend_string *name, *lcname;
+	zend_class_entry *ce = zend_arena_alloc(&CG(arena), sizeof(zend_class_entry));
+	zend_op *opline;
+
+	zend_string *unqualified_name = decl->name;
+
+	if (CG(active_class_entry)) {
+		zend_error_noreturn(E_COMPILE_ERROR, "Delegate declarations may not be nested");
+	}
+
+	zend_assert_valid_class_name(unqualified_name);
+	name = zend_prefix_with_ns(unqualified_name);
+	name = zend_new_interned_string(name);
+	lcname = zend_string_tolower(name);
+
+	if (FC(imports)) {
+		zend_string *import_name = zend_hash_find_ptr_lc(
+			FC(imports), ZSTR_VAL(unqualified_name), ZSTR_LEN(unqualified_name));
+		if (import_name && !zend_string_equals_ci(lcname, import_name)) {
+			zend_error_noreturn(E_COMPILE_ERROR, "Cannot declare delegate %s "
+					"because the name is already in use", ZSTR_VAL(name));
+		}
+	}
+
+	zend_register_seen_symbol(lcname, ZEND_SYMBOL_CLASS);
+	lcname = zend_new_interned_string(lcname);
+
+	ce->type = ZEND_USER_CLASS;
+	ce->name = name;
+	zend_initialize_class_data(ce, 1);
+
+	if (CG(compiler_options) & ZEND_COMPILE_PRELOAD) {
+		ce->ce_flags |= ZEND_ACC_PRELOADED;
+		ZEND_MAP_PTR_NEW(ce->static_members_table);
+	}
+
+	ce->ce_flags |= decl->flags | ZEND_ACC_INTERFACE;
+	ce->info.user.filename = zend_get_compiled_filename();
+	ce->info.user.line_start = decl->start_lineno;
+	ce->info.user.line_end = decl->end_lineno;
+
+	if (decl->doc_comment) {
+		ce->info.user.doc_comment = zend_string_copy(decl->doc_comment);
+	}
+
+	ce->serialize = zend_class_serialize_deny;
+	ce->unserialize = zend_class_unserialize_deny;
+
+	CG(active_class_entry) = ce;
+
+	/* Reset lineno for final opcodes and errors */
+	CG(zend_lineno) = ast->lineno;
+
+	if (toplevel) {
+		ce->ce_flags |= ZEND_ACC_TOP_LEVEL;
+	}
+
+	if (toplevel
+		/* We currently don't early-bind classes that implement interfaces or use traits */
+	 && !(CG(compiler_options) & ZEND_COMPILE_PRELOAD)) {
+		if (EXPECTED(zend_hash_add_ptr(CG(class_table), lcname, ce) != NULL)) {
+			zend_string_release(lcname);
+			zend_build_properties_info_table(ce);
+			ce->ce_flags |= ZEND_ACC_LINKED;
+			return;
+		}
+	}
+
+	opline = get_next_op();
+
+	opline->op1_type = IS_CONST;
+	LITERAL_STR(opline->op1, lcname);
+
+	zend_string *key = zend_build_runtime_definition_key(lcname, decl->start_lineno);
+
+	/* RTD key is placed after lcname literal in op1 */
+	zend_add_literal_string(&key);
+	if (!zend_hash_add_ptr(CG(class_table), key, ce)) {
+		zend_error_noreturn(E_ERROR,
+			"Runtime definition key collision for class %s. This is a bug", ZSTR_VAL(name));
+	}
+
+	opline->opcode = ZEND_DECLARE_CLASS;
+
+	// declare __invoke here
+	zend_op_array *orig_op_array = CG(active_op_array);
+	zend_op_array *op_array2 = zend_arena_alloc(&CG(arena), sizeof(zend_op_array));
+	zend_oparray_context orig_oparray_context;
+	closure_info info;
+	memset(&info, 0, sizeof(closure_info));
+
+	init_op_array(op_array2, ZEND_USER_FUNCTION, INITIAL_OP_ARRAY_SIZE);
+
+	if (CG(compiler_options) & ZEND_COMPILE_PRELOAD) {
+		op_array2->fn_flags |= ZEND_ACC_PRELOADED;
+		ZEND_MAP_PTR_NEW(op_array2->run_time_cache);
+		ZEND_MAP_PTR_NEW(op_array2->static_variables_ptr);
+	} else {
+		ZEND_MAP_PTR_INIT(op_array2->run_time_cache, zend_arena_alloc(&CG(arena), sizeof(void*)));
+		ZEND_MAP_PTR_SET(op_array2->run_time_cache, NULL);
+	}
+
+	op_array2->fn_flags = ZEND_ACC_PUBLIC;//|= (orig_op_array->fn_flags & ZEND_ACC_STRICT_TYPES);
+	// op_array2->fn_flags |= decl->flags;
+	op_array2->line_start = decl->start_lineno;
+	op_array2->line_end = decl->end_lineno;
+	if (decl->doc_comment) {
+		op_array2->doc_comment = zend_string_copy(decl->doc_comment);
+	}
+	zend_begin_method_decl(op_array2, zend_string_init("__invoke", sizeof("__invoke")-1, 0), 0);
+
+	CG(active_op_array) = op_array2;//???????????? <--------
+
+	zend_oparray_context_begin(&orig_oparray_context);
+
+	if (CG(compiler_options) & ZEND_COMPILE_EXTENDED_STMT) {
+		zend_op *opline_ext = zend_emit_op(NULL, ZEND_EXT_NOP, NULL, NULL);
+		opline_ext->lineno = decl->start_lineno;
+	}
+
+	{
+		/* Push a separator to the loop variable stack */
+		zend_loop_var dummy_var;
+		dummy_var.opcode = ZEND_RETURN;
+
+		zend_stack_push(&CG(loop_var_stack), (void *) &dummy_var);
+	}
+
+	zend_compile_params(params_ast, return_type_ast, 0);
+
+	/* put the implicit return on the really last line */
+	CG(zend_lineno) = decl->end_lineno;
+
+	zend_do_extended_stmt();
+	zend_emit_final_return(0);
+
+	pass_two(CG(active_op_array));
+	zend_oparray_context_end(&orig_oparray_context);
+
+	/* Pop the loop variable stack separator */
+	zend_stack_del_top(&CG(loop_var_stack));
+
+	CG(active_op_array) = orig_op_array;
+	// CG(active_class_entry) = orig_class_entry;
+}
+/* }}} */
+
 void zend_compile_prop_decl(zend_ast *ast, zend_ast *type_ast, uint32_t flags) /* {{{ */
 {
 	zend_ast_list *list = zend_ast_get_list(ast);
@@ -8805,6 +8957,9 @@ void zend_compile_stmt(zend_ast *ast) /* {{{ */
 			break;
 		case ZEND_AST_CLASS:
 			zend_compile_class_decl(ast, 0);
+			break;
+		case ZEND_AST_DELEGATE:
+			zend_compile_delegate_decl(ast, 0);
 			break;
 		case ZEND_AST_GROUP_USE:
 			zend_compile_group_use(ast);

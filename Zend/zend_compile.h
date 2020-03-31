@@ -275,7 +275,10 @@ typedef struct _zend_oparray_context {
 /* Whether this class was used in its unlinked state.     |     |     |     */
 #define ZEND_ACC_HAS_UNLINKED_USES       (1 << 23) /*  X  |     |     |     */
 /*                                                        |     |     |     */
-/* Function Flags (unused: 17, 23, 26)                    |     |     |     */
+/* Class constants updated                                |     |     |     */
+#define ZEND_ACC_DELEGATE                (1 << 26) /*  X  |  X? |     |     */
+/*                                                        |     |     |     */
+/* Function Flags (unused: 17, 23)                        |     |     |     */
 /* ==============                                         |     |     |     */
 /*                                                        |     |     |     */
 /* deprecation flag                                       |     |     |     */

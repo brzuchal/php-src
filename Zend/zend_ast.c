@@ -1190,6 +1190,7 @@ static ZEND_COLD void zend_ast_export_stmt(smart_str *str, zend_ast *ast, int in
 			case ZEND_AST_FUNC_DECL:
 			case ZEND_AST_METHOD:
 			case ZEND_AST_CLASS:
+			case ZEND_AST_DELEGATE:
 			case ZEND_AST_USE_TRAIT:
 			case ZEND_AST_NAMESPACE:
 			case ZEND_AST_DECLARE:
@@ -1477,6 +1478,11 @@ tail_call:
 			}
 			smart_str_appendl(str, ZSTR_VAL(decl->name), ZSTR_LEN(decl->name));
 			zend_ast_export_class_no_header(str, decl, indent);
+			smart_str_appendc(str, '\n');
+			break;
+		case ZEND_AST_DELEGATE:
+			decl = (zend_ast_decl *) ast;
+			smart_str_appends(str, "delegate ");
 			smart_str_appendc(str, '\n');
 			break;
 
