@@ -657,6 +657,22 @@ struct _zend_ast_ref {
 #define IS_ALIAS_PTR				14
 #define _IS_ERROR					15
 
+/*
+ * Prototype runtime category for first-class collection values.
+ *
+ * The payload is currently an ordinary zend_array and the only implemented
+ * concrete collection kind is vec. The tag is deliberately generic rather than
+ * vec-specific so that further collection kinds can be introduced without
+ * consuming an additional zval runtime tag, of which there are none to spare.
+ * There is no kind discriminator yet, so this tag denotes the category only -
+ * it cannot distinguish one kind from another.
+ *
+ * The value is >= 16 because PHP has no free *real* zval tag below it: 0..11
+ * are real types and 12..15 are internal (IS_INDIRECT, IS_PTR, IS_ALIAS_PTR,
+ * _IS_ERROR).
+ */
+#define IS_COLLECTION						21
+
 /* used for casts */
 #define _IS_BOOL					18
 #define _IS_NUMBER					19
