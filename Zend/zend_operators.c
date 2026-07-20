@@ -57,7 +57,20 @@ static _locale_t current_locale = NULL;
 #define zend_tolower(c) tolower(c)
 #endif
 
-#define TYPE_PAIR(t1,t2) (((t1) << 4) | (t2))
+/* Packs two type tags into one dispatch key. Both coordinates must fit in
+ * ZEND_TYPE_PAIR_BITS and the result must be held in zend_type_pair; a narrower
+ * variable silently aliases unrelated pairs onto the same key. */
+#define ZEND_TYPE_PAIR_BITS 5
+typedef uint32_t zend_type_pair;
+#define TYPE_PAIR(t1,t2) (((zend_type_pair)(t1) << ZEND_TYPE_PAIR_BITS) | (zend_type_pair)(t2))
+
+/* Asserts the highest tag; extend when adding one above IS_COLLECTION. */
+ZEND_STATIC_ASSERT(IS_COLLECTION < (1u << ZEND_TYPE_PAIR_BITS),
+	"TYPE_PAIR: a runtime type tag no longer fits in ZEND_TYPE_PAIR_BITS");
+ZEND_STATIC_ASSERT(IS_CONSTANT_AST < (1u << ZEND_TYPE_PAIR_BITS),
+	"TYPE_PAIR: core runtime tags must fit in ZEND_TYPE_PAIR_BITS");
+ZEND_STATIC_ASSERT(sizeof(zend_type_pair) * CHAR_BIT >= 2 * ZEND_TYPE_PAIR_BITS,
+	"TYPE_PAIR: zend_type_pair is too narrow to hold both coordinates");
 
 #ifdef ZEND_INTRIN_AVX2_NATIVE
 #define HAVE_BLOCKCONV
@@ -1139,7 +1152,7 @@ static zend_never_inline void ZEND_FASTCALL add_function_array(zval *result, con
 
 static zend_always_inline zend_result add_function_fast(zval *result, zval *op1, zval *op2) /* {{{ */
 {
-	uint8_t type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
+	zend_type_pair type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
 
 	if (EXPECTED(type_pair == TYPE_PAIR(IS_LONG, IS_LONG))) {
 		fast_long_add_function(result, op1, op2);
@@ -1205,7 +1218,7 @@ ZEND_API zend_result ZEND_FASTCALL add_function(zval *result, zval *op1, zval *o
 
 static zend_always_inline zend_result sub_function_fast(zval *result, zval *op1, zval *op2) /* {{{ */
 {
-	uint8_t type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
+	zend_type_pair type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
 
 	if (EXPECTED(type_pair == TYPE_PAIR(IS_LONG, IS_LONG))) {
 		fast_long_sub_function(result, op1, op2);
@@ -1270,7 +1283,7 @@ ZEND_API zend_result ZEND_FASTCALL sub_function(zval *result, zval *op1, zval *o
 
 static zend_always_inline zend_result mul_function_fast(zval *result, zval *op1, zval *op2) /* {{{ */
 {
-	uint8_t type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
+	zend_type_pair type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
 
 	if (EXPECTED(type_pair == TYPE_PAIR(IS_LONG, IS_LONG))) {
 		zend_long overflow;
@@ -1353,7 +1366,7 @@ static double safe_pow(double base, double exponent)
 
 static zend_result ZEND_FASTCALL pow_function_base(zval *result, zval *op1, zval *op2) /* {{{ */
 {
-	uint8_t type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
+	zend_type_pair type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
 
 	if (EXPECTED(type_pair == TYPE_PAIR(IS_LONG, IS_LONG))) {
 		if (Z_LVAL_P(op2) >= 0) {
@@ -1449,7 +1462,7 @@ typedef enum {
 
 static zend_div_status ZEND_FASTCALL div_function_base(zval *result, const zval *op1, const zval *op2) /* {{{ */
 {
-	uint8_t type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
+	zend_type_pair type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
 
 	if (EXPECTED(type_pair == TYPE_PAIR(IS_LONG, IS_LONG))) {
 		if (Z_LVAL_P(op2) == 0) {
