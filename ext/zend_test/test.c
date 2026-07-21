@@ -634,6 +634,23 @@ static void zend_test_vec_release(zend_vec *vec)
 	zval_ptr_dtor(&z);
 }
 
+/* Build a vec through the only exported construction entry point. Reserving
+ * storage and installing elements are private to zend_vec.c; the invariants of
+ * that two-step path are covered by zend_vec_lifecycle_selftest() instead. */
+static zend_vec *zend_test_vec_build(zend_type t, zval *vals, uint32_t n)
+{
+	HashTable ht;
+	zend_vec *vec;
+
+	zend_hash_init(&ht, n ? n : 1, NULL, ZVAL_PTR_DTOR, 0);
+	for (uint32_t i = 0; i < n; i++) {
+		zend_hash_next_index_insert_new(&ht, &vals[i]);
+	}
+	vec = zend_vec_create(&ht, t);
+	zend_hash_destroy(&ht);
+	return vec;
+}
+
 /* Self-test for the vec runtime representation (commit: vec payload). Exercises
  * allocation, element storage, builtin and named-class element-type metadata,
  * ownership of a class-name zend_string, element destruction and empty vecs,
@@ -649,17 +666,17 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 	 *    populate and read back, destroy. */
 	{
 		zend_type int_type = ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
-		zend_vec *vec = zend_vec_alloc(3, int_type);
-		bool ok = ZEND_VEC_COUNT(vec) == 0   /* count follows installation */
-			&& (ZEND_TYPE_FULL_MASK(vec->element_type) & _ZEND_TYPE_MAY_BE_MASK)
-				== (1u << IS_LONG);
+		zval vals[3];
+		zend_vec *vec;
+		bool ok;
 
 		for (uint32_t i = 0; i < 3; i++) {
-			zval tmp;
-			ZVAL_LONG(&tmp, (zend_long) (i + 10));
-			ok = ok && zend_vec_append(vec, &tmp);
+			ZVAL_LONG(&vals[i], (zend_long) (i + 10));
 		}
-		ok = ok && ZEND_VEC_COUNT(vec) == 3;
+		vec = zend_test_vec_build(int_type, vals, 3);
+		ok = vec != NULL && ZEND_VEC_COUNT(vec) == 3
+			&& (ZEND_TYPE_FULL_MASK(vec->element_type) & _ZEND_TYPE_MAY_BE_MASK)
+				== (1u << IS_LONG);
 		for (uint32_t i = 0; i < 3; i++) {
 			ok = ok && Z_TYPE(vec->elements[i]) == IS_LONG
 				&& Z_LVAL(vec->elements[i]) == (zend_long) (i + 10);
@@ -684,7 +701,7 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 		uint32_t rc_caller = GC_REFCOUNT(foo);
 		zend_type foo_type = ZEND_TYPE_INIT_CLASS(foo, 0, 0);
 		bool ok = zend_vec_type_is_supported(foo_type);
-		zend_vec *vec = zend_vec_alloc(0, foo_type);
+		zend_vec *vec = zend_test_vec_build(foo_type, NULL, 0);
 
 		/* vec took its own reference */
 		ok = ok && GC_REFCOUNT(foo) == rc_caller + 1;
@@ -701,12 +718,12 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 	{
 		zend_string *elem = zend_string_init("elem", sizeof("elem") - 1, 0);
 		zend_type str_type = ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
-		zend_vec *vec = zend_vec_alloc(1, str_type);
+		zval tmp;
+		zend_vec *vec;
 		uint32_t rc_before;
 
-		zval tmp;
-		ZVAL_STR(&tmp, elem);
-		zend_vec_append(vec, &tmp);                    /* addref -> held by vec */
+		ZVAL_STR_COPY(&tmp, elem);
+		vec = zend_test_vec_build(str_type, &tmp, 1);  /* vec takes its own ref */
 		rc_before = GC_REFCOUNT(elem);
 		zend_test_vec_release(vec);
 		add_assoc_bool(return_value, "element_dtor",
@@ -719,14 +736,30 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 	 *    cleanly. */
 	{
 		zend_type int_type = ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
-		zend_vec *vec = zend_vec_alloc(0, int_type);
+		zend_vec *vec = zend_test_vec_build(int_type, NULL, 0);
 		bool ok = vec != NULL && ZEND_VEC_COUNT(vec) == 0;
 
 		zend_test_vec_release(vec);
 		add_assoc_bool(return_value, "empty", ok);
 	}
 
-	/* 5. Validator: reuse zend_vec_type_is_supported (do not duplicate it). */
+	/* 5. Internal construction invariants. alloc/append are private to
+	 *    zend_vec.c, so the engine runs these checks itself and reports which
+	 *    passed, rather than the API being widened for the tests. */
+	{
+		uint32_t bits = zend_vec_lifecycle_selftest();
+
+		add_assoc_bool(return_value, "alloc_starts_empty",
+			(bits & ZEND_VEC_SELFTEST_ALLOC_EMPTY) != 0);
+		add_assoc_bool(return_value, "failed_append_inert",
+			(bits & ZEND_VEC_SELFTEST_FAILED_APPEND_INERT) != 0);
+		add_assoc_bool(return_value, "destroys_only_installed",
+			(bits & ZEND_VEC_SELFTEST_ONLY_INSTALLED) != 0);
+		add_assoc_bool(return_value, "element_dtor_exactly_once",
+			(bits & ZEND_VEC_SELFTEST_DTOR_EXACTLY_ONCE) != 0);
+	}
+
+	/* 6. Validator: reuse zend_vec_type_is_supported (do not duplicate it). */
 	{
 		zend_type ok_type = ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
 		zend_type bad_type = ZEND_TYPE_INIT_CODE(IS_CALLABLE, 0, 0);

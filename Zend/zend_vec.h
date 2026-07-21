@@ -78,22 +78,23 @@ ZEND_API void zend_vec_type_copy(zend_type *dst, zend_type src);
  * zend_string. A no-op for pure masks. */
 ZEND_API void zend_vec_type_dtor(zend_type type);
 
-/* Allocate a vec with room for `capacity` elements and a count of zero. The
- * type must be supported; the vec takes its own reference to any class-name
- * metadata. Elements are installed one at a time with zend_vec_append(), which
- * is what keeps count equal to the number of initialised slots at every point,
- * so a failure part-way through can be cleaned up safely. */
-ZEND_API zend_vec *zend_vec_alloc(uint32_t capacity, zend_type element_type);
-
-/* Validate `value` against the element type and install it in the next slot,
- * raising count only after the slot is initialised. Returns false and installs
- * nothing when the value does not match. The caller must not exceed capacity. */
-ZEND_API bool zend_vec_append(zend_vec *vec, zval *value);
-
-/* Build a vec from a packed list of values. On any element failing validation
- * the partially built vec is destroyed (which touches only the slots already
- * installed) and NULL is returned. */
+/* Build a vec from a packed list of values. This is the only construction
+ * entry point: reserving storage and installing elements are private to
+ * zend_vec.c, so the capacity invariant they share cannot be violated from
+ * outside. On any element failing validation the partially built vec is
+ * destroyed, touching only the slots already installed, and NULL is returned. */
 ZEND_API zend_vec *zend_vec_create(const HashTable *values, zend_type element_type);
+
+/* Exercise the private construction path's invariants from inside the engine
+ * boundary, so they keep direct coverage without re-exporting the two-step
+ * constructor. Returns a bitmask of the checks that passed. */
+#define ZEND_VEC_SELFTEST_ALLOC_EMPTY          (1u << 0)
+#define ZEND_VEC_SELFTEST_FAILED_APPEND_INERT  (1u << 1)
+#define ZEND_VEC_SELFTEST_ONLY_INSTALLED       (1u << 2)
+#define ZEND_VEC_SELFTEST_DTOR_EXACTLY_ONCE    (1u << 3)
+#define ZEND_VEC_SELFTEST_ALL                  (0xfu)
+
+ZEND_API uint32_t zend_vec_lifecycle_selftest(void);
 
 /* Release the element type, the element zvals, and the allocation. Reached
  * through rc_dtor_func() when the refcount drops to zero. */
