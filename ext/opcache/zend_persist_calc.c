@@ -197,7 +197,15 @@ static void zend_persist_attributes_calc(HashTable *attributes)
 
 static void zend_persist_type_calc(zend_type *type)
 {
-	if (ZEND_TYPE_HAS_LIST(*type)) {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*type)) {
+		zend_collection_type *desc = ZEND_TYPE_COLLECTION(*type);
+		ADD_SIZE(ZEND_TYPE_COLLECTION_SIZE(desc->num_types));
+		for (uint32_t i = 0; i < desc->num_types; i++) {
+			zend_persist_type_calc(&desc->types[i]);
+		}
+		return;
+	}
+	if (ZEND_TYPE_IS_TYPE_LIST(*type)) {
 		ADD_SIZE(ZEND_TYPE_LIST_SIZE(ZEND_TYPE_LIST(*type)->num_types));
 	}
 

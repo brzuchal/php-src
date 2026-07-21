@@ -2944,6 +2944,29 @@ ZEND_API void zend_add_magic_method(zend_class_entry *ce, zend_function *fptr, c
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arg_info_toString, 0, 0, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
+/* Recursively intern the class names reachable from a single type node. A node
+ * may be a class name, a collection descriptor whose parameters are themselves
+ * arbitrary types (e.g. vec[vec[Foo]]), or a nested type list, so this descends
+ * through the ordinary discriminators rather than assuming a name/builtin leaf. */
+static void zend_normalize_internal_type_names(zend_type *single_type) {
+	if (ZEND_TYPE_HAS_NAME(*single_type)) {
+		zend_string *name = zend_new_interned_string(ZEND_TYPE_NAME(*single_type));
+		zend_alloc_ce_cache(name);
+		ZEND_TYPE_SET_PTR(*single_type, name);
+	} else if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*single_type)) {
+		zend_collection_type *desc = ZEND_TYPE_COLLECTION(*single_type);
+		for (uint32_t i = 0; i < desc->num_types; i++) {
+			zend_normalize_internal_type_names(&desc->types[i]);
+		}
+	} else if (ZEND_TYPE_IS_TYPE_LIST(*single_type)) {
+		zend_type *inner;
+		ZEND_TYPE_FOREACH_MUTABLE(*single_type, inner) {
+			ZEND_ASSERT(!ZEND_TYPE_HAS_LITERAL_NAME(*inner));
+			zend_normalize_internal_type_names(inner);
+		} ZEND_TYPE_FOREACH_END();
+	}
+}
+
 static zend_always_inline void zend_normalize_internal_type(zend_type *type) {
 	ZEND_ASSERT(!ZEND_TYPE_HAS_LITERAL_NAME(*type));
 	if (ZEND_TYPE_PURE_MASK(*type) != MAY_BE_ANY) {
@@ -2955,7 +2978,14 @@ static zend_always_inline void zend_normalize_internal_type(zend_type *type) {
 			zend_string *name = zend_new_interned_string(ZEND_TYPE_NAME(*current));
 			zend_alloc_ce_cache(name);
 			ZEND_TYPE_SET_PTR(*current, name);
-		} else if (ZEND_TYPE_HAS_LIST(*current)) {
+		} else if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*current)) {
+			/* Recurse so class names in nested descriptors (vec[vec[Foo]]) and
+			 * type-list parameters are interned too, not just immediate names. */
+			zend_collection_type *desc = ZEND_TYPE_COLLECTION(*current);
+			for (uint32_t i = 0; i < desc->num_types; i++) {
+				zend_normalize_internal_type_names(&desc->types[i]);
+			}
+		} else if (ZEND_TYPE_IS_TYPE_LIST(*current)) {
 			zend_type *inner;
 			ZEND_TYPE_FOREACH_MUTABLE(*current, inner) {
 				ZEND_ASSERT(!ZEND_TYPE_HAS_LITERAL_NAME(*inner) && !ZEND_TYPE_HAS_LIST(*inner));

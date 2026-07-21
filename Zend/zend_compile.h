@@ -970,6 +970,10 @@ ZEND_API void zend_destroy_file_handle(zend_file_handle *file_handle);
 ZEND_API void zend_cleanup_mutable_class_data(zend_class_entry *ce);
 ZEND_API void zend_cleanup_internal_class_data(zend_class_entry *ce);
 ZEND_API void zend_type_release(zend_type type, bool persistent);
+/* Allocate a collection type descriptor with `num_types` (> 0) uninitialised
+ * element-type slots. The caller fills types[0..num_types) and installs the
+ * descriptor with ZEND_TYPE_SET_COLLECTION. */
+ZEND_API zend_collection_type *zend_type_collection_alloc(uint32_t kind, uint32_t num_types, bool persistent);
 ZEND_API zend_string *zend_create_member_string(const zend_string *class_name, const zend_string *member_name);
 
 

@@ -1,5 +1,5 @@
 /* This is a generated file, edit test.stub.php instead.
- * Stub hash: 0c2271d1533d0d1f24f6955a2aaff0b0c1c3afa9
+ * Stub hash: 57e7f41d71c84c6c155ccdd4dd93f01e78856159
  * Has decl header: yes */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_trigger_bailout, 0, 0, IS_NEVER, 0)
@@ -134,6 +134,10 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_refcount, 0, 1, IS_LON
 ZEND_END_ARG_INFO()
 
 #define arginfo_zend_test_vec_selftest arginfo_zend_test_array_return
+
+#define arginfo_zend_test_collection_type_selftest arginfo_zend_test_array_return
+
+#define arginfo_zend_test_nested_collection_type_selftest arginfo_zend_test_array_return
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_zend_ini_parse_quantity, 0, 1, IS_LONG, 0)
 	ZEND_ARG_TYPE_INFO(0, str, IS_STRING, 0)
@@ -331,6 +335,8 @@ static ZEND_FUNCTION(zend_call_method_if_exists);
 static ZEND_FUNCTION(zend_test_call_with_consumed_args);
 static ZEND_FUNCTION(zend_test_refcount);
 static ZEND_FUNCTION(zend_test_vec_selftest);
+static ZEND_FUNCTION(zend_test_collection_type_selftest);
+static ZEND_FUNCTION(zend_test_nested_collection_type_selftest);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_quantity);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_uquantity);
 static ZEND_FUNCTION(zend_test_zend_ini_str);
@@ -466,6 +472,8 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_test_call_with_consumed_args, arginfo_zend_test_call_with_consumed_args)
 	ZEND_FE(zend_test_refcount, arginfo_zend_test_refcount)
 	ZEND_FE(zend_test_vec_selftest, arginfo_zend_test_vec_selftest)
+	ZEND_FE(zend_test_collection_type_selftest, arginfo_zend_test_collection_type_selftest)
+	ZEND_FE(zend_test_nested_collection_type_selftest, arginfo_zend_test_nested_collection_type_selftest)
 	ZEND_FE(zend_test_zend_ini_parse_quantity, arginfo_zend_test_zend_ini_parse_quantity)
 	ZEND_FE(zend_test_zend_ini_parse_uquantity, arginfo_zend_test_zend_ini_parse_uquantity)
 	ZEND_FE(zend_test_zend_ini_str, arginfo_zend_test_zend_ini_str)

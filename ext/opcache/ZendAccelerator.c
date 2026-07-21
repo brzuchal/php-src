@@ -625,7 +625,12 @@ static inline void accel_copy_permanent_list_types(
 {
 	zend_type *single_type;
 	ZEND_TYPE_FOREACH_MUTABLE(type, single_type) {
-		if (ZEND_TYPE_HAS_LIST(*single_type)) {
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*single_type)) {
+			zend_collection_type *desc = ZEND_TYPE_COLLECTION(*single_type);
+			for (uint32_t i = 0; i < desc->num_types; i++) {
+				accel_copy_permanent_list_types(new_interned_string, desc->types[i]);
+			}
+		} else if (ZEND_TYPE_IS_TYPE_LIST(*single_type)) {
 			ZEND_ASSERT(ZEND_TYPE_IS_INTERSECTION(*single_type));
 			accel_copy_permanent_list_types(new_interned_string, *single_type);
 		}

@@ -359,7 +359,21 @@ uint32_t zend_accel_get_class_name_map_ptr(zend_string *type_name)
 }
 
 static void zend_persist_type(zend_type *type) {
-	if (ZEND_TYPE_HAS_LIST(*type)) {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*type)) {
+		zend_collection_type *desc = ZEND_TYPE_COLLECTION(*type);
+		if (ZEND_TYPE_USES_ARENA(*type) || zend_accel_in_shm(desc)) {
+			desc = zend_shared_memdup_put(desc, ZEND_TYPE_COLLECTION_SIZE(desc->num_types));
+			ZEND_TYPE_FULL_MASK(*type) &= ~_ZEND_TYPE_ARENA_BIT;
+		} else {
+			desc = zend_shared_memdup_put_free(desc, ZEND_TYPE_COLLECTION_SIZE(desc->num_types));
+		}
+		ZEND_TYPE_SET_PTR(*type, desc);
+		for (uint32_t i = 0; i < desc->num_types; i++) {
+			zend_persist_type(&desc->types[i]);
+		}
+		return;
+	}
+	if (ZEND_TYPE_IS_TYPE_LIST(*type)) {
 		zend_type_list *list = ZEND_TYPE_LIST(*type);
 		if (ZEND_TYPE_USES_ARENA(*type) || zend_accel_in_shm(list)) {
 			list = zend_shared_memdup_put(list, ZEND_TYPE_LIST_SIZE(list->num_types));

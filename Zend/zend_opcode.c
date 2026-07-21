@@ -109,8 +109,24 @@ ZEND_API void destroy_zend_function(zend_function *function)
 	zend_function_dtor(&tmp);
 }
 
+ZEND_API zend_collection_type *zend_type_collection_alloc(uint32_t kind, uint32_t num_types, bool persistent) {
+	ZEND_ASSERT(num_types > 0);
+	zend_collection_type *desc = pemalloc(ZEND_TYPE_COLLECTION_SIZE(num_types), persistent);
+	desc->kind = kind;
+	desc->num_types = num_types;
+	return desc;
+}
+
 ZEND_API void zend_type_release(zend_type type, bool persistent) {
-	if (ZEND_TYPE_HAS_LIST(type)) {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
+		zend_collection_type *desc = ZEND_TYPE_COLLECTION(type);
+		for (uint32_t i = 0; i < desc->num_types; i++) {
+			zend_type_release(desc->types[i], persistent);
+		}
+		if (!ZEND_TYPE_USES_ARENA(type)) {
+			pefree(desc, persistent);
+		}
+	} else if (ZEND_TYPE_IS_TYPE_LIST(type)) {
 		zend_type *list_type;
 		ZEND_TYPE_LIST_FOREACH_MUTABLE(ZEND_TYPE_LIST(type), list_type) {
 			zend_type_release(*list_type, persistent);

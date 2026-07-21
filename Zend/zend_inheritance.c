@@ -87,8 +87,33 @@ static void zend_type_list_copy_ctor(
 	} ZEND_TYPE_LIST_FOREACH_END();
 }
 
+static void zend_type_collection_copy_ctor(
+	zend_type *const parent_type,
+	bool use_arena,
+	bool persistent
+) {
+	const zend_collection_type *const old_desc = ZEND_TYPE_COLLECTION(*parent_type);
+	size_t size = ZEND_TYPE_COLLECTION_SIZE(old_desc->num_types);
+	zend_collection_type *new_desc = use_arena
+		? zend_arena_alloc(&CG(arena), size) : pemalloc(size, persistent);
+
+	memcpy(new_desc, old_desc, size);
+	ZEND_TYPE_SET_COLLECTION(*parent_type, new_desc);
+	if (use_arena) {
+		ZEND_TYPE_FULL_MASK(*parent_type) |= _ZEND_TYPE_ARENA_BIT;
+	}
+
+	for (uint32_t i = 0; i < new_desc->num_types; i++) {
+		zend_type_copy_ctor(&new_desc->types[i], use_arena, persistent);
+	}
+}
+
+/* Keep the heap-copy semantics in sync with the test-only reference helper
+ * zend_test_deep_copy_type() in ext/zend_test/test.c. */
 static void zend_type_copy_ctor(zend_type *const type, bool use_arena, bool persistent) {
-	if (ZEND_TYPE_HAS_LIST(*type)) {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*type)) {
+		zend_type_collection_copy_ctor(type, use_arena, persistent);
+	} else if (ZEND_TYPE_IS_TYPE_LIST(*type)) {
 		zend_type_list_copy_ctor(type, use_arena, persistent);
 	} else if (ZEND_TYPE_HAS_NAME(*type)) {
 		zend_string_addref(ZEND_TYPE_NAME(*type));

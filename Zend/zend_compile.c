@@ -1446,14 +1446,51 @@ static zend_string *add_intersection_type(zend_string *str,
 	return str;
 }
 
+static const char *zend_collection_type_kind_name(uint32_t kind) {
+	switch (kind) {
+		case ZEND_COLLECTION_TYPE_VEC:
+			return "vec";
+		default:
+			return NULL;
+	}
+}
+
 zend_string *zend_type_to_string_resolved(const zend_type type, const zend_class_entry *scope) {
 	zend_string *str = NULL;
+
+	/* Collection type, e.g. vec[int]. Reuse the recursive stringifier for the
+	 * element type(s) rather than re-implementing builtin/class formatting. */
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
+		const zend_collection_type *desc = ZEND_TYPE_COLLECTION(type);
+		const char *kind_name = zend_collection_type_kind_name(desc->kind);
+
+		if (kind_name == NULL || desc->num_types == 0) {
+			return ZSTR_INIT_LITERAL("collection[?]", 0);
+		}
+
+		zend_string *inner = NULL;
+		for (uint32_t i = 0; i < desc->num_types; i++) {
+			zend_string *elem = zend_type_to_string_resolved(desc->types[i], scope);
+			if (inner == NULL) {
+				inner = elem;
+			} else {
+				zend_string *joined = zend_strpprintf(0, "%s,%s", ZSTR_VAL(inner), ZSTR_VAL(elem));
+				zend_string_release(inner);
+				zend_string_release(elem);
+				inner = joined;
+			}
+		}
+
+		zend_string *result = zend_strpprintf(0, "%s[%s]", kind_name, ZSTR_VAL(inner));
+		zend_string_release(inner);
+		return result;
+	}
 
 	/* Pure intersection type */
 	if (ZEND_TYPE_IS_INTERSECTION(type)) {
 		ZEND_ASSERT(!ZEND_TYPE_IS_UNION(type));
 		str = add_intersection_type(str, ZEND_TYPE_LIST(type), /* is_bracketed */ false);
-	} else if (ZEND_TYPE_HAS_LIST(type)) {
+	} else if (ZEND_TYPE_IS_TYPE_LIST(type)) {
 		/* A union type might not be a list */
 		const zend_type *list_type;
 		ZEND_TYPE_LIST_FOREACH(ZEND_TYPE_LIST(type), list_type) {

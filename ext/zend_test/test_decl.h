@@ -1,8 +1,8 @@
 /* This is a generated file, edit test.stub.php instead.
- * Stub hash: 0c2271d1533d0d1f24f6955a2aaff0b0c1c3afa9 */
+ * Stub hash: 57e7f41d71c84c6c155ccdd4dd93f01e78856159 */
 
-#ifndef ZEND_TEST_DECL_0c2271d1533d0d1f24f6955a2aaff0b0c1c3afa9_H
-#define ZEND_TEST_DECL_0c2271d1533d0d1f24f6955a2aaff0b0c1c3afa9_H
+#ifndef ZEND_TEST_DECL_57e7f41d71c84c6c155ccdd4dd93f01e78856159_H
+#define ZEND_TEST_DECL_57e7f41d71c84c6c155ccdd4dd93f01e78856159_H
 
 typedef enum zend_enum_ZendTestUnitEnum {
 	ZEND_ENUM_ZendTestUnitEnum_Foo = 1,
@@ -27,4 +27,4 @@ typedef enum zend_enum_ZendTestEnumWithInterface {
 	ZEND_ENUM_ZendTestEnumWithInterface_Bar = 2,
 } zend_enum_ZendTestEnumWithInterface;
 
-#endif /* ZEND_TEST_DECL_0c2271d1533d0d1f24f6955a2aaff0b0c1c3afa9_H */
+#endif /* ZEND_TEST_DECL_57e7f41d71c84c6c155ccdd4dd93f01e78856159_H */

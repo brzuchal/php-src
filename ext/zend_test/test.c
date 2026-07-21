@@ -730,6 +730,366 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 	}
 }
 
+/* Build a collection type wrapping a single element type. Ownership of any
+ * refcounted parts of `elem` transfers to the descriptor. vec has arity one. */
+static zend_type zend_test_make_collection(uint32_t kind, zend_type elem)
+{
+	zend_collection_type *desc = zend_type_collection_alloc(kind, 1, /* persistent */ false);
+	zend_type t = ZEND_TYPE_INIT_NONE(0);
+
+	desc->types[0] = elem;
+	ZEND_TYPE_SET_COLLECTION(t, desc);
+	return t;
+}
+
+/* Self-test for the collection-type descriptor (commit: internal collection
+ * type representation). Exercises the reachable lifecycle in C: construction,
+ * recursive release, class-name ownership, arena-backed release, stringification
+ * and the discriminator macros. Deep-copy via zend_type_copy_ctor and opcache
+ * persistence are NOT exercised here: both require a collection type to appear
+ * in a signature, which needs declaration syntax (a later commit). */
+static ZEND_FUNCTION(zend_test_collection_type_selftest)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	array_init(return_value);
+
+	/* 1. vec[int] construction and descriptor invariants. */
+	{
+		zend_type t = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC,
+			(zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0));
+		zend_collection_type *desc = ZEND_TYPE_COLLECTION(t);
+		bool ok = ZEND_TYPE_HAS_LIST(t)                       /* is list-shaped */
+			&& !ZEND_TYPE_IS_TYPE_LIST(t)                     /* but not a real list */
+			&& ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(t)         /* it is a collection */
+			&& desc->kind == ZEND_COLLECTION_TYPE_VEC
+			&& desc->num_types == 1
+			&& (ZEND_TYPE_FULL_MASK(desc->types[0]) & _ZEND_TYPE_MAY_BE_MASK)
+				== (1u << IS_LONG);
+		add_assoc_bool(return_value, "construction", ok);
+		zend_type_release(t, /* persistent */ false);
+	}
+
+	/* 2. vec[Foo] class-name ownership: the descriptor owns one reference to the
+	 *    element's class name, and releasing the descriptor releases exactly
+	 *    that reference (net-zero for the caller). */
+	{
+		zend_string *foo = zend_string_init("Foo", sizeof("Foo") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+		zend_type elem = ZEND_TYPE_INIT_CLASS(foo, 0, 0);
+		zend_string_addref(foo);                 /* the descriptor's own reference */
+		zend_type t = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC, elem);
+
+		bool ok = GC_REFCOUNT(foo) == rc_caller + 1;
+		zend_type_release(t, /* persistent */ false);   /* releases the descriptor's ref */
+		ok = ok && GC_REFCOUNT(foo) == rc_caller;
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "named_ownership", ok);
+	}
+
+	/* 3. Independent destruction: two descriptors over the same class name each
+	 *    own a distinct reference; releasing one does not affect the other. */
+	{
+		zend_string *foo = zend_string_init("Bar", sizeof("Bar") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+
+		zend_string_addref(foo);
+		zend_type a = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC,
+			(zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0));
+		zend_string_addref(foo);
+		zend_type b = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC,
+			(zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0));
+
+		bool ok = ZEND_TYPE_COLLECTION(a) != ZEND_TYPE_COLLECTION(b)   /* distinct */
+			&& GC_REFCOUNT(foo) == rc_caller + 2;
+		zend_type_release(a, /* persistent */ false);
+		ok = ok && GC_REFCOUNT(foo) == rc_caller + 1;   /* b's ref untouched */
+		zend_type_release(b, /* persistent */ false);
+		ok = ok && GC_REFCOUNT(foo) == rc_caller;
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "independent_destruction", ok);
+	}
+
+	/* 4. Arena-backed descriptor: releasing it must release the element's name
+	 *    but must NOT free the descriptor storage (the arena owns it). ASAN in a
+	 *    debug build proves no invalid free happens here. */
+	{
+		zend_string *foo = zend_string_init("Baz", sizeof("Baz") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+		size_t size = ZEND_TYPE_COLLECTION_SIZE(1);
+		zend_collection_type *desc = zend_arena_alloc(&CG(arena), size);
+		zend_type t = ZEND_TYPE_INIT_NONE(0);
+
+		desc->kind = ZEND_COLLECTION_TYPE_VEC;
+		desc->num_types = 1;
+		zend_string_addref(foo);
+		desc->types[0] = (zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0);
+		ZEND_TYPE_SET_COLLECTION(t, desc);
+		ZEND_TYPE_FULL_MASK(t) |= _ZEND_TYPE_ARENA_BIT;
+
+		zend_type_release(t, /* persistent */ false);   /* releases name, keeps arena mem */
+		bool ok = GC_REFCOUNT(foo) == rc_caller;        /* name ref balanced */
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "arena_release", ok);
+	}
+
+	/* 5. Stringification: vec[int] and vec[Foo]. */
+	{
+		zend_type ti = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC,
+			(zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0));
+		zend_string *si = zend_type_to_string(ti);
+		bool ok = zend_string_equals_literal(si, "vec[int]");
+		zend_string_release(si);
+		zend_type_release(ti, /* persistent */ false);
+
+		zend_string *foo = zend_string_init("Foo", sizeof("Foo") - 1, 0);
+		zend_string_addref(foo);
+		zend_type tf = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC,
+			(zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0));
+		zend_string *sf = zend_type_to_string(tf);
+		ok = ok && zend_string_equals_literal(sf, "vec[Foo]");
+		zend_string_release(sf);
+		zend_type_release(tf, /* persistent */ false);
+		zend_string_release(foo);
+
+		add_assoc_bool(return_value, "stringify", ok);
+	}
+
+	/* 6. A real union is still recognised as a type list, never a collection. */
+	{
+		zend_type_list *list = emalloc(ZEND_TYPE_LIST_SIZE(2));
+		list->num_types = 2;
+		list->types[0] = (zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
+		list->types[1] = (zend_type) ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
+		zend_type u = ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_LIST(u, list);
+		ZEND_TYPE_FULL_MASK(u) |= _ZEND_TYPE_UNION_BIT;
+
+		add_assoc_bool(return_value, "union_is_type_list",
+			ZEND_TYPE_IS_TYPE_LIST(u) && !ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(u));
+		zend_type_release(u, /* persistent */ false);
+	}
+
+	/* 7. A real intersection is still recognised as a type list. */
+	{
+		zend_string *a = zend_string_init("A", 1, 0);
+		zend_string *b = zend_string_init("B", 1, 0);
+		zend_type_list *list = emalloc(ZEND_TYPE_LIST_SIZE(2));
+		list->num_types = 2;
+		list->types[0] = (zend_type) ZEND_TYPE_INIT_CLASS(a, 0, 0);
+		list->types[1] = (zend_type) ZEND_TYPE_INIT_CLASS(b, 0, 0);
+		zend_type it = ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_LIST(it, list);
+		ZEND_TYPE_FULL_MASK(it) |= _ZEND_TYPE_INTERSECTION_BIT;
+
+		add_assoc_bool(return_value, "intersection_is_type_list",
+			ZEND_TYPE_IS_TYPE_LIST(it) && !ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(it));
+		zend_type_release(it, /* persistent */ false);   /* releases a and b */
+	}
+}
+
+/* Build vec[vec[<innermost>]] on the heap: two nested collection descriptors,
+ * the inner one held as the sole parameter of the outer. Proves the descriptor
+ * layout represents arbitrary nesting with no arity-one assumption in the
+ * generic path (only the vec kind fixes num_types == 1 per level). */
+static zend_type zend_test_make_nested_vec(zend_type innermost)
+{
+	zend_type inner = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC, innermost);
+	return zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC, inner);
+}
+
+/* Test-only reference copier that builds an independent copy of a nested
+ * collection-descriptor tree.
+ *
+ * What this is, and what it is NOT:
+ *   - It is NOT an alternative or public implementation of any engine routine.
+ *     Nothing outside this test may use it, and it must never be promoted to the
+ *     engine.
+ *   - It exists ONLY because the engine's deep-copy routine, the static
+ *     zend_type_copy_ctor() in Zend/zend_inheritance.c, is intentionally kept
+ *     private: we do not widen the engine's public surface merely to test it. A
+ *     test extension therefore cannot call it, so this helper constructs a
+ *     structurally identical, independently-owned tree instead.
+ *   - Its SOLE purpose is to produce that independent tree so the *production*
+ *     recursive infrastructure can be exercised on it (recursive release,
+ *     class-name ownership, recursive stringification; arena handling is covered
+ *     separately in scenario 5). The helper's own output is never the assertion
+ *     target -- see the note on scenario 4 below.
+ *
+ * It is composed purely from public primitives (zend_type_collection_alloc,
+ * ZEND_TYPE_SET_COLLECTION, zend_string_addref and the ZEND_TYPE_* discriminators);
+ * it does not touch any engine internal. The only thing it "mirrors" is the
+ * irreducible control flow of a deep copy -- allocate a fresh descriptor per
+ * level, recurse into every parameter, take exactly one reference on each leaf
+ * class name -- which is why it cannot be shrunk further without either baking in
+ * a vec-only arity-one assumption or losing the arity-agnostic recursion.
+ *
+ * It is expected to remain structurally equivalent to the heap branch
+ * (use_arena == false, persistent == false) of zend_type_copy_ctor(), and MUST be
+ * reviewed whenever that routine's ownership or descriptor-duplication contract
+ * changes. Divergence is low-risk: scenarios 1-3 and 5 exercise the production
+ * recursive lifecycle WITHOUT this helper, so a bug here cannot masquerade as
+ * production coverage -- at worst it fails its own scenario (4). */
+static zend_type zend_test_deep_copy_type(zend_type t)
+{
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(t)) {
+		zend_collection_type *src = ZEND_TYPE_COLLECTION(t);
+		zend_collection_type *dst =
+			zend_type_collection_alloc(src->kind, src->num_types, /* persistent */ false);
+		for (uint32_t i = 0; i < src->num_types; i++) {
+			dst->types[i] = zend_test_deep_copy_type(src->types[i]);   /* recurse */
+		}
+		zend_type out = ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_COLLECTION(out, dst);
+		return out;
+	}
+	if (ZEND_TYPE_HAS_NAME(t)) {
+		zend_string_addref(ZEND_TYPE_NAME(t));   /* the copy owns its own name reference */
+		return t;
+	}
+	return t;   /* builtin mask: plain value copy */
+}
+
+/* Regression self-test for recursively nested collection descriptors, using the
+ * internal constructors only (no parser syntax). Exercises the reachable generic
+ * lifecycle two descriptor levels deep: construction, recursive stringification,
+ * recursive release + ownership, recursive deep copy (via the test-local mirror
+ * zend_test_deep_copy_type) and recursive arena-backed release. Persistence
+ * (zend_persist_type) stays uncovered here: it is static and needs an
+ * accelerator/SHM context. */
+static ZEND_FUNCTION(zend_test_nested_collection_type_selftest)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	array_init(return_value);
+
+	/* 1. vec[vec[int]] construction: two descriptor levels, inner is itself a
+	 *    collection descriptor (not a name/builtin), innermost is the int mask. */
+	{
+		zend_type t = zend_test_make_nested_vec(
+			(zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0));
+		zend_collection_type *outer = ZEND_TYPE_COLLECTION(t);
+		bool ok = ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(t)
+			&& outer->kind == ZEND_COLLECTION_TYPE_VEC
+			&& outer->num_types == 1
+			&& ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(outer->types[0]);   /* nested! */
+		if (ok) {
+			zend_collection_type *inner = ZEND_TYPE_COLLECTION(outer->types[0]);
+			ok = inner->kind == ZEND_COLLECTION_TYPE_VEC
+				&& inner->num_types == 1
+				&& !ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(inner->types[0])
+				&& (ZEND_TYPE_FULL_MASK(inner->types[0]) & _ZEND_TYPE_MAY_BE_MASK)
+					== (1u << IS_LONG);
+		}
+		add_assoc_bool(return_value, "nested_construction", ok);
+		zend_type_release(t, /* persistent */ false);   /* recursive release */
+	}
+
+	/* 2. Recursive stringification: exactly "vec[vec[int]]". */
+	{
+		zend_type t = zend_test_make_nested_vec(
+			(zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0));
+		zend_string *s = zend_type_to_string(t);
+		add_assoc_bool(return_value, "nested_stringify",
+			zend_string_equals_literal(s, "vec[vec[int]]"));
+		zend_string_release(s);
+		zend_type_release(t, /* persistent */ false);
+	}
+
+	/* 3. Recursive release + ownership through two descriptor levels: the single
+	 *    innermost class-name reference is released by recursing outer -> inner. */
+	{
+		zend_string *foo = zend_string_init("Foo", sizeof("Foo") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+		zend_string_addref(foo);                         /* the innermost descriptor's ref */
+		zend_type t = zend_test_make_nested_vec(
+			(zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0));
+
+		bool ok = GC_REFCOUNT(foo) == rc_caller + 1;
+		zend_type_release(t, /* persistent */ false);    /* recurses two levels down */
+		ok = ok && GC_REFCOUNT(foo) == rc_caller;
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "nested_release_ownership", ok);
+	}
+
+	/* 4. Recursive deep copy. The independent tree is built by the test-local
+	 *    reference copier (zend_test_deep_copy_type, above); everything that is
+	 *    actually ASSERTED then runs through PRODUCTION code:
+	 *      - zend_type_to_string() -> zend_type_to_string_resolved(): recursive
+	 *        stringification of both descriptor levels ("vec[vec[Foo]]");
+	 *      - zend_type_release() x2: recursive release of both descriptor levels
+	 *        plus the leaf class-name reference -- the GC_REFCOUNT() checks
+	 *        (caller+2 -> caller+1 -> caller) validate its recursive ownership
+	 *        accounting and prove the two trees destroy independently.
+	 *    The pointer-inequality checks additionally require the copy to own a
+	 *    distinct descriptor at BOTH levels (deep, not shallow). */
+	{
+		zend_string *foo = zend_string_init("Foo", sizeof("Foo") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+		zend_string_addref(foo);
+		zend_type orig = zend_test_make_nested_vec(
+			(zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0));
+
+		zend_type copy = zend_test_deep_copy_type(orig);
+
+		zend_collection_type *o_out = ZEND_TYPE_COLLECTION(orig);
+		zend_collection_type *c_out = ZEND_TYPE_COLLECTION(copy);
+		zend_collection_type *o_in = ZEND_TYPE_COLLECTION(o_out->types[0]);
+		zend_collection_type *c_in = ZEND_TYPE_COLLECTION(c_out->types[0]);
+		bool ok = c_out != o_out          /* outer descriptor duplicated */
+			&& c_in != o_in               /* inner descriptor duplicated (deep) */
+			&& GC_REFCOUNT(foo) == rc_caller + 2;   /* copy owns its own name ref */
+
+		zend_string *s = zend_type_to_string(copy);
+		ok = ok && zend_string_equals_literal(s, "vec[vec[Foo]]");
+		zend_string_release(s);
+
+		zend_type_release(copy, /* persistent */ false);
+		ok = ok && GC_REFCOUNT(foo) == rc_caller + 1;   /* orig untouched */
+		zend_type_release(orig, /* persistent */ false);
+		ok = ok && GC_REFCOUNT(foo) == rc_caller;
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "nested_deep_copy", ok);
+	}
+
+	/* 5. Recursive arena-backed release: both descriptor levels live in the arena.
+	 *    Release must recurse and drop the class-name reference but free no arena
+	 *    storage (ASAN in a debug build proves there is no invalid free). */
+	{
+		zend_string *foo = zend_string_init("Baz", sizeof("Baz") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+		size_t size = ZEND_TYPE_COLLECTION_SIZE(1);
+
+		zend_collection_type *inner = zend_arena_alloc(&CG(arena), size);
+		inner->kind = ZEND_COLLECTION_TYPE_VEC;
+		inner->num_types = 1;
+		zend_string_addref(foo);
+		inner->types[0] = (zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0);
+		zend_type inner_t = ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_COLLECTION(inner_t, inner);
+		ZEND_TYPE_FULL_MASK(inner_t) |= _ZEND_TYPE_ARENA_BIT;
+
+		zend_collection_type *outer = zend_arena_alloc(&CG(arena), size);
+		outer->kind = ZEND_COLLECTION_TYPE_VEC;
+		outer->num_types = 1;
+		outer->types[0] = inner_t;              /* carries the arena bit */
+		zend_type outer_t = ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_COLLECTION(outer_t, outer);
+		ZEND_TYPE_FULL_MASK(outer_t) |= _ZEND_TYPE_ARENA_BIT;
+
+		zend_type_release(outer_t, /* persistent */ false);
+		bool ok = GC_REFCOUNT(foo) == rc_caller;   /* name released, arena kept */
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "nested_arena_release", ok);
+	}
+}
+
 static ZEND_FUNCTION(zend_get_unit_enum)
 {
 	ZEND_PARSE_PARAMETERS_NONE();

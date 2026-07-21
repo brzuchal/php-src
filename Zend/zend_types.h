@@ -127,6 +127,24 @@ typedef struct {
 	zend_type types[1];
 } zend_type_list;
 
+/* Runtime kind of a collection type. Grows as further collection types are
+ * added; the descriptor below is generic over all of them. */
+typedef enum {
+	ZEND_COLLECTION_TYPE_VEC = 0,
+} zend_collection_type_kind;
+
+/* Reified parameter of a collection type declaration such as vec[int]. Stored
+ * behind a zend_type whose _ZEND_TYPE_LIST_BIT is set but which is neither a
+ * union nor an intersection (see ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR). The
+ * layout deliberately differs from zend_type_list (a leading kind field), so a
+ * descriptor is never a valid zend_type_list and must not be read as one.
+ * Header-plus-flexible-array, like zend_type_list and zend_attribute. */
+typedef struct _zend_collection_type {
+	uint32_t  kind;        /* zend_collection_type_kind */
+	uint32_t  num_types;   /* always > 0; vec has exactly one */
+	zend_type types[1];
+} zend_collection_type;
+
 #define _ZEND_TYPE_EXTRA_FLAGS_SHIFT 25
 #define _ZEND_TYPE_MASK ((1u << 25) - 1)
 /* Only one of these bits may be set. */
@@ -164,6 +182,21 @@ typedef struct {
 
 #define ZEND_TYPE_HAS_LIST(t) \
 	((((t).type_mask) & _ZEND_TYPE_LIST_BIT) != 0)
+
+/* A list-shaped ptr that is a union or intersection type list, i.e. a real
+ * zend_type_list. This is the only shape that may be read via ZEND_TYPE_LIST().
+ * A collection descriptor also has _ZEND_TYPE_LIST_BIT set but is neither union
+ * nor intersection, so it is excluded here. */
+#define ZEND_TYPE_IS_TYPE_LIST(t) \
+	((((t).type_mask) & _ZEND_TYPE_LIST_BIT) != 0 \
+	 && (((t).type_mask) & (_ZEND_TYPE_UNION_BIT | _ZEND_TYPE_INTERSECTION_BIT)) != 0)
+
+/* A collection type descriptor (e.g. vec[int]): _ZEND_TYPE_LIST_BIT set, but
+ * neither union nor intersection. Read via ZEND_TYPE_COLLECTION(), never
+ * ZEND_TYPE_LIST(). Named to avoid collision with the IS_COLLECTION zval tag. */
+#define ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(t) \
+	((((t).type_mask) & _ZEND_TYPE_LIST_BIT) != 0 \
+	 && (((t).type_mask) & (_ZEND_TYPE_UNION_BIT | _ZEND_TYPE_INTERSECTION_BIT)) == 0)
 
 #define ZEND_TYPE_IS_ITERABLE_FALLBACK(t) \
 	((((t).type_mask) & _ZEND_TYPE_ITERABLE_BIT) != 0)
@@ -213,7 +246,7 @@ typedef struct {
  * be visited. If it's a single type, only the single type is visited. */
 #define ZEND_TYPE_FOREACH(type, type_ptr) do { \
 	const zend_type *_cur, *_end; \
-	if (ZEND_TYPE_HAS_LIST(type)) { \
+	if (ZEND_TYPE_IS_TYPE_LIST(type)) { \
 		zend_type_list *_list = ZEND_TYPE_LIST(type); \
 		_cur = _list->types; \
 		_end = _cur + _list->num_types; \
@@ -228,7 +261,7 @@ typedef struct {
 #define ZEND_TYPE_FOREACH_MUTABLE(type, type_ptr) do { \
 	zend_type *_cur; \
 	const zend_type *_end; \
-	if (ZEND_TYPE_HAS_LIST(type)) { \
+	if (ZEND_TYPE_IS_TYPE_LIST(type)) { \
 		zend_type_list *_list = ZEND_TYPE_LIST(type); \
 		_cur = _list->types; \
 		_end = _cur + _list->num_types; \
@@ -254,6 +287,21 @@ typedef struct {
 
 #define ZEND_TYPE_SET_LIST(t, list) \
 	ZEND_TYPE_SET_PTR_AND_KIND(t, list, _ZEND_TYPE_LIST_BIT)
+
+/* Read/write a collection descriptor. SET_COLLECTION stores only the list bit
+ * (no union/intersection), which is exactly the ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR
+ * shape; callers must not OR in a union or intersection bit afterwards. */
+#define ZEND_TYPE_COLLECTION(t) \
+	((zend_collection_type *) (t).ptr)
+
+#define ZEND_TYPE_SET_COLLECTION(t, desc) \
+	ZEND_TYPE_SET_PTR_AND_KIND(t, desc, _ZEND_TYPE_LIST_BIT)
+
+/* Byte size of a collection descriptor holding num_types element types. Mirrors
+ * ZEND_TYPE_LIST_SIZE / ZEND_ATTRIBUTE_SIZE. num_types must be > 0 (asserted at
+ * the construction helpers), so the (num_types - 1) term never underflows. */
+#define ZEND_TYPE_COLLECTION_SIZE(num_types) \
+	(sizeof(zend_collection_type) + ((num_types) - 1) * sizeof(zend_type))
 
 /* FULL_MASK() includes the MAY_BE_* type mask, as well as additional metadata bits.
  * The PURE_MASK() only includes the MAY_BE_* type mask. */
