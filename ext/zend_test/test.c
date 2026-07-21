@@ -29,6 +29,7 @@
 #include "zend_attributes.h"
 #include "zend_enum.h"
 #include "zend_vec.h"
+#include "zend_collection_info.h"
 #include "zend_type_info.h"
 #include "zend_interfaces.h"
 #include "zend_weakrefs.h"
@@ -1059,6 +1060,161 @@ static ZEND_FUNCTION(zend_test_vec_get)
 		RETURN_THROWS();
 	}
 	RETURN_COPY(&Z_VEC_P(v)->elements[idx]);
+}
+
+/* Structural-key hooks. These exercise the PROBE side only: a key computed by
+ * walking a raw compiler-produced zend_type tree. No interning exists yet. */
+static bool test_collection_first_param_type(zend_string *fname, zend_type *out)
+{
+	zend_string *lc = zend_string_tolower(fname);
+	zend_function *fn = zend_hash_find_ptr(EG(function_table), lc);
+	zend_string_release(lc);
+
+	if (!fn || fn->common.num_args < 1 || !fn->common.arg_info) {
+		return false;
+	}
+	*out = fn->common.arg_info[0].type;
+	return true;
+}
+
+static ZEND_FUNCTION(zend_test_collection_key)
+{
+	zend_string *fname;
+	zend_type type;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(fname)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (!test_collection_first_param_type(fname, &type)) {
+		zend_argument_value_error(1, "must name a function with at least one parameter");
+		RETURN_THROWS();
+	}
+	if (!zend_collection_key_is_supported(type)) {
+		zend_argument_value_error(1, "must name a function whose first parameter is a supported collection type");
+		RETURN_THROWS();
+	}
+	RETURN_LONG((zend_long) zend_collection_key_hash_type(type));
+}
+
+static ZEND_FUNCTION(zend_test_collection_key_supported)
+{
+	zend_string *fname;
+	zend_type type;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(fname)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (!test_collection_first_param_type(fname, &type)) {
+		zend_argument_value_error(1, "must name a function with at least one parameter");
+		RETURN_THROWS();
+	}
+	RETURN_BOOL(zend_collection_key_is_supported(type));
+}
+
+static ZEND_FUNCTION(zend_test_collection_key_positional)
+{
+	union {
+		zend_collection_type desc;
+		char buf[ZEND_TYPE_COLLECTION_SIZE(2)];
+	} first, second;
+	zend_type ta = ZEND_TYPE_INIT_NONE(0);
+	zend_type tb = ZEND_TYPE_INIT_NONE(0);
+	zend_type m_int = ZEND_TYPE_INIT_MASK(MAY_BE_LONG);
+	zend_type m_str = ZEND_TYPE_INIT_MASK(MAY_BE_STRING);
+
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	/* Stack-built, so this stays allocation-free. Member order is the only
+	 * difference between the two descriptors. */
+	first.desc.kind = 0;
+	first.desc.num_types = 2;
+	first.desc.types[0] = m_int;
+	first.desc.types[1] = m_str;
+
+	second.desc.kind = 0;
+	second.desc.num_types = 2;
+	second.desc.types[0] = m_str;
+	second.desc.types[1] = m_int;
+
+	ZEND_TYPE_SET_COLLECTION(ta, &first.desc);
+	ZEND_TYPE_SET_COLLECTION(tb, &second.desc);
+
+	array_init(return_value);
+	add_next_index_long(return_value, (zend_long) zend_collection_key_hash_type(ta));
+	add_next_index_long(return_value, (zend_long) zend_collection_key_hash_type(tb));
+}
+
+/* Provenance bits must not reach the key. Both hashes below are taken over the
+ * *same* descriptor, differing only in _ZEND_TYPE_ARENA_BIT, so an equal pair
+ * proves allocation provenance is excluded. */
+static ZEND_FUNCTION(zend_test_collection_key_provenance)
+{
+	zend_string *fname;
+	zend_type type;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(fname)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (!test_collection_first_param_type(fname, &type)
+	 || !zend_collection_key_is_supported(type)) {
+		zend_argument_value_error(1, "must name a function with a supported collection parameter");
+		RETURN_THROWS();
+	}
+
+	zend_type as_arena = type;
+	zend_type as_heap = type;
+	ZEND_TYPE_FULL_MASK(as_arena) |= _ZEND_TYPE_ARENA_BIT;
+	ZEND_TYPE_FULL_MASK(as_heap) &= ~_ZEND_TYPE_ARENA_BIT;
+
+	array_init(return_value);
+	add_next_index_long(return_value, (zend_long) zend_collection_key_hash_type(as_arena));
+	add_next_index_long(return_value, (zend_long) zend_collection_key_hash_type(as_heap));
+}
+
+/* Forms outside the supported input boundary. The compiler rejects a union
+ * inside a collection parameter today, so the only way to present one to the
+ * key logic is to build it directly. */
+static ZEND_FUNCTION(zend_test_collection_key_unsupported)
+{
+	union {
+		zend_collection_type desc;
+		char buf[ZEND_TYPE_COLLECTION_SIZE(1)];
+	} outer, empty;
+	union {
+		zend_type_list list;
+		char buf[ZEND_TYPE_LIST_SIZE(2)];
+	} members;
+	zend_type union_member = ZEND_TYPE_INIT_NONE(0);
+	zend_type with_union = ZEND_TYPE_INIT_NONE(0);
+	zend_type zero_arity = ZEND_TYPE_INIT_NONE(0);
+	zend_type plain_int = ZEND_TYPE_INIT_MASK(MAY_BE_LONG);
+	zend_type m_long = ZEND_TYPE_INIT_MASK(MAY_BE_LONG);
+	zend_type m_string = ZEND_TYPE_INIT_MASK(MAY_BE_STRING);
+
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	members.list.num_types = 2;
+	members.list.types[0] = m_long;
+	members.list.types[1] = m_string;
+	ZEND_TYPE_SET_LIST(union_member, &members.list);
+	ZEND_TYPE_FULL_MASK(union_member) |= _ZEND_TYPE_UNION_BIT;
+
+	outer.desc.kind = 0;
+	outer.desc.num_types = 1;
+	outer.desc.types[0] = union_member;
+	ZEND_TYPE_SET_COLLECTION(with_union, &outer.desc);
+
+	empty.desc.kind = 0;
+	empty.desc.num_types = 0;
+	ZEND_TYPE_SET_COLLECTION(zero_arity, &empty.desc);
+
+	array_init(return_value);
+	add_assoc_bool(return_value, "union_member", zend_collection_key_is_supported(with_union));
+	add_assoc_bool(return_value, "zero_arity", zend_collection_key_is_supported(zero_arity));
+	add_assoc_bool(return_value, "non_collection_root", zend_collection_key_is_supported(plain_int));
 }
 
 /* Regression guard for runtime type tags that sit above _ZEND_TYPE_MAY_BE_MASK.

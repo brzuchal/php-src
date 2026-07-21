@@ -1,5 +1,5 @@
 /* This is a generated file, edit test.stub.php instead.
- * Stub hash: ad0d39b86665c45a515a770df0fce2a7ad1ba706
+ * Stub hash: 4119733c8f0939091c9baa3ef353fabd6f1c5e5f
  * Has decl header: yes */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_trigger_bailout, 0, 0, IS_NEVER, 0)
@@ -155,6 +155,22 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_vec_get, 0, 2, IS_MIXE
 	ZEND_ARG_TYPE_INFO(0, vec, IS_MIXED, 0)
 	ZEND_ARG_TYPE_INFO(0, index, IS_LONG, 0)
 ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_collection_key, 0, 1, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, function, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_collection_key_supported, 0, 1, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, function, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+#define arginfo_zend_test_collection_key_positional arginfo_zend_test_array_return
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_collection_key_provenance, 0, 1, IS_ARRAY, 0)
+	ZEND_ARG_TYPE_INFO(0, function, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+#define arginfo_zend_test_collection_key_unsupported arginfo_zend_test_array_return
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_zend_ini_parse_quantity, 0, 1, IS_LONG, 0)
 	ZEND_ARG_TYPE_INFO(0, str, IS_STRING, 0)
@@ -358,6 +374,11 @@ static ZEND_FUNCTION(zend_test_type_code_alias_selftest);
 static ZEND_FUNCTION(zend_test_make_vec);
 static ZEND_FUNCTION(zend_test_vec_count);
 static ZEND_FUNCTION(zend_test_vec_get);
+static ZEND_FUNCTION(zend_test_collection_key);
+static ZEND_FUNCTION(zend_test_collection_key_supported);
+static ZEND_FUNCTION(zend_test_collection_key_positional);
+static ZEND_FUNCTION(zend_test_collection_key_provenance);
+static ZEND_FUNCTION(zend_test_collection_key_unsupported);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_quantity);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_uquantity);
 static ZEND_FUNCTION(zend_test_zend_ini_str);
@@ -499,6 +520,11 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_test_make_vec, arginfo_zend_test_make_vec)
 	ZEND_FE(zend_test_vec_count, arginfo_zend_test_vec_count)
 	ZEND_FE(zend_test_vec_get, arginfo_zend_test_vec_get)
+	ZEND_FE(zend_test_collection_key, arginfo_zend_test_collection_key)
+	ZEND_FE(zend_test_collection_key_supported, arginfo_zend_test_collection_key_supported)
+	ZEND_FE(zend_test_collection_key_positional, arginfo_zend_test_collection_key_positional)
+	ZEND_FE(zend_test_collection_key_provenance, arginfo_zend_test_collection_key_provenance)
+	ZEND_FE(zend_test_collection_key_unsupported, arginfo_zend_test_collection_key_unsupported)
 	ZEND_FE(zend_test_zend_ini_parse_quantity, arginfo_zend_test_zend_ini_parse_quantity)
 	ZEND_FE(zend_test_zend_ini_parse_uquantity, arginfo_zend_test_zend_ini_parse_uquantity)
 	ZEND_FE(zend_test_zend_ini_str, arginfo_zend_test_zend_ini_str)

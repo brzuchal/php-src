@@ -334,6 +334,25 @@ namespace {
 
     function zend_test_vec_get(mixed $vec, int $index): mixed {}
 
+    /** Structural key of the first parameter's collection descriptor. */
+    function zend_test_collection_key(string $function): int {}
+
+    function zend_test_collection_key_supported(string $function): bool {}
+
+    /**
+     * Keys of two synthetic two-member descriptors that differ only in member
+     * order, to prove positional folding. Stack-built; no arity-2 kind has
+     * syntax yet.
+     * @return array<int, int>
+     */
+    function zend_test_collection_key_positional(): array {}
+
+    /** @return array<int, int> */
+    function zend_test_collection_key_provenance(string $function): array {}
+
+    /** @return array<string, bool> */
+    function zend_test_collection_key_unsupported(): array {}
+
     function zend_test_zend_ini_parse_quantity(string $str): int {}
     function zend_test_zend_ini_parse_uquantity(string $str): int {}
 

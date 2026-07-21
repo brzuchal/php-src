@@ -73,24 +73,49 @@ typedef struct _zend_collection_info {
 #define ZEND_COLLECTION_INFO_IS_PERMANENT(info) \
 	(((info)->flags & ZEND_COLLECTION_INFO_PERMANENT) != 0)
 
-/* Promote a compiler- or extension-produced descriptor into an interned runtime
- * node. The returned pointer is borrowed and stable for the lifetime of its
- * tier; the caller must not free it. `type` is only read, never retained, so it
- * may be arena-backed, SHM-backed or caller-owned. Returns NULL if the type is
- * not a collection descriptor. */
-ZEND_API const zend_collection_info *zend_collection_info_intern(zend_type type);
+/* Canonicalization keys come in three distinct forms. They are kept separate on
+ * purpose, because collapsing them would make every intern-table lookup walk a
+ * raw zend_type tree forever:
+ *
+ *   (1) PROBE -- an incoming compiler- or extension-produced descriptor, whose
+ *       key must be computed by walking the raw zend_type tree. This is the
+ *       only tree-walking path, and it runs at most once per lookup.
+ *
+ *   (2) CANONICAL KEY -- the key of an already-interned node, cached in its
+ *       `hash` field at construction. Read via ZEND_COLLECTION_INFO_KEY(); it
+ *       is never recomputed, and no caller should ever re-derive it from the
+ *       node's members.
+ *
+ *   (3) CANONICAL EQUALITY -- equality between two already-interned nodes.
+ *       Because interning makes nodes canonical, this is pointer identity for
+ *       nested members rather than a structural walk.
+ *
+ * The first implementation shares the recursion between (1) and the collision
+ * check, but the boundary above is the contract: anything holding a
+ * zend_collection_info* is in world (2)/(3) and must not fall back to (1).
+ */
 
-/* Structural equality over runtime nodes. Nested nodes compare by pointer,
- * which is valid only because interning has already made them canonical. */
-ZEND_API bool zend_collection_info_equals(
-	const zend_collection_info *a, const zend_collection_info *b);
+/* (1) PROBE. Whether a descriptor is within the supported input boundary, and
+ * its structural key. `type` is only read, never retained, so it may be
+ * arena-backed, SHM-backed or caller-owned.
+ *
+ * Contract, mirroring zend_type_structurally_equals():
+ *     zend_type_structurally_equals(a, b)  =>  hash(a) == hash(b)
+ * The converse is not claimed; collisions are resolved by full comparison.
+ *
+ * zend_collection_key_hash_type() asserts on unsupported input: an unsupported
+ * form has no stable key, and assigning it one silently would break
+ * canonicalization rather than fail. Callers must test support first. */
+ZEND_API bool zend_collection_key_is_supported(zend_type type);
+ZEND_API zend_ulong zend_collection_key_hash_type(zend_type type);
 
-/* "vec[int]" etc., for diagnostics. Caller owns the returned string. */
-ZEND_API zend_string *zend_collection_info_to_string(const zend_collection_info *info);
+/* (2) CANONICAL KEY. Cached at construction, never recomputed. */
+#define ZEND_COLLECTION_INFO_KEY(info) ((info)->hash)
 
-void zend_collection_info_request_init(void);
-void zend_collection_info_request_shutdown(void);
-void zend_collection_info_permanent_shutdown(void);
+/* (3) CANONICAL EQUALITY, promotion, tier lifecycle and diagnostics arrive with
+ * the intern table; they are deliberately absent here because nothing can
+ * construct a node yet, and declaring an API before it can be exercised invites
+ * untested code. */
 
 END_EXTERN_C()
 
