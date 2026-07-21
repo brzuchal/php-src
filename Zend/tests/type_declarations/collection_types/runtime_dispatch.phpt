@@ -6,7 +6,11 @@ zend_test
 <?php
 zend_test_make_vec([1, 2, 3], 'int', $v);
 
-/* Debug output reports the real runtime type instead of UNKNOWN:0. */
+/* Debug output reports the real runtime type instead of UNKNOWN:0.
+ * The exact rendering below is provisional: collections have no display
+ * semantics yet, so this asserts only that the type is reported and that
+ * nothing falls through to UNKNOWN. It is not a public format, and it
+ * deliberately shows neither element count nor contents. */
 var_dump($v);
 debug_zval_dump($v);
 
@@ -18,7 +22,7 @@ foreach ([
     'string cast'=> fn() => (string) $v,
 ] as $label => $op) {
     try { $op(); echo "$label: NO ERROR\n"; }
-    catch (Error $e) { echo "$label: ", $e->getMessage(), "\n"; }
+    catch (TypeError $e) { echo "$label: ", get_class($e), ": ", $e->getMessage(), "\n"; }
 }
 
 /* Ordinary values are entirely unaffected. */
@@ -29,9 +33,9 @@ echo serialize([1, 2]), "\n";
 --EXPECT--
 vec[int]
 vec[int]
-var_export: Cannot export a collection value
-serialize: Cannot serialize a collection value
-string cast: Cannot convert a collection to string
+var_export: TypeError: Cannot export a collection value
+serialize: TypeError: Cannot serialize a collection value
+string cast: TypeError: Cannot convert a collection to string
 int(1)
 string(1) "s"
 array(1) {

@@ -1111,7 +1111,7 @@ try_again:
 			/* Collections have no string conversion. Without this arm the value
 			 * falls into ZEND_UNREACHABLE(), which aborts a debug build and is
 			 * undefined behaviour in a release build. */
-			zend_throw_error(NULL, "Cannot convert a collection to string");
+			zend_type_error("Cannot convert a collection to string");
 			return ZSTR_EMPTY_ALLOC();
 		default: ZEND_UNREACHABLE();
 	}

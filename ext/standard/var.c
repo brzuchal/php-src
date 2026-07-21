@@ -697,7 +697,7 @@ again:
 		case IS_COLLECTION:
 			/* Exporting as NULL would silently round-trip to the wrong value.
 			 * Collections have no export representation yet. */
-			zend_throw_error(NULL, "Cannot export a collection value");
+			zend_type_error("Cannot export a collection value");
 			return FAILURE;
 		default:
 			smart_str_appendl(buf, "NULL", 4);
@@ -1343,7 +1343,7 @@ again:
 		case IS_COLLECTION:
 			/* Emitting i:0; would silently round-trip a collection as integer
 			 * zero. Collections have no serialization format yet. */
-			zend_throw_error(NULL, "Cannot serialize a collection value");
+			zend_type_error("Cannot serialize a collection value");
 			return;
 		default:
 			smart_str_appendl(buf, "i:0;", 4);
