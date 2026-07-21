@@ -4022,6 +4022,16 @@ static zend_always_inline int i_zend_verify_type_assignable_zval(
 		return 1;
 	}
 
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
+		return zend_check_collection_type(&type, zv) ? 1 : 0;
+	}
+
+	if (UNEXPECTED(zv_type == IS_COLLECTION)) {
+		/* A collection has no may-be bit, so no mask can accept it. Only mixed
+		 * does, and it must never reach the scalar coercion below. */
+		return ZEND_TYPE_IS_MIXED(type) ? 1 : 0;
+	}
+
 	if (ZEND_TYPE_IS_COMPLEX(type) && zv_type == IS_OBJECT
 			&& zend_check_and_resolve_property_or_class_constant_class_type(info->ce, info->type, Z_OBJCE_P(zv))) {
 		return 1;
