@@ -1093,6 +1093,10 @@ static zend_always_inline bool i_zend_check_property_type(const zend_property_in
 		return zend_check_collection_type(&info->type, property);
 	}
 
+	if (UNEXPECTED(Z_TYPE_P(property) == IS_COLLECTION)) {
+		return ZEND_TYPE_IS_MIXED(info->type);
+	}
+
 	if (ZEND_TYPE_IS_COMPLEX(info->type) && Z_TYPE_P(property) == IS_OBJECT
 			&& zend_check_and_resolve_property_or_class_constant_class_type(info->ce, info->type, Z_OBJCE_P(property))) {
 		return 1;
@@ -1204,6 +1208,13 @@ static zend_always_inline bool zend_check_type_slow(
 {
 	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*type)) {
 		return zend_check_collection_type(type, arg);
+	}
+
+	if (UNEXPECTED(Z_TYPE_P(arg) == IS_COLLECTION)) {
+		/* A collection has no may-be bit, so no mask can accept it. Only mixed
+		 * does; object, iterable and array must keep rejecting it, and it must
+		 * never reach the scalar coercion helpers below. */
+		return ZEND_TYPE_IS_MIXED(*type);
 	}
 
 	if (ZEND_TYPE_IS_COMPLEX(*type) && EXPECTED(Z_TYPE_P(arg) == IS_OBJECT)) {
@@ -1567,6 +1578,10 @@ static zend_always_inline bool zend_check_class_constant_type(const zend_class_c
 	ZEND_ASSERT(!Z_ISREF_P(constant));
 	if (EXPECTED(ZEND_TYPE_CONTAINS_CODE(c->type, Z_TYPE_P(constant)))) {
 		return 1;
+	}
+
+	if (UNEXPECTED(Z_TYPE_P(constant) == IS_COLLECTION)) {
+		return ZEND_TYPE_IS_MIXED(c->type);
 	}
 
 	if (((ZEND_TYPE_PURE_MASK(c->type) & MAY_BE_STATIC) || ZEND_TYPE_IS_COMPLEX(c->type)) && Z_TYPE_P(constant) == IS_OBJECT

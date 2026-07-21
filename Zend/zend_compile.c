@@ -2758,7 +2758,7 @@ static void zend_emit_return_type_check(
 			}
 		}
 
-		if (expr && ZEND_TYPE_PURE_MASK(type) == MAY_BE_ANY) {
+		if (expr && ZEND_TYPE_IS_MIXED(type)) {
 			/* we don't need run-time check for mixed return type */
 			return;
 		}

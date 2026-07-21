@@ -704,21 +704,23 @@ static inheritance_status zend_perform_covariant_type_check(
 {
 	ZEND_ASSERT(ZEND_TYPE_IS_SET(fe_type) && ZEND_TYPE_IS_SET(proto_type));
 
-	/* Collection types are invariant: a descriptor is compatible only with a
-	 * structurally identical descriptor, and never with any other type shape.
-	 * Checked first so it cannot fall through the class loop, which treats an
-	 * unrecognised shape as trivially compatible. */
+	/* Apart from void, everything is trivially covariant to the mixed type.
+	 * Handle this case separately to ensure it never requires class loading.
+	 * This is deliberately tested before the collection rule below, so that a
+	 * collection narrowing a mixed prototype stays compatible. */
+	if (ZEND_TYPE_IS_MIXED(proto_type) &&
+			!ZEND_TYPE_CONTAINS_CODE(fe_type, IS_VOID)) {
+		return INHERITANCE_SUCCESS;
+	}
+
+	/* Collection types are otherwise invariant: a descriptor is compatible only
+	 * with a structurally identical descriptor, and never with any other type
+	 * shape. Checked before the class loop, which treats an unrecognised shape
+	 * as trivially compatible. */
 	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(fe_type)
 	 || ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(proto_type)) {
 		return zend_type_structurally_equals(fe_type, proto_type)
 			? INHERITANCE_SUCCESS : INHERITANCE_ERROR;
-	}
-
-	/* Apart from void, everything is trivially covariant to the mixed type.
-	 * Handle this case separately to ensure it never requires class loading. */
-	if (ZEND_TYPE_PURE_MASK(proto_type) == MAY_BE_ANY &&
-			!ZEND_TYPE_CONTAINS_CODE(fe_type, IS_VOID)) {
-		return INHERITANCE_SUCCESS;
 	}
 
 	/* Builtin types may be removed, but not added */
@@ -803,7 +805,7 @@ static inheritance_status zend_do_perform_arg_type_hint_check(
 		zend_class_entry *fe_scope, const zend_arg_info *fe_arg_info,
 		zend_class_entry *proto_scope, const zend_arg_info *proto_arg_info) /* {{{ */
 {
-	if (!ZEND_TYPE_IS_SET(fe_arg_info->type) || ZEND_TYPE_PURE_MASK(fe_arg_info->type) == MAY_BE_ANY) {
+	if (!ZEND_TYPE_IS_SET(fe_arg_info->type) || ZEND_TYPE_IS_MIXED(fe_arg_info->type)) {
 		/* Child with no type or mixed type is always compatible */
 		return INHERITANCE_SUCCESS;
 	}

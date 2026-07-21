@@ -322,6 +322,13 @@ typedef struct _zend_collection_type {
  * runtime tag that sits above the mask (IS_COLLECTION) from aliasing a structural
  * flag such as _ZEND_TYPE_ITERABLE_BIT, which occupies 1u << IS_COLLECTION. Such
  * a code is simply not contained in any mask, which is the correct answer. */
+/* `mixed` means every runtime value. Runtime type codes at or above
+ * _ZEND_TYPE_MAY_BE_MASK (currently IS_COLLECTION) have no may-be bit, so a mask
+ * test can never report them as contained; the sites that mean "accepts anything"
+ * must therefore ask this question explicitly instead of relying on the mask. */
+#define ZEND_TYPE_IS_MIXED(t) \
+	(ZEND_TYPE_PURE_MASK(t) == MAY_BE_ANY)
+
 #define ZEND_TYPE_CONTAINS_CODE(t, code) \
 	(((t).type_mask & _ZEND_TYPE_MAY_BE_MASK & (1u << (code))) != 0)
 

@@ -1508,7 +1508,7 @@ static reflection_type_kind get_type_kind(zend_type type) {
 		}
 		return NAMED_TYPE;
 	}
-	if (type_mask_without_null == MAY_BE_BOOL || ZEND_TYPE_PURE_MASK(type) == MAY_BE_ANY) {
+	if (type_mask_without_null == MAY_BE_BOOL || ZEND_TYPE_IS_MIXED(type)) {
 		return NAMED_TYPE;
 	}
 	/* Check that only one bit is set. */
@@ -1524,7 +1524,7 @@ static void reflection_type_factory(zend_type type, zval *object, bool legacy_be
 	reflection_object *intern;
 	type_reference *reference;
 	reflection_type_kind type_kind = get_type_kind(type);
-	bool is_mixed = ZEND_TYPE_PURE_MASK(type) == MAY_BE_ANY;
+	bool is_mixed = ZEND_TYPE_IS_MIXED(type);
 	bool is_only_null = (ZEND_TYPE_PURE_MASK(type) == MAY_BE_NULL && !ZEND_TYPE_IS_COMPLEX(type));
 
 	switch (type_kind) {

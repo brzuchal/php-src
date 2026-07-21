@@ -1546,7 +1546,7 @@ ZEND_API zend_result zend_update_class_constant(zend_class_constant *c, const ze
 {
 	ZEND_ASSERT(Z_TYPE(c->value) == IS_CONSTANT_AST);
 
-	if (EXPECTED(!ZEND_TYPE_IS_SET(c->type) || ZEND_TYPE_PURE_MASK(c->type) == MAY_BE_ANY)) {
+	if (EXPECTED(!ZEND_TYPE_IS_SET(c->type) || ZEND_TYPE_IS_MIXED(c->type))) {
 		return zval_update_constant_ex(&c->value, scope);
 	}
 
