@@ -231,6 +231,16 @@ again:
 			}
 			struc = Z_REFVAL_P(struc);
 			goto again;
+		case IS_COLLECTION: {
+			/* Collections have no display semantics yet. Report the real runtime
+			 * type rather than UNKNOWN:0; contents are deliberately not shown. */
+			zend_string *name = zend_zval_collection_type_name(struc);
+			php_printf("%s%s\n", COMMON, name ? ZSTR_VAL(name) : "collection");
+			if (name) {
+				zend_string_release(name);
+			}
+			break;
+		}
 		default:
 			php_printf("%sUNKNOWN:0\n", COMMON);
 			break;
@@ -425,6 +435,14 @@ PHPAPI void php_debug_zval_dump(zval *struc, int level) /* {{{ */
 		}
 		PUTS("}\n");
 		break;
+	case IS_COLLECTION: {
+		zend_string *name = zend_zval_collection_type_name(struc);
+		php_printf("%s\n", name ? ZSTR_VAL(name) : "collection");
+		if (name) {
+			zend_string_release(name);
+		}
+		break;
+	}
 	default:
 		PUTS("UNKNOWN:0\n");
 		break;
@@ -676,6 +694,11 @@ again:
 		case IS_REFERENCE:
 			struc = Z_REFVAL_P(struc);
 			goto again;
+		case IS_COLLECTION:
+			/* Exporting as NULL would silently round-trip to the wrong value.
+			 * Collections have no export representation yet. */
+			zend_throw_error(NULL, "Cannot export a collection value");
+			return FAILURE;
 		default:
 			smart_str_appendl(buf, "NULL", 4);
 			break;
@@ -1317,6 +1340,11 @@ again:
 		case IS_REFERENCE:
 			struc = Z_REFVAL_P(struc);
 			goto again;
+		case IS_COLLECTION:
+			/* Emitting i:0; would silently round-trip a collection as integer
+			 * zero. Collections have no serialization format yet. */
+			zend_throw_error(NULL, "Cannot serialize a collection value");
+			return;
 		default:
 			smart_str_appendl(buf, "i:0;", 4);
 			return;

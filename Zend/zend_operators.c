@@ -1107,6 +1107,12 @@ try_again:
 			goto try_again;
 		case IS_STRING:
 			return zend_string_copy(Z_STR_P(op));
+		case IS_COLLECTION:
+			/* Collections have no string conversion. Without this arm the value
+			 * falls into ZEND_UNREACHABLE(), which aborts a debug build and is
+			 * undefined behaviour in a release build. */
+			zend_throw_error(NULL, "Cannot convert a collection to string");
+			return ZSTR_EMPTY_ALLOC();
 		default: ZEND_UNREACHABLE();
 	}
 	return NULL;
