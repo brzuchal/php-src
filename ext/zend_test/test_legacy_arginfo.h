@@ -1,5 +1,5 @@
 /* This is a generated file, edit test.stub.php instead.
- * Stub hash: 57e7f41d71c84c6c155ccdd4dd93f01e78856159
+ * Stub hash: 30086aace3c2e31503d2812a84de237e0bd29628
  * Has decl header: yes */
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_trigger_bailout, 0, 0, 0)
@@ -122,6 +122,8 @@ ZEND_END_ARG_INFO()
 #define arginfo_zend_test_collection_type_selftest arginfo_zend_trigger_bailout
 
 #define arginfo_zend_test_nested_collection_type_selftest arginfo_zend_trigger_bailout
+
+#define arginfo_zend_test_type_code_alias_selftest arginfo_zend_trigger_bailout
 
 #define arginfo_zend_test_zend_ini_parse_quantity arginfo_zend_create_unterminated_string
 
@@ -300,6 +302,7 @@ static ZEND_FUNCTION(zend_test_refcount);
 static ZEND_FUNCTION(zend_test_vec_selftest);
 static ZEND_FUNCTION(zend_test_collection_type_selftest);
 static ZEND_FUNCTION(zend_test_nested_collection_type_selftest);
+static ZEND_FUNCTION(zend_test_type_code_alias_selftest);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_quantity);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_uquantity);
 static ZEND_FUNCTION(zend_test_zend_ini_str);
@@ -409,6 +412,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_test_vec_selftest, arginfo_zend_test_vec_selftest)
 	ZEND_FE(zend_test_collection_type_selftest, arginfo_zend_test_collection_type_selftest)
 	ZEND_FE(zend_test_nested_collection_type_selftest, arginfo_zend_test_nested_collection_type_selftest)
+	ZEND_FE(zend_test_type_code_alias_selftest, arginfo_zend_test_type_code_alias_selftest)
 	ZEND_FE(zend_test_zend_ini_parse_quantity, arginfo_zend_test_zend_ini_parse_quantity)
 	ZEND_FE(zend_test_zend_ini_parse_uquantity, arginfo_zend_test_zend_ini_parse_uquantity)
 	ZEND_FE(zend_test_zend_ini_str, arginfo_zend_test_zend_ini_str)

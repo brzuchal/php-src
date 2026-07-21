@@ -5738,7 +5738,10 @@ ZEND_VM_HOT_HANDLER(63, ZEND_RECV, NUM, UNUSED)
 
 	param = EX_VAR(opline->result.var);
 
-	if (UNEXPECTED(!(opline->op2.num & (1u << Z_TYPE_P(param))))) {
+	/* op2.num is the full type mask, so mask off everything above the may-be bits:
+	 * a runtime tag above the mask (IS_COLLECTION) would otherwise alias a
+	 * structural flag and skip verification entirely. */
+	if (UNEXPECTED(!(opline->op2.num & _ZEND_TYPE_MAY_BE_MASK & (1u << Z_TYPE_P(param))))) {
 		ZEND_VM_DISPATCH_TO_HELPER(zend_verify_recv_arg_type_helper, op_1, param);
 	}
 

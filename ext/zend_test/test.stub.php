@@ -324,6 +324,9 @@ namespace {
     /** @return array<string, bool> */
     function zend_test_nested_collection_type_selftest(): array {}
 
+    /** @return array<string, bool> */
+    function zend_test_type_code_alias_selftest(): array {}
+
     function zend_test_zend_ini_parse_quantity(string $str): int {}
     function zend_test_zend_ini_parse_uquantity(string $str): int {}
 

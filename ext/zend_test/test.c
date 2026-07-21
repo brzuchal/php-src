@@ -891,6 +891,48 @@ static ZEND_FUNCTION(zend_test_collection_type_selftest)
 	}
 }
 
+/* Regression guard for runtime type tags that sit above _ZEND_TYPE_MAY_BE_MASK.
+ * IS_COLLECTION is 21 and _ZEND_TYPE_ITERABLE_BIT is 1u << 21, so an unmasked
+ * "does this type contain that code" test reads the iterable flag instead, and an
+ * iterable declaration silently accepts a collection without verifying it. */
+static ZEND_FUNCTION(zend_test_type_code_alias_selftest)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	array_init(return_value);
+
+	/* The shape the compiler produces for `iterable`: array plus the iterable
+	 * flag. It must not report that it contains IS_COLLECTION, while still
+	 * reporting the array member it really does contain. */
+	{
+		zend_type t = (zend_type) ZEND_TYPE_INIT_MASK(
+			MAY_BE_ARRAY | _ZEND_TYPE_ITERABLE_BIT);
+		add_assoc_bool(return_value, "iterable_excludes_collection",
+			!ZEND_TYPE_CONTAINS_CODE(t, IS_COLLECTION)
+			&& ZEND_TYPE_CONTAINS_CODE(t, IS_ARRAY));
+	}
+
+	/* Every other structural flag is equally out of reach of a code test. */
+	{
+		zend_type t = (zend_type) ZEND_TYPE_INIT_MASK(
+			MAY_BE_LONG | _ZEND_TYPE_UNION_BIT | _ZEND_TYPE_ARENA_BIT);
+		add_assoc_bool(return_value, "flags_excluded",
+			ZEND_TYPE_CONTAINS_CODE(t, IS_LONG)
+			&& !ZEND_TYPE_CONTAINS_CODE(t, IS_COLLECTION));
+	}
+
+	/* Ordinary builtin codes keep answering exactly as before. */
+	{
+		zend_type mixed = (zend_type) ZEND_TYPE_INIT_CODE(IS_MIXED, 0, 0);
+		zend_type lng = (zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
+		add_assoc_bool(return_value, "builtins_unchanged",
+			ZEND_TYPE_CONTAINS_CODE(mixed, IS_LONG)
+			&& ZEND_TYPE_CONTAINS_CODE(mixed, IS_OBJECT)
+			&& ZEND_TYPE_CONTAINS_CODE(lng, IS_LONG)
+			&& !ZEND_TYPE_CONTAINS_CODE(lng, IS_STRING));
+	}
+}
+
 /* Build vec[vec[<innermost>]] on the heap: two nested collection descriptors,
  * the inner one held as the sole parameter of the outer. Proves the descriptor
  * layout represents arbitrary nesting with no arity-one assumption in the

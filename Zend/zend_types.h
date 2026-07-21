@@ -317,8 +317,13 @@ typedef struct _zend_collection_type {
 #define ZEND_TYPE_PURE_MASK_WITHOUT_NULL(t) \
 	((t).type_mask & _ZEND_TYPE_MAY_BE_MASK & ~_ZEND_TYPE_NULLABLE_BIT)
 
+/* Whether the type accepts values of the given zval type code. Only codes below
+ * _ZEND_TYPE_MAY_BE_MASK are representable as may-be bits; masking first keeps a
+ * runtime tag that sits above the mask (IS_COLLECTION) from aliasing a structural
+ * flag such as _ZEND_TYPE_ITERABLE_BIT, which occupies 1u << IS_COLLECTION. Such
+ * a code is simply not contained in any mask, which is the correct answer. */
 #define ZEND_TYPE_CONTAINS_CODE(t, code) \
-	(((t).type_mask & (1u << (code))) != 0)
+	(((t).type_mask & _ZEND_TYPE_MAY_BE_MASK & (1u << (code))) != 0)
 
 #define ZEND_TYPE_ALLOW_NULL(t) \
 	(((t).type_mask & _ZEND_TYPE_NULLABLE_BIT) != 0)
