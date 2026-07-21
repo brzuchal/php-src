@@ -627,9 +627,10 @@ static void zend_test_vec_release(zend_vec *vec)
 {
 	zval z;
 
-	ZVAL_UNDEF(&z);
-	Z_COUNTED(z) = (zend_refcounted *) vec;
-	Z_TYPE_INFO(z) = IS_COLLECTION | (IS_TYPE_REFCOUNTED << Z_TYPE_FLAGS_SHIFT);
+	/* Must go through ZVAL_VEC: a hand-built type_info that omits
+	 * IS_TYPE_COLLECTABLE would make this the one vec zval the collector cannot
+	 * see, which is exactly the invariant every other path upholds. */
+	ZVAL_VEC(&z, vec);
 	zval_ptr_dtor(&z);
 }
 
