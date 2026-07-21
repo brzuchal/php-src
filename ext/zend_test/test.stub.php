@@ -315,6 +315,9 @@ namespace {
 
     function zend_test_refcount(mixed $value): int {}
 
+    /** @return array<string, bool> */
+    function zend_test_vec_selftest(): array {}
+
     function zend_test_zend_ini_parse_quantity(string $str): int {}
     function zend_test_zend_ini_parse_uquantity(string $str): int {}
 

@@ -1,5 +1,5 @@
 /* This is a generated file, edit test.stub.php instead.
- * Stub hash: 8ca2fc33013d5a1c325bf5f0090cc6416a242297
+ * Stub hash: 0c2271d1533d0d1f24f6955a2aaff0b0c1c3afa9
  * Has decl header: yes */
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_trigger_bailout, 0, 0, 0)
@@ -116,6 +116,8 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_refcount, 0, 0, 1)
 	ZEND_ARG_INFO(0, value)
 ZEND_END_ARG_INFO()
+
+#define arginfo_zend_test_vec_selftest arginfo_zend_trigger_bailout
 
 #define arginfo_zend_test_zend_ini_parse_quantity arginfo_zend_create_unterminated_string
 
@@ -291,6 +293,7 @@ static ZEND_FUNCTION(zend_object_init_with_constructor);
 static ZEND_FUNCTION(zend_call_method_if_exists);
 static ZEND_FUNCTION(zend_test_call_with_consumed_args);
 static ZEND_FUNCTION(zend_test_refcount);
+static ZEND_FUNCTION(zend_test_vec_selftest);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_quantity);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_uquantity);
 static ZEND_FUNCTION(zend_test_zend_ini_str);
@@ -397,6 +400,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_call_method_if_exists, arginfo_zend_call_method_if_exists)
 	ZEND_FE(zend_test_call_with_consumed_args, arginfo_zend_test_call_with_consumed_args)
 	ZEND_FE(zend_test_refcount, arginfo_zend_test_refcount)
+	ZEND_FE(zend_test_vec_selftest, arginfo_zend_test_vec_selftest)
 	ZEND_FE(zend_test_zend_ini_parse_quantity, arginfo_zend_test_zend_ini_parse_quantity)
 	ZEND_FE(zend_test_zend_ini_parse_uquantity, arginfo_zend_test_zend_ini_parse_uquantity)
 	ZEND_FE(zend_test_zend_ini_str, arginfo_zend_test_zend_ini_str)

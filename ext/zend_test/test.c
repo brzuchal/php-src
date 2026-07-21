@@ -28,6 +28,8 @@
 #include "object_handlers.h"
 #include "zend_attributes.h"
 #include "zend_enum.h"
+#include "zend_vec.h"
+#include "zend_type_info.h"
 #include "zend_interfaces.h"
 #include "zend_weakrefs.h"
 #include "Zend/Optimizer/zend_optimizer.h"
@@ -617,6 +619,115 @@ static ZEND_FUNCTION(zend_test_refcount)
 	}
 
 	RETURN_LONG(Z_REFCOUNT_P(value));
+}
+
+/* Destroy a vec through the ordinary refcounted-zval path, so the GC dtor slot
+ * (rc_dtor_func -> zend_vec_destroy) is exercised, not just a direct call. */
+static void zend_test_vec_release(zend_vec *vec)
+{
+	zval z;
+
+	ZVAL_UNDEF(&z);
+	Z_COUNTED(z) = (zend_refcounted *) vec;
+	Z_TYPE_INFO(z) = IS_COLLECTION | (IS_TYPE_REFCOUNTED << Z_TYPE_FLAGS_SHIFT);
+	zval_ptr_dtor(&z);
+}
+
+/* Self-test for the vec runtime representation (commit: vec payload). Exercises
+ * allocation, element storage, builtin and named-class element-type metadata,
+ * ownership of a class-name zend_string, element destruction and empty vecs,
+ * entirely in C. Returns a map of scenario => bool so a .phpt can assert each
+ * path actually ran and passed. */
+static ZEND_FUNCTION(zend_test_vec_selftest)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	array_init(return_value);
+
+	/* 1. Builtin element type: allocate, verify count and element_type,
+	 *    populate and read back, destroy. */
+	{
+		zend_type int_type = ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
+		zend_vec *vec = zend_vec_alloc(3, int_type);
+		bool ok = ZEND_VEC_COUNT(vec) == 3
+			&& (ZEND_TYPE_FULL_MASK(vec->element_type) & _ZEND_TYPE_MAY_BE_MASK)
+				== (1u << IS_LONG);
+
+		for (uint32_t i = 0; i < 3; i++) {
+			ZVAL_LONG(&vec->elements[i], (zend_long) (i + 10));
+		}
+		for (uint32_t i = 0; i < 3; i++) {
+			ok = ok && Z_TYPE(vec->elements[i]) == IS_LONG
+				&& Z_LVAL(vec->elements[i]) == (zend_long) (i + 10);
+		}
+		zend_test_vec_release(vec);
+		add_assoc_bool(return_value, "builtin", ok);
+	}
+
+	/* 2. Named-class element type: balanced ownership. The vec takes its own
+	 *    reference to the class-name string; destroying the vec releases
+	 *    exactly that reference and no other; the caller's reference remains
+	 *    valid afterward.
+	 *
+	 *    A request-local, non-interned string is used so the addref/release is
+	 *    observable (interned strings would no-op). The exact refcount values
+	 *    below are an internal white-box check of that balance, not a public or
+	 *    architectural contract: the invariant being verified is that ownership
+	 *    is balanced (net zero across the vec's lifetime), whatever the caller's
+	 *    starting refcount happens to be. */
+	{
+		zend_string *foo = zend_string_init("Foo", sizeof("Foo") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+		zend_type foo_type = ZEND_TYPE_INIT_CLASS(foo, 0, 0);
+		bool ok = zend_vec_type_is_supported(foo_type);
+		zend_vec *vec = zend_vec_alloc(0, foo_type);
+
+		/* vec took its own reference */
+		ok = ok && GC_REFCOUNT(foo) == rc_caller + 1;
+		zend_test_vec_release(vec);
+		/* vec released exactly the reference it owned; caller's ref survives */
+		ok = ok && GC_REFCOUNT(foo) == rc_caller;
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "named_ownership", ok);
+	}
+
+	/* 3. Element destruction: destroying a vec must release a refcounted
+	 *    element (a request-local string) exactly once. */
+	{
+		zend_string *elem = zend_string_init("elem", sizeof("elem") - 1, 0);
+		zend_type str_type = ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
+		zend_vec *vec = zend_vec_alloc(1, str_type);
+		uint32_t rc_before;
+
+		ZVAL_STR_COPY(&vec->elements[0], elem);        /* addref -> held by vec */
+		rc_before = GC_REFCOUNT(elem);
+		zend_test_vec_release(vec);
+		add_assoc_bool(return_value, "element_dtor",
+			GC_REFCOUNT(elem) == rc_before - 1);
+
+		zend_string_release(elem);
+	}
+
+	/* 4. Empty vec: count == 0 must allocate a valid header and destroy
+	 *    cleanly. */
+	{
+		zend_type int_type = ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
+		zend_vec *vec = zend_vec_alloc(0, int_type);
+		bool ok = vec != NULL && ZEND_VEC_COUNT(vec) == 0;
+
+		zend_test_vec_release(vec);
+		add_assoc_bool(return_value, "empty", ok);
+	}
+
+	/* 5. Validator: reuse zend_vec_type_is_supported (do not duplicate it). */
+	{
+		zend_type ok_type = ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
+		zend_type bad_type = ZEND_TYPE_INIT_CODE(IS_CALLABLE, 0, 0);
+		add_assoc_bool(return_value, "validator",
+			zend_vec_type_is_supported(ok_type)
+			&& !zend_vec_type_is_supported(bad_type));
+	}
 }
 
 static ZEND_FUNCTION(zend_get_unit_enum)
