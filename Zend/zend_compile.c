@@ -1446,13 +1446,40 @@ static zend_string *add_intersection_type(zend_string *str,
 	return str;
 }
 
-static const char *zend_collection_type_kind_name(uint32_t kind) {
-	switch (kind) {
-		case ZEND_COLLECTION_TYPE_VEC:
-			return "vec";
-		default:
-			return NULL;
+/* The collection kinds the language accepts in a type declaration. The head name
+ * is matched here rather than reserved in the grammar, so `vec` remains an
+ * ordinary identifier everywhere else. Adding map/tuple/shape is a table entry. */
+typedef struct {
+	const char *name;
+	size_t      name_len;
+	uint32_t    kind;
+	uint32_t    num_types;   /* required arity of the parameter list */
+} zend_collection_type_info;
+
+static const zend_collection_type_info collection_type_infos[] = {
+	{ZEND_STRL("vec"), ZEND_COLLECTION_TYPE_VEC, 1},
+	{NULL, 0, 0, 0}
+};
+
+ZEND_API const char *zend_collection_type_kind_name(uint32_t kind) {
+	for (const zend_collection_type_info *info = collection_type_infos; info->name; info++) {
+		if (info->kind == kind) {
+			return info->name;
+		}
 	}
+	return NULL;
+}
+
+static const zend_collection_type_info *zend_lookup_collection_type_by_name(
+		const zend_string *name) {
+	for (const zend_collection_type_info *info = collection_type_infos; info->name; info++) {
+		if (ZSTR_LEN(name) == info->name_len
+		 && zend_binary_strcasecmp(ZSTR_VAL(name), ZSTR_LEN(name),
+				info->name, info->name_len) == 0) {
+			return info;
+		}
+	}
+	return NULL;
 }
 
 zend_string *zend_type_to_string_resolved(const zend_type type, const zend_class_entry *scope) {
@@ -1481,7 +1508,9 @@ zend_string *zend_type_to_string_resolved(const zend_type type, const zend_class
 			}
 		}
 
-		zend_string *result = zend_strpprintf(0, "%s[%s]", kind_name, ZSTR_VAL(inner));
+		zend_string *result = ZEND_TYPE_ALLOW_NULL(type)
+			? zend_strpprintf(0, "?%s[%s]", kind_name, ZSTR_VAL(inner))
+			: zend_strpprintf(0, "%s[%s]", kind_name, ZSTR_VAL(inner));
 		zend_string_release(inner);
 		return result;
 	}
@@ -7570,6 +7599,48 @@ static void zend_is_type_list_redundant_by_single_type(const zend_type_list *typ
 
 static zend_type zend_compile_typename(zend_ast *ast);
 
+static zend_type zend_compile_typename(zend_ast *ast);
+
+/* Compile a parameterized collection type such as vec[int]. Parameters are
+ * compiled through the ordinary type compiler, so nesting (vec[vec[int]]),
+ * nullable parameters and class parameters all work without special cases. */
+static zend_type zend_compile_collection_typename(zend_ast *ast)
+{
+	zend_ast *name_ast = ast->child[0];
+	const zend_ast_list *args = zend_ast_get_list(ast->child[1]);
+	zend_string *name = zend_ast_get_str(name_ast);
+
+	if ((name_ast->attr & ZEND_NAME_NOT_FQ) != ZEND_NAME_NOT_FQ) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Collection type \"%s\" must be unqualified", ZSTR_VAL(name));
+	}
+
+	const zend_collection_type_info *info = zend_lookup_collection_type_by_name(name);
+	if (info == NULL) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Unknown collection type \"%s\"", ZSTR_VAL(name));
+	}
+	if (args->children != info->num_types) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Collection type %s expects %u parameter%s, %u given",
+			info->name, info->num_types, info->num_types == 1 ? "" : "s",
+			args->children);
+	}
+
+	zend_collection_type *desc = zend_arena_alloc(&CG(arena),
+		ZEND_TYPE_COLLECTION_SIZE(args->children));
+	desc->kind = info->kind;
+	desc->num_types = args->children;
+	for (uint32_t i = 0; i < args->children; i++) {
+		desc->types[i] = zend_compile_typename(args->child[i]);
+	}
+
+	zend_type type = ZEND_TYPE_INIT_NONE(0);
+	ZEND_TYPE_SET_COLLECTION(type, desc);
+	ZEND_TYPE_FULL_MASK(type) |= _ZEND_TYPE_ARENA_BIT;
+	return type;
+}
+
 static zend_type zend_compile_typename_ex(
 		zend_ast *ast, bool force_allow_null, bool *forced_allow_null) /* {{{ */
 {
@@ -7581,7 +7652,9 @@ static zend_type zend_compile_typename_ex(
 		ast->attr &= ~ZEND_TYPE_NULLABLE;
 	}
 
-	if (ast->kind == ZEND_AST_TYPE_UNION) {
+	if (ast->kind == ZEND_AST_TYPE_COLLECTION) {
+		type = zend_compile_collection_typename(ast);
+	} else if (ast->kind == ZEND_AST_TYPE_UNION) {
 		const zend_ast_list *list = zend_ast_get_list(ast);
 		zend_type_list *type_list;
 		bool is_composite = false;
@@ -7625,6 +7698,12 @@ static zend_type zend_compile_typename_ex(
 					zend_is_intersection_type_redundant_by_single_type(single_type, type_list->types[i]);
 				}
 				continue;
+			}
+
+			if (type_ast->kind == ZEND_AST_TYPE_COLLECTION) {
+				zend_error_noreturn(E_COMPILE_ERROR,
+					"Collection type cannot be part of a union type; "
+					"write ?vec[...] for a nullable collection");
 			}
 
 			single_type = zend_compile_single_typename(type_ast);
@@ -7710,6 +7789,10 @@ static zend_type zend_compile_typename_ex(
 
 		for (uint32_t i = 0; i < list->children; i++) {
 			zend_ast *type_ast = list->child[i];
+			if (type_ast->kind == ZEND_AST_TYPE_COLLECTION) {
+				zend_error_noreturn(E_COMPILE_ERROR,
+					"Collection type cannot be part of an intersection type");
+			}
 			zend_type single_type = zend_compile_single_typename(type_ast);
 
 			/* An intersection of union types cannot exist so invalidate it

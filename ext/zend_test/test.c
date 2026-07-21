@@ -891,6 +891,51 @@ static ZEND_FUNCTION(zend_test_collection_type_selftest)
 	}
 }
 
+/* Test-only factory producing a real vec value, so PHPT coverage can exercise the
+ * accepting side of a vec[T] declaration and not only rejection. There is no
+ * literal syntax yet; this is scaffolding, not a language feature. */
+static ZEND_FUNCTION(zend_test_make_vec)
+{
+	HashTable *values;
+	zend_string *type_name;
+	zval *out;
+	zend_type element_type;
+
+	ZEND_PARSE_PARAMETERS_START(3, 3)
+		Z_PARAM_ARRAY_HT(values)
+		Z_PARAM_STR(type_name)
+		Z_PARAM_ZVAL(out)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (zend_string_equals_literal(type_name, "int")) {
+		element_type = (zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
+	} else if (zend_string_equals_literal(type_name, "float")) {
+		element_type = (zend_type) ZEND_TYPE_INIT_CODE(IS_DOUBLE, 0, 0);
+	} else if (zend_string_equals_literal(type_name, "string")) {
+		element_type = (zend_type) ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
+	} else {
+		zend_argument_value_error(2, "must be one of \"int\", \"float\", or \"string\"");
+		RETURN_THROWS();
+	}
+
+	zend_vec *vec = zend_vec_alloc(zend_hash_num_elements(values), element_type);
+	uint32_t i = 0;
+	zval *entry;
+	ZEND_HASH_FOREACH_VAL(values, entry) {
+		ZVAL_COPY(&vec->elements[i++], entry);
+	} ZEND_HASH_FOREACH_END();
+
+	/* Written through an untyped by-ref out parameter: a collection is not
+	 * `mixed`, so it cannot be returned through a declared internal return type. */
+	zval vec_zv;
+	Z_COUNTED(vec_zv) = (zend_refcounted *) vec;
+	Z_TYPE_INFO(vec_zv) = IS_COLLECTION | (IS_TYPE_REFCOUNTED << Z_TYPE_FLAGS_SHIFT);
+
+	ZVAL_DEREF(out);
+	zval_ptr_dtor(out);
+	ZVAL_COPY_VALUE(out, &vec_zv);
+}
+
 /* Regression guard for runtime type tags that sit above _ZEND_TYPE_MAY_BE_MASK.
  * IS_COLLECTION is 21 and _ZEND_TYPE_ITERABLE_BIT is 1u << 21, so an unmasked
  * "does this type contain that code" test reads the iterable flag instead, and an

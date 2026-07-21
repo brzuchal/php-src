@@ -28,6 +28,7 @@
 #include "zend_API.h"
 #include "zend_ptr_stack.h"
 #include "zend_constants.h"
+#include "zend_vec.h"
 #include "zend_extensions.h"
 #include "zend_ini.h"
 #include "zend_exceptions.h"
@@ -1002,7 +1003,11 @@ static bool zend_check_intersection_for_property_or_class_constant_class_type(
 
 static bool zend_check_and_resolve_property_or_class_constant_class_type(
 	const zend_class_entry *scope, const zend_type member_type, const zend_class_entry *value_ce) {
-	if (ZEND_TYPE_HAS_LIST(member_type)) {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member_type)) {
+		/* Never satisfied by a class instance. */
+		return false;
+	}
+	if (ZEND_TYPE_IS_TYPE_LIST(member_type)) {
 		if (ZEND_TYPE_IS_INTERSECTION(member_type)) {
 			return zend_check_intersection_for_property_or_class_constant_class_type(
 				scope, ZEND_TYPE_LIST(member_type), value_ce);
@@ -1039,11 +1044,32 @@ static bool zend_check_and_resolve_property_or_class_constant_class_type(
 	return false;
 }
 
+/* A collection type is satisfied only by a collection value whose own element
+ * type is structurally identical to the declared parameter: compatibility is
+ * invariant. Never routed through the class or scalar paths. */
+static bool zend_check_collection_type(const zend_type *type, const zval *arg)
+{
+	const zend_collection_type *desc = ZEND_TYPE_COLLECTION(*type);
+
+	if (Z_TYPE_P(arg) != IS_COLLECTION) {
+		return false;
+	}
+	/* vec is the only kind, and carries exactly one element type on the value. */
+	if (desc->kind != ZEND_COLLECTION_TYPE_VEC || desc->num_types != 1) {
+		return false;
+	}
+	return zend_type_structurally_equals(Z_VEC_P(arg)->element_type, desc->types[0]);
+}
+
 static zend_always_inline bool i_zend_check_property_type(const zend_property_info *info, zval *property, bool strict)
 {
 	ZEND_ASSERT(!Z_ISREF_P(property));
 	if (EXPECTED(ZEND_TYPE_CONTAINS_CODE(info->type, Z_TYPE_P(property)))) {
 		return 1;
+	}
+
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(info->type)) {
+		return zend_check_collection_type(&info->type, property);
 	}
 
 	if (ZEND_TYPE_IS_COMPLEX(info->type) && Z_TYPE_P(property) == IS_OBJECT
@@ -1155,9 +1181,13 @@ static zend_always_inline bool zend_check_type_slow(
 		const zend_type *type, zval *arg, const zend_reference *ref,
 		bool is_return_type, bool is_internal)
 {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*type)) {
+		return zend_check_collection_type(type, arg);
+	}
+
 	if (ZEND_TYPE_IS_COMPLEX(*type) && EXPECTED(Z_TYPE_P(arg) == IS_OBJECT)) {
 		zend_class_entry *ce;
-		if (UNEXPECTED(ZEND_TYPE_HAS_LIST(*type))) {
+		if (UNEXPECTED(ZEND_TYPE_IS_TYPE_LIST(*type))) {
 			if (ZEND_TYPE_IS_INTERSECTION(*type)) {
 				return zend_check_intersection_type_from_list(ZEND_TYPE_LIST(*type), Z_OBJCE_P(arg));
 			} else {

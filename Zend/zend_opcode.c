@@ -117,6 +117,54 @@ ZEND_API zend_collection_type *zend_type_collection_alloc(uint32_t kind, uint32_
 	return desc;
 }
 
+/* Structural identity of two types. Collection compatibility is invariant, so
+ * this is the comparison the inheritance and runtime checks use; it recurses
+ * through descriptors and type lists rather than comparing payload pointers. */
+ZEND_API bool zend_type_structurally_equals(zend_type a, zend_type b) {
+	if (ZEND_TYPE_PURE_MASK(a) != ZEND_TYPE_PURE_MASK(b)) {
+		return false;
+	}
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(a) || ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(b)) {
+		if (!ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(a) || !ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(b)) {
+			return false;
+		}
+		const zend_collection_type *da = ZEND_TYPE_COLLECTION(a);
+		const zend_collection_type *db = ZEND_TYPE_COLLECTION(b);
+		if (da->kind != db->kind || da->num_types != db->num_types) {
+			return false;
+		}
+		for (uint32_t i = 0; i < da->num_types; i++) {
+			if (!zend_type_structurally_equals(da->types[i], db->types[i])) {
+				return false;
+			}
+		}
+		return true;
+	}
+	if (ZEND_TYPE_IS_TYPE_LIST(a) || ZEND_TYPE_IS_TYPE_LIST(b)) {
+		if (!ZEND_TYPE_IS_TYPE_LIST(a) || !ZEND_TYPE_IS_TYPE_LIST(b)) {
+			return false;
+		}
+		const zend_type_list *la = ZEND_TYPE_LIST(a);
+		const zend_type_list *lb = ZEND_TYPE_LIST(b);
+		if (la->num_types != lb->num_types) {
+			return false;
+		}
+		for (uint32_t i = 0; i < la->num_types; i++) {
+			if (!zend_type_structurally_equals(la->types[i], lb->types[i])) {
+				return false;
+			}
+		}
+		return true;
+	}
+	if (ZEND_TYPE_HAS_NAME(a) || ZEND_TYPE_HAS_NAME(b)) {
+		if (!ZEND_TYPE_HAS_NAME(a) || !ZEND_TYPE_HAS_NAME(b)) {
+			return false;
+		}
+		return zend_string_equals_ci(ZEND_TYPE_NAME(a), ZEND_TYPE_NAME(b));
+	}
+	return true;
+}
+
 ZEND_API void zend_type_release(zend_type type, bool persistent) {
 	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
 		zend_collection_type *desc = ZEND_TYPE_COLLECTION(type);

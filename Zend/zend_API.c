@@ -125,6 +125,10 @@ ZEND_API const char *zend_get_type_by_const(int type) /* {{{ */
 			return "mixed";
 		case _IS_NUMBER:
 			return "int|float";
+		case IS_COLLECTION:
+			/* The kind and its parameters are not recoverable from a bare type
+			 * code; callers wanting vec[int] use zend_type_to_string(). */
+			return "collection";
 		default: ZEND_UNREACHABLE();
 	}
 }

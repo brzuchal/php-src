@@ -614,7 +614,14 @@ static zend_string *get_class_from_type(const zend_class_entry *scope, const zen
 static void register_unresolved_classes(zend_class_entry *scope, const zend_type type) {
 	const zend_type *single_type;
 	ZEND_TYPE_FOREACH(type, single_type) {
-		if (ZEND_TYPE_HAS_LIST(*single_type)) {
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*single_type)) {
+			const zend_collection_type *desc = ZEND_TYPE_COLLECTION(*single_type);
+			for (uint32_t i = 0; i < desc->num_types; i++) {
+				register_unresolved_classes(scope, desc->types[i]);
+			}
+			continue;
+		}
+		if (ZEND_TYPE_IS_TYPE_LIST(*single_type)) {
 			register_unresolved_classes(scope, *single_type);
 			continue;
 		}
@@ -696,6 +703,16 @@ static inheritance_status zend_perform_covariant_type_check(
 		zend_class_entry *proto_scope, const zend_type proto_type)
 {
 	ZEND_ASSERT(ZEND_TYPE_IS_SET(fe_type) && ZEND_TYPE_IS_SET(proto_type));
+
+	/* Collection types are invariant: a descriptor is compatible only with a
+	 * structurally identical descriptor, and never with any other type shape.
+	 * Checked first so it cannot fall through the class loop, which treats an
+	 * unrecognised shape as trivially compatible. */
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(fe_type)
+	 || ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(proto_type)) {
+		return zend_type_structurally_equals(fe_type, proto_type)
+			? INHERITANCE_SUCCESS : INHERITANCE_ERROR;
+	}
 
 	/* Apart from void, everything is trivially covariant to the mixed type.
 	 * Handle this case separately to ensure it never requires class loading. */

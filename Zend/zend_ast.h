@@ -69,6 +69,7 @@ enum _zend_ast_kind {
 	ZEND_AST_ATTRIBUTE_GROUP,
 	ZEND_AST_MATCH_ARM_LIST,
 	ZEND_AST_MODIFIER_LIST,
+	ZEND_AST_TYPE_COLLECTION_ARGS,
 
 	/* 0 child nodes */
 	ZEND_AST_MAGIC_CONST = 0 << ZEND_AST_NUM_CHILDREN_SHIFT,
@@ -153,6 +154,9 @@ enum _zend_ast_kind {
 	ZEND_AST_MATCH_ARM,
 	ZEND_AST_NAMED_ARG,
 	ZEND_AST_PIPE,
+	/* Parameterized collection type, e.g. vec[int]: child 0 is the kind name,
+	 * child 1 is the ZEND_AST_TYPE_COLLECTION_ARGS list of parameter types. */
+	ZEND_AST_TYPE_COLLECTION,
 
 	/* 3 child nodes */
 	ZEND_AST_METHOD_CALL = 3 << ZEND_AST_NUM_CHILDREN_SHIFT,

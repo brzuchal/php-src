@@ -88,6 +88,7 @@ PHPAPI zend_class_entry *reflection_type_ptr;
 PHPAPI zend_class_entry *reflection_named_type_ptr;
 PHPAPI zend_class_entry *reflection_intersection_type_ptr;
 PHPAPI zend_class_entry *reflection_union_type_ptr;
+PHPAPI zend_class_entry *reflection_collection_type_ptr;
 PHPAPI zend_class_entry *reflection_class_ptr;
 PHPAPI zend_class_entry *reflection_object_ptr;
 PHPAPI zend_class_entry *reflection_method_ptr;
@@ -1472,7 +1473,8 @@ static void reflection_parameter_factory(zend_function *fptr, zval *closure_obje
 typedef enum {
 	NAMED_TYPE = 0,
 	UNION_TYPE = 1,
-	INTERSECTION_TYPE = 2
+	INTERSECTION_TYPE = 2,
+	COLLECTION_TYPE = 3
 } reflection_type_kind;
 
 /* For backwards compatibility reasons, we need to return T|null style unions
@@ -1482,7 +1484,13 @@ typedef enum {
 static reflection_type_kind get_type_kind(zend_type type) {
 	uint32_t type_mask_without_null = ZEND_TYPE_PURE_MASK_WITHOUT_NULL(type);
 
-	if (ZEND_TYPE_HAS_LIST(type)) {
+	/* A collection descriptor is list-shaped but is neither a union nor an
+	 * intersection; it must never be read as a zend_type_list. */
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
+		return COLLECTION_TYPE;
+	}
+
+	if (ZEND_TYPE_IS_TYPE_LIST(type)) {
 		if (ZEND_TYPE_IS_INTERSECTION(type)) {
 			return INTERSECTION_TYPE;
 		}
@@ -1525,6 +1533,9 @@ static void reflection_type_factory(zend_type type, zval *object, bool legacy_be
 			break;
 		case UNION_TYPE:
 			object_init_ex(object, reflection_union_type_ptr);
+			break;
+		case COLLECTION_TYPE:
+			object_init_ex(object, reflection_collection_type_ptr);
 			break;
 		case NAMED_TYPE:
 			object_init_ex(object, reflection_named_type_ptr);
@@ -3181,7 +3192,7 @@ ZEND_METHOD(ReflectionUnionType, getTypes)
 	GET_REFLECTION_OBJECT_PTR(param);
 
 	array_init(return_value);
-	if (ZEND_TYPE_HAS_LIST(param->type)) {
+	if (ZEND_TYPE_IS_TYPE_LIST(param->type)) {
 		const zend_type *list_type;
 		ZEND_TYPE_LIST_FOREACH(ZEND_TYPE_LIST(param->type), list_type) {
 			append_type(return_value, *list_type);
@@ -3238,13 +3249,49 @@ ZEND_METHOD(ReflectionIntersectionType, getTypes)
 	ZEND_PARSE_PARAMETERS_NONE();
 	GET_REFLECTION_OBJECT_PTR(param);
 
-	ZEND_ASSERT(ZEND_TYPE_HAS_LIST(param->type));
+	ZEND_ASSERT(ZEND_TYPE_IS_TYPE_LIST(param->type));
 
 	array_init(return_value);
 	ZEND_TYPE_LIST_FOREACH(ZEND_TYPE_LIST(param->type), list_type) {
 		append_type(return_value, *list_type);
 	} ZEND_TYPE_LIST_FOREACH_END();
 }
+
+/* {{{ Returns the source-level name of the collection kind, e.g. "vec" */
+ZEND_METHOD(ReflectionCollectionType, getCollectionName)
+{
+	reflection_object *intern;
+	type_reference *param;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(param);
+
+	ZEND_ASSERT(ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(param->type));
+	const char *name = zend_collection_type_kind_name(
+		ZEND_TYPE_COLLECTION(param->type)->kind);
+
+	RETURN_STRING(name ? name : "collection");
+}
+/* }}} */
+
+/* {{{ Returns the parameter types of the collection type */
+ZEND_METHOD(ReflectionCollectionType, getTypes)
+{
+	reflection_object *intern;
+	type_reference *param;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(param);
+
+	ZEND_ASSERT(ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(param->type));
+	const zend_collection_type *desc = ZEND_TYPE_COLLECTION(param->type);
+
+	array_init(return_value);
+	for (uint32_t i = 0; i < desc->num_types; i++) {
+		append_type(return_value, desc->types[i]);
+	}
+}
+/* }}} */
 /* }}} */
 
 /* {{{ Constructor. Throws an Exception in case the given method does not exist */
@@ -8246,6 +8293,7 @@ PHP_MINIT_FUNCTION(reflection) /* {{{ */
 	reflection_union_type_ptr->default_object_handlers = &reflection_object_handlers;
 
 	reflection_intersection_type_ptr = register_class_ReflectionIntersectionType(reflection_type_ptr);
+	reflection_collection_type_ptr = register_class_ReflectionCollectionType(reflection_type_ptr);
 	reflection_intersection_type_ptr->create_object = reflection_objects_new;
 	reflection_intersection_type_ptr->default_object_handlers = &reflection_object_handlers;
 

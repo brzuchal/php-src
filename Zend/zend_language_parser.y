@@ -278,6 +278,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %type <ast> lexical_var_list encaps_list
 %type <ast> array_pair non_empty_array_pair_list array_pair_list possible_array_pair
 %type <ast> isset_variable type return_type type_expr type_without_static
+%type <ast> collection_type_args
 %type <ast> identifier type_expr_without_static union_type_without_static_element union_type_without_static intersection_type_without_static
 %type <ast> inline_function union_type_element union_type intersection_type
 %type <ast> attributed_statement attributed_top_statement attributed_class_statement attributed_parameter
@@ -873,6 +874,17 @@ type_without_static:
 		T_ARRAY		{ $$ = zend_ast_create_ex(ZEND_AST_TYPE, IS_ARRAY); }
 	|	T_CALLABLE	{ $$ = zend_ast_create_ex(ZEND_AST_TYPE, IS_CALLABLE); }
 	|	name		{ $$ = $1; }
+	|	name '[' collection_type_args ']'
+			{ $$ = zend_ast_create(ZEND_AST_TYPE_COLLECTION, $1, $3); }
+;
+
+/* Parameter list of a collection type. The head name is resolved to a
+ * collection kind at compile time, so no keyword is reserved here. */
+collection_type_args:
+		type_expr
+			{ $$ = zend_ast_create_list(1, ZEND_AST_TYPE_COLLECTION_ARGS, $1); }
+	|	collection_type_args ',' type_expr
+			{ $$ = zend_ast_list_add($1, $3); }
 ;
 
 union_type_without_static_element:
