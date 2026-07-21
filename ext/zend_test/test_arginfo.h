@@ -1,5 +1,5 @@
 /* This is a generated file, edit test.stub.php instead.
- * Stub hash: d67bbb6b7dbc73ac7d7ce0d0045a770314e04721
+ * Stub hash: ad0d39b86665c45a515a770df0fce2a7ad1ba706
  * Has decl header: yes */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_trigger_bailout, 0, 0, IS_NEVER, 0)
@@ -145,6 +145,15 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_make_vec, 0, 3, IS_VOI
 	ZEND_ARG_TYPE_INFO(0, values, IS_ARRAY, 0)
 	ZEND_ARG_TYPE_INFO(0, element_type, IS_STRING, 0)
 	ZEND_ARG_TYPE_INFO(1, out, IS_MIXED, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_vec_count, 0, 1, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, vec, IS_MIXED, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_vec_get, 0, 2, IS_MIXED, 0)
+	ZEND_ARG_TYPE_INFO(0, vec, IS_MIXED, 0)
+	ZEND_ARG_TYPE_INFO(0, index, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_zend_ini_parse_quantity, 0, 1, IS_LONG, 0)
@@ -347,6 +356,8 @@ static ZEND_FUNCTION(zend_test_collection_type_selftest);
 static ZEND_FUNCTION(zend_test_nested_collection_type_selftest);
 static ZEND_FUNCTION(zend_test_type_code_alias_selftest);
 static ZEND_FUNCTION(zend_test_make_vec);
+static ZEND_FUNCTION(zend_test_vec_count);
+static ZEND_FUNCTION(zend_test_vec_get);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_quantity);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_uquantity);
 static ZEND_FUNCTION(zend_test_zend_ini_str);
@@ -486,6 +497,8 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_test_nested_collection_type_selftest, arginfo_zend_test_nested_collection_type_selftest)
 	ZEND_FE(zend_test_type_code_alias_selftest, arginfo_zend_test_type_code_alias_selftest)
 	ZEND_FE(zend_test_make_vec, arginfo_zend_test_make_vec)
+	ZEND_FE(zend_test_vec_count, arginfo_zend_test_vec_count)
+	ZEND_FE(zend_test_vec_get, arginfo_zend_test_vec_get)
 	ZEND_FE(zend_test_zend_ini_parse_quantity, arginfo_zend_test_zend_ini_parse_quantity)
 	ZEND_FE(zend_test_zend_ini_parse_uquantity, arginfo_zend_test_zend_ini_parse_uquantity)
 	ZEND_FE(zend_test_zend_ini_str, arginfo_zend_test_zend_ini_str)

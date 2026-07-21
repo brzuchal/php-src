@@ -46,6 +46,17 @@ typedef struct _zend_vec {
 /* offsetof is the only layout contract; do not assume a fixed header size. */
 #define ZEND_VEC_HEADER_SIZE     offsetof(zend_vec, elements)
 
+/* A collection zval: IS_COLLECTION is the runtime type, IS_VEC_GC is the
+ * allocation kind. Every vec is collectable, exactly like an array or object. */
+#define IS_COLLECTION_EX \
+	(IS_COLLECTION | ((IS_TYPE_REFCOUNTED|IS_TYPE_COLLECTABLE) << Z_TYPE_FLAGS_SHIFT))
+
+#define ZVAL_VEC(z, v) do {                     \
+		zval *__z = (z);                        \
+		Z_COUNTED_P(__z) = (zend_refcounted *) (v); \
+		Z_TYPE_INFO_P(__z) = IS_COLLECTION_EX;  \
+	} while (0)
+
 #define Z_VEC(zval)              ((zend_vec *) Z_COUNTED(zval))
 #define Z_VEC_P(zval_p)          Z_VEC(*(zval_p))
 #define ZEND_VEC_COUNT(vec)      ((vec)->count)
@@ -67,11 +78,22 @@ ZEND_API void zend_vec_type_copy(zend_type *dst, zend_type src);
  * zend_string. A no-op for pure masks. */
 ZEND_API void zend_vec_type_dtor(zend_type type);
 
-/* Allocate an uninitialised vec of `count` elements with the given element
- * type. The type must be supported; the vec takes its own reference to any
- * class-name metadata. Every element must be filled before the value becomes
- * reachable; the elements are uninitialised memory on return, not IS_UNDEF. */
-ZEND_API zend_vec *zend_vec_alloc(uint32_t count, zend_type element_type);
+/* Allocate a vec with room for `capacity` elements and a count of zero. The
+ * type must be supported; the vec takes its own reference to any class-name
+ * metadata. Elements are installed one at a time with zend_vec_append(), which
+ * is what keeps count equal to the number of initialised slots at every point,
+ * so a failure part-way through can be cleaned up safely. */
+ZEND_API zend_vec *zend_vec_alloc(uint32_t capacity, zend_type element_type);
+
+/* Validate `value` against the element type and install it in the next slot,
+ * raising count only after the slot is initialised. Returns false and installs
+ * nothing when the value does not match. The caller must not exceed capacity. */
+ZEND_API bool zend_vec_append(zend_vec *vec, zval *value);
+
+/* Build a vec from a packed list of values. On any element failing validation
+ * the partially built vec is destroyed (which touches only the slots already
+ * installed) and NULL is returned. */
+ZEND_API zend_vec *zend_vec_create(const HashTable *values, zend_type element_type);
 
 /* Release the element type, the element zvals, and the allocation. Reached
  * through rc_dtor_func() when the refcount drops to zero. */

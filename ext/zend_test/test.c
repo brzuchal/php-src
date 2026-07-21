@@ -649,13 +649,16 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 	{
 		zend_type int_type = ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
 		zend_vec *vec = zend_vec_alloc(3, int_type);
-		bool ok = ZEND_VEC_COUNT(vec) == 3
+		bool ok = ZEND_VEC_COUNT(vec) == 0   /* count follows installation */
 			&& (ZEND_TYPE_FULL_MASK(vec->element_type) & _ZEND_TYPE_MAY_BE_MASK)
 				== (1u << IS_LONG);
 
 		for (uint32_t i = 0; i < 3; i++) {
-			ZVAL_LONG(&vec->elements[i], (zend_long) (i + 10));
+			zval tmp;
+			ZVAL_LONG(&tmp, (zend_long) (i + 10));
+			ok = ok && zend_vec_append(vec, &tmp);
 		}
+		ok = ok && ZEND_VEC_COUNT(vec) == 3;
 		for (uint32_t i = 0; i < 3; i++) {
 			ok = ok && Z_TYPE(vec->elements[i]) == IS_LONG
 				&& Z_LVAL(vec->elements[i]) == (zend_long) (i + 10);
@@ -700,7 +703,9 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 		zend_vec *vec = zend_vec_alloc(1, str_type);
 		uint32_t rc_before;
 
-		ZVAL_STR_COPY(&vec->elements[0], elem);        /* addref -> held by vec */
+		zval tmp;
+		ZVAL_STR(&tmp, elem);
+		zend_vec_append(vec, &tmp);                    /* addref -> held by vec */
 		rc_before = GC_REFCOUNT(elem);
 		zend_test_vec_release(vec);
 		add_assoc_bool(return_value, "element_dtor",
@@ -900,6 +905,8 @@ static ZEND_FUNCTION(zend_test_make_vec)
 	zend_string *type_name;
 	zval *out;
 	zend_type element_type;
+	bool owns_type = false;
+	zend_collection_type *owns_nested = NULL;
 
 	ZEND_PARSE_PARAMETERS_START(3, 3)
 		Z_PARAM_ARRAY_HT(values)
@@ -913,27 +920,111 @@ static ZEND_FUNCTION(zend_test_make_vec)
 		element_type = (zend_type) ZEND_TYPE_INIT_CODE(IS_DOUBLE, 0, 0);
 	} else if (zend_string_equals_literal(type_name, "string")) {
 		element_type = (zend_type) ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
+	} else if (zend_string_equals_literal(type_name, "array")) {
+		element_type = (zend_type) ZEND_TYPE_INIT_CODE(IS_ARRAY, 0, 0);
+	} else if (zend_string_starts_with_literal(type_name, "vec:")) {
+		/* "vec:Foo" builds the descriptor for a vec[vec[Foo]] element, so tests
+		 * can construct nested collection values. */
+		zend_collection_type *desc = zend_type_collection_alloc(
+			ZEND_COLLECTION_TYPE_VEC, 1, /* persistent */ false);
+		const char *inner = ZSTR_VAL(type_name) + strlen("vec:");
+
+		if (!strcmp(inner, "int")) {
+			desc->types[0] = (zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
+		} else {
+			zend_string *iname = zend_string_init(inner, strlen(inner), 0);
+			zend_class_entry *ce = zend_lookup_class(iname);
+
+			zend_string_release(iname);
+			if (!ce) {
+				pefree(desc, 0);
+				zend_argument_value_error(2, "names an unknown inner class");
+				RETURN_THROWS();
+			}
+			desc->types[0] = (zend_type) ZEND_TYPE_INIT_CLASS(zend_string_copy(ce->name), 0, 0);
+		}
+		element_type = (zend_type) ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_COLLECTION(element_type, desc);
+		owns_nested = desc;
 	} else {
-		zend_argument_value_error(2, "must be one of \"int\", \"float\", or \"string\"");
+		/* Anything else is taken as a class name, so tests can build vec[Foo]
+		 * and exercise cycles through object elements. */
+		zend_class_entry *ce = zend_lookup_class(type_name);
+
+		if (!ce) {
+			zend_argument_value_error(2, "must name a builtin element type or an existing class");
+			RETURN_THROWS();
+		}
+		element_type = (zend_type) ZEND_TYPE_INIT_CLASS(zend_string_copy(ce->name), 0, 0);
+		owns_type = true;
+	}
+
+	/* Routed through the production constructor, so the tests exercise the real
+	 * validation and partial-construction cleanup rather than a parallel path. */
+	zend_vec *vec = zend_vec_create(values, element_type);
+	if (owns_type) {
+		/* zend_vec_create took its own reference; drop the local one. */
+		zend_vec_type_dtor(element_type);
+	}
+	if (owns_nested) {
+		zend_type_release(owns_nested->types[0], /* persistent */ false);
+		pefree(owns_nested, 0);
+	}
+	if (!vec) {
+		zend_argument_value_error(1,
+			"must contain only values matching the requested element type");
 		RETURN_THROWS();
 	}
 
-	zend_vec *vec = zend_vec_alloc(zend_hash_num_elements(values), element_type);
-	uint32_t i = 0;
-	zval *entry;
-	ZEND_HASH_FOREACH_VAL(values, entry) {
-		ZVAL_COPY(&vec->elements[i++], entry);
-	} ZEND_HASH_FOREACH_END();
-
-	/* Written through an untyped by-ref out parameter: a collection is not
-	 * `mixed`, so it cannot be returned through a declared internal return type. */
+	/* Written through a by-ref out parameter: a collection is not `mixed`, so it
+	 * cannot be returned through a declared internal return type. */
 	zval vec_zv;
-	Z_COUNTED(vec_zv) = (zend_refcounted *) vec;
-	Z_TYPE_INFO(vec_zv) = IS_COLLECTION | (IS_TYPE_REFCOUNTED << Z_TYPE_FLAGS_SHIFT);
+	ZVAL_VEC(&vec_zv, vec);
 
 	ZVAL_DEREF(out);
 	zval_ptr_dtor(out);
 	ZVAL_COPY_VALUE(out, &vec_zv);
+}
+
+/* Read-only inspection of a collection value, for lifecycle tests only. There is
+ * no public collection API yet; these exist so PHPTs can observe count, element
+ * identity and refcounts without one. */
+static ZEND_FUNCTION(zend_test_vec_count)
+{
+	zval *v;
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_ZVAL(v)
+	ZEND_PARSE_PARAMETERS_END();
+
+	ZVAL_DEREF(v);
+	if (Z_TYPE_P(v) != IS_COLLECTION) {
+		zend_argument_type_error(1, "must be a collection");
+		RETURN_THROWS();
+	}
+	ZEND_ASSERT(GC_TYPE(Z_COUNTED_P(v)) == IS_VEC_GC);
+	RETURN_LONG((zend_long) ZEND_VEC_COUNT(Z_VEC_P(v)));
+}
+
+static ZEND_FUNCTION(zend_test_vec_get)
+{
+	zval *v;
+	zend_long idx;
+
+	ZEND_PARSE_PARAMETERS_START(2, 2)
+		Z_PARAM_ZVAL(v)
+		Z_PARAM_LONG(idx)
+	ZEND_PARSE_PARAMETERS_END();
+
+	ZVAL_DEREF(v);
+	if (Z_TYPE_P(v) != IS_COLLECTION) {
+		zend_argument_type_error(1, "must be a collection");
+		RETURN_THROWS();
+	}
+	if (idx < 0 || (uint32_t) idx >= ZEND_VEC_COUNT(Z_VEC_P(v))) {
+		zend_argument_value_error(2, "is out of range");
+		RETURN_THROWS();
+	}
+	RETURN_COPY(&Z_VEC_P(v)->elements[idx]);
 }
 
 /* Regression guard for runtime type tags that sit above _ZEND_TYPE_MAY_BE_MASK.

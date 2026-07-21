@@ -330,6 +330,10 @@ namespace {
     /** Test-only vec factory; no return type, a collection is not `mixed`. */
     function zend_test_make_vec(array $values, string $element_type, mixed &$out): void {}
 
+    function zend_test_vec_count(mixed $vec): int {}
+
+    function zend_test_vec_get(mixed $vec, int $index): mixed {}
+
     function zend_test_zend_ini_parse_quantity(string $str): int {}
     function zend_test_zend_ini_parse_uquantity(string $str): int {}
 
