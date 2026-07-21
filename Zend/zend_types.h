@@ -762,6 +762,11 @@ static zend_always_inline uint8_t zval_get_type(const zval* pz) {
 #define GC_PERSISTENT               (1<<7) /* allocated using malloc */
 #define GC_PERSISTENT_LOCAL         (1<<8) /* persistent, but thread-local */
 
+/* GC_TYPE is a 4-bit field and the rc_dtor_func table is indexed by it.
+ * Slots 0..IS_CONSTANT_AST mirror the zval type tags; 12..15 are free for
+ * refcounted payloads that are not zvals of the same tag. */
+#define IS_VEC_GC					12
+
 #define GC_TYPE_MASK				0x0000000f
 #define GC_FLAGS_MASK				0x000003f0
 #define GC_INFO_MASK				0xfffffc00
@@ -910,6 +915,8 @@ static zend_always_inline uint32_t zend_gc_delref_ex(zend_refcounted_h *p, uint3
 #define GC_STRING					(IS_STRING       | (GC_NOT_COLLECTABLE << GC_FLAGS_SHIFT))
 #define GC_ARRAY					IS_ARRAY
 #define GC_OBJECT					IS_OBJECT
+/* Collection payloads are not zend_arrays and must not be destroyed as one. */
+#define GC_VEC						IS_VEC_GC
 #define GC_RESOURCE					(IS_RESOURCE     | (GC_NOT_COLLECTABLE << GC_FLAGS_SHIFT))
 #define GC_REFERENCE				(IS_REFERENCE    | (GC_NOT_COLLECTABLE << GC_FLAGS_SHIFT))
 #define GC_CONSTANT_AST				(IS_CONSTANT_AST | (GC_NOT_COLLECTABLE << GC_FLAGS_SHIFT))

@@ -1800,6 +1800,7 @@ PHP_ADD_SOURCES([Zend], m4_normalize([
     zend_strtod.c
     zend_system_id.c
     zend_variables.c
+    zend_vec.c
     zend_virtual_cwd.c
     zend_vm_opcodes.c
     zend_weakrefs.c
