@@ -20,6 +20,7 @@
 
 #include "zend.h"
 #include "zend_compile.h"
+#include "zend_vec.h"
 #include "zend_execute.h"
 #include "zend_API.h"
 #include "zend_hash.h"
@@ -151,6 +152,36 @@ ZEND_API const char *zend_zval_value_name(const zval *arg)
 	}
 
 	return zend_get_type_by_const(Z_TYPE_P(arg));
+}
+
+/* Format the runtime collection descriptor of a value as its full type name,
+ * e.g. "vec[int]". Returns NULL for any value that is not a collection, where
+ * the coarse zend_zval_value_name()/zend_zval_type_name() spelling is already
+ * exact; callers release a non-NULL result.
+ *
+ * The name is produced by the shared type stringifier rather than formatted
+ * here, so the kind[...] spelling has exactly one definition and stays correct
+ * for further collection kinds. The descriptor is assembled from whatever
+ * parameters the payload exposes: today's vec payload carries a single element
+ * type, but nothing below is specific to that beyond num_types, and a payload
+ * exposing more would be assembled the same way with a descriptor sized to fit. */
+ZEND_API zend_string *zend_zval_collection_type_name(const zval *arg)
+{
+	ZVAL_DEREF(arg);
+
+	if (Z_TYPE_P(arg) != IS_COLLECTION) {
+		return NULL;
+	}
+
+	zend_collection_type desc;
+	desc.kind = ZEND_COLLECTION_TYPE_VEC;
+	desc.num_types = 1;
+	desc.types[0] = Z_VEC_P(arg)->element_type;
+
+	zend_type type = ZEND_TYPE_INIT_NONE(0);
+	ZEND_TYPE_SET_COLLECTION(type, &desc);
+
+	return zend_type_to_string(type);
 }
 
 ZEND_API const char *zend_zval_type_name(const zval *arg)

@@ -684,7 +684,7 @@ static zend_never_inline ZEND_COLD void ZEND_FASTCALL zend_throw_non_object_erro
 static zend_never_inline ZEND_COLD void zend_verify_type_error_common(
 		const zend_function *zf, const zend_arg_info *arg_info, const zval *value,
 		const char **fname, const char **fsep, const char **fclass,
-		zend_string **need_msg, const char **given_kind)
+		zend_string **need_msg, const char **given_kind, zend_string **given_str)
 {
 	*fname = ZSTR_VAL(zf->common.function_name);
 	if (zf->common.scope) {
@@ -698,8 +698,12 @@ static zend_never_inline ZEND_COLD void zend_verify_type_error_common(
 	*need_msg = zend_type_to_string_resolved(arg_info->type, zf->common.scope);
 
 	if (value) {
-		*given_kind = zend_zval_value_name(value);
+		/* Prefer the value's full runtime type name, so a mismatched collection
+		 * reports vec[int] rather than the coarse "collection". */
+		*given_str = zend_zval_collection_type_name(value);
+		*given_kind = *given_str ? ZSTR_VAL(*given_str) : zend_zval_value_name(value);
 	} else {
+		*given_str = NULL;
 		*given_kind = "none";
 	}
 }
@@ -711,9 +715,10 @@ ZEND_API zend_never_inline ZEND_COLD void zend_verify_arg_error(
 	const char *fname, *fsep, *fclass;
 	zend_string *need_msg;
 	const char *given_msg;
+	zend_string *given_str;
 
 	zend_verify_type_error_common(
-		zf, arg_info, value, &fname, &fsep, &fclass, &need_msg, &given_msg);
+		zf, arg_info, value, &fname, &fsep, &fclass, &need_msg, &given_msg, &given_str);
 
 	ZEND_ASSERT(zf->common.type == ZEND_USER_FUNCTION
 		&& "Arginfo verification is not performed for internal functions");
@@ -728,6 +733,9 @@ ZEND_API zend_never_inline ZEND_COLD void zend_verify_arg_error(
 	}
 
 	zend_string_release(need_msg);
+	if (given_str) {
+		zend_string_release(given_str);
+	}
 }
 
 static bool zend_verify_weak_scalar_type_hint(uint32_t type_mask, zval *arg)
@@ -843,8 +851,13 @@ static zend_never_inline ZEND_COLD void zend_verify_class_constant_type_error(co
 {
 	zend_string *type_str = zend_type_to_string(c->type);
 
+	zend_string *given_str = zend_zval_collection_type_name(constant);
 	zend_type_error("Cannot assign %s to class constant %s::%s of type %s",
-		zend_zval_type_name(constant), ZSTR_VAL(c->ce->name), ZSTR_VAL(name), ZSTR_VAL(type_str));
+		given_str ? ZSTR_VAL(given_str) : zend_zval_type_name(constant),
+		ZSTR_VAL(c->ce->name), ZSTR_VAL(name), ZSTR_VAL(type_str));
+	if (given_str) {
+		zend_string_release(given_str);
+	}
 
 	zend_string_release(type_str);
 }
@@ -859,11 +872,15 @@ static zend_never_inline ZEND_COLD void zend_verify_property_type_error(const ze
 	}
 
 	type_str = zend_type_to_string(info->type);
+	zend_string *given_str = zend_zval_collection_type_name(property);
 	zend_type_error("Cannot assign %s to property %s::$%s of type %s",
-		zend_zval_value_name(property),
+		given_str ? ZSTR_VAL(given_str) : zend_zval_value_name(property),
 		ZSTR_VAL(info->ce->name),
 		zend_get_unmangled_property_name(info->name),
 		ZSTR_VAL(type_str));
+	if (given_str) {
+		zend_string_release(given_str);
+	}
 	zend_string_release(type_str);
 }
 
@@ -875,12 +892,16 @@ static zend_never_inline ZEND_COLD void zend_magic_get_property_type_inconsisten
 	}
 
 	zend_string *type_str = zend_type_to_string(info->type);
+	zend_string *given_str = zend_zval_collection_type_name(property);
 	zend_type_error("Value of type %s returned from %s::__get() must be compatible with unset property %s::$%s of type %s",
-		zend_zval_type_name(property),
+		given_str ? ZSTR_VAL(given_str) : zend_zval_type_name(property),
 		ZSTR_VAL(info->ce->name),
 		ZSTR_VAL(info->ce->name),
 		zend_get_unmangled_property_name(info->name),
 		ZSTR_VAL(type_str));
+	if (given_str) {
+		zend_string_release(given_str);
+	}
 	zend_string_release(type_str);
 }
 
@@ -1456,14 +1477,18 @@ ZEND_API zend_never_inline ZEND_COLD void zend_verify_return_error(const zend_fu
 	const char *fname, *fsep, *fclass;
 	zend_string *need_msg;
 	const char *given_msg;
+	zend_string *given_str;
 
 	zend_verify_type_error_common(
-		zf, arg_info, value, &fname, &fsep, &fclass, &need_msg, &given_msg);
+		zf, arg_info, value, &fname, &fsep, &fclass, &need_msg, &given_msg, &given_str);
 
 	zend_type_error("%s%s%s(): Return value must be of type %s, %s returned",
 		fclass, fsep, fname, ZSTR_VAL(need_msg), given_msg);
 
 	zend_string_release(need_msg);
+	if (given_str) {
+		zend_string_release(given_str);
+	}
 }
 
 ZEND_API zend_never_inline ZEND_COLD void zend_verify_never_error(const zend_function *zf)
@@ -1483,9 +1508,10 @@ static zend_never_inline ZEND_COLD void zend_verify_internal_return_error(const 
 	const char *fname, *fsep, *fclass;
 	zend_string *need_msg;
 	const char *given_msg;
+	zend_string *given_str;
 
 	zend_verify_type_error_common(
-		zf, arg_info, value, &fname, &fsep, &fclass, &need_msg, &given_msg);
+		zf, arg_info, value, &fname, &fsep, &fclass, &need_msg, &given_msg, &given_str);
 
 	zend_error_noreturn(E_CORE_ERROR, "%s%s%s(): Return value must be of type %s, %s returned",
 		fclass, fsep, fname, ZSTR_VAL(need_msg), given_msg);

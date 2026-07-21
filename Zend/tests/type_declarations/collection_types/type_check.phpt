@@ -17,7 +17,7 @@ try { want_int_vec(null); } catch (TypeError $e) { echo $e->getMessage(), "\n"; 
 ?>
 --EXPECTF--
 accepted
-want_str_vec(): Argument #1 ($v) must be of type vec[string], collection given, called in %s on line %d
+want_str_vec(): Argument #1 ($v) must be of type vec[string], vec[int] given, called in %s on line %d
 want_int_vec(): Argument #1 ($v) must be of type vec[int], int given, called in %s on line %d
 want_int_vec(): Argument #1 ($v) must be of type vec[int], array given, called in %s on line %d
 want_int_vec(): Argument #1 ($v) must be of type vec[int], null given, called in %s on line %d
