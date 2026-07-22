@@ -118,8 +118,7 @@ static bool zend_vec_element_matches(const zend_collection_info *info, zval *val
 		if (Z_TYPE_P(value) != IS_COLLECTION) {
 			return false;
 		}
-		return Z_VEC_P(value)->type
-			== (const zend_collection_info *) ZEND_TYPE_COLLECTION(element_type);
+		return Z_VEC_P(value)->type == ZEND_COLLECTION_INFO_CHILD(element_type);
 	}
 
 	if (ZEND_TYPE_HAS_NAME(element_type)) {

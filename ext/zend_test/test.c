@@ -1322,12 +1322,7 @@ static ZEND_FUNCTION(zend_test_collection_classify)
 
 	array_init(return_value);
 	add_assoc_long(return_value, "num_types", (zend_long) info->num_types);
-	add_assoc_long(return_value, "depth", (zend_long) info->depth);
 	add_assoc_long(return_value, "fast_mask", (zend_long) info->fast_mask);
-	add_assoc_bool(return_value, "has_nested",
-		ZEND_COLLECTION_INFO_HAS_FLAG(info, ZEND_COLLECTION_INFO_HAS_NESTED));
-	add_assoc_bool(return_value, "has_class_name",
-		ZEND_COLLECTION_INFO_HAS_FLAG(info, ZEND_COLLECTION_INFO_HAS_CLASS_NAME));
 	add_assoc_bool(return_value, "all_mask_members",
 		ZEND_COLLECTION_INFO_HAS_FLAG(info, ZEND_COLLECTION_INFO_ALL_MASK_MEMBERS));
 	add_assoc_bool(return_value, "value_constructible",

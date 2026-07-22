@@ -16,23 +16,18 @@ $c = 'zend_test_collection_classify';
 
 echo "-- flat builtin --\n";
 $f = $c('flat_int');
-var_dump($f['depth'], $f['has_nested'], $f['all_mask_members'], $f['value_constructible']);
+var_dump($f['all_mask_members'], $f['value_constructible']);
 var_dump($f['fast_mask'] !== 0);
 
 echo "-- flat class name --\n";
 $f = $c('flat_cls');
-var_dump($f['depth'], $f['has_class_name'], $f['all_mask_members']);
+var_dump($f['all_mask_members']);
 /* A class element needs more than a mask test. */
 var_dump($f['fast_mask'] === 0);
 
-echo "-- depth accumulates from cached child depth --\n";
-var_dump($c('nest1')['depth'], $c('nest2')['depth']);
-
-echo "-- class-name presence propagates transitively --\n";
-var_dump($c('nest1')['has_class_name'], $c('nest_cls')['has_class_name']);
-
 echo "-- nesting disables the mask fast path --\n";
-var_dump($c('nest1')['has_nested'], $c('nest1')['all_mask_members'], $c('nest1')['fast_mask']);
+var_dump($c('nest1')['all_mask_members'], $c('nest1')['fast_mask']);
+var_dump($c('nest2')['all_mask_members'], $c('nest_cls')['all_mask_members']);
 
 echo "-- nodes are immutable: repeated reads are identical --\n";
 $before = $c('nest2');
@@ -53,26 +48,17 @@ var_dump(zend_test_collection_key_unsupported());
 ?>
 --EXPECT--
 -- flat builtin --
-int(1)
-bool(false)
 bool(true)
 bool(true)
 bool(true)
 -- flat class name --
-int(1)
-bool(true)
-bool(false)
-bool(true)
--- depth accumulates from cached child depth --
-int(2)
-int(3)
--- class-name presence propagates transitively --
 bool(false)
 bool(true)
 -- nesting disables the mask fast path --
-bool(true)
 bool(false)
 int(0)
+bool(false)
+bool(false)
 -- nodes are immutable: repeated reads are identical --
 bool(true)
 -- value constructibility is cached, not re-derived --

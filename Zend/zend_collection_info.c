@@ -223,6 +223,8 @@ ZEND_API uint64_t zend_collection_info_descent_count(void)
 }
 #endif
 
+static bool collection_info_matches_type(const zend_collection_info *info, zend_type type);
+
 static bool collection_info_matches_member(zend_type node_slot, zend_type desc_slot)
 {
 	if (ZEND_TYPE_PURE_MASK(node_slot) != ZEND_TYPE_PURE_MASK(desc_slot)) {
@@ -241,8 +243,8 @@ static bool collection_info_matches_member(zend_type node_slot, zend_type desc_s
 		 * compiler descriptor, so this must descend. Only reachable for a node
 		 * that classification marked as nested -- see the fast path in
 		 * zend_collection_info_matches_type(). */
-		return zend_collection_info_matches_type(
-			(const zend_collection_info *) ZEND_TYPE_COLLECTION(node_slot), desc_slot);
+		return collection_info_matches_type(
+			ZEND_COLLECTION_INFO_CHILD(node_slot), desc_slot);
 	}
 	if (ZEND_TYPE_HAS_NAME(node_slot) || ZEND_TYPE_HAS_NAME(desc_slot)) {
 		if (!ZEND_TYPE_HAS_NAME(node_slot) || !ZEND_TYPE_HAS_NAME(desc_slot)) {
@@ -255,7 +257,7 @@ static bool collection_info_matches_member(zend_type node_slot, zend_type desc_s
 	return true;
 }
 
-ZEND_API bool zend_collection_info_matches_type(const zend_collection_info *info, zend_type type)
+static bool collection_info_matches_type(const zend_collection_info *info, zend_type type)
 {
 	if (!ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
 		return false;
@@ -291,13 +293,6 @@ ZEND_API bool zend_collection_info_matches_type(const zend_collection_info *info
 	return true;
 }
 
-ZEND_API bool zend_collection_info_equals(
-	const zend_collection_info *a, const zend_collection_info *b)
-{
-	/* Both sides are canonical, so identity is the whole answer. */
-	return a == b;
-}
-
 /* Classify a node whose members are already filled and already canonical.
  *
  * This is the single place any classification field is written. It reads each
@@ -310,34 +305,16 @@ ZEND_API bool zend_collection_info_equals(
 static void collection_info_classify(zend_collection_info *info)
 {
 	uint32_t flags = 0;
-	uint32_t depth = 1;
 	bool all_mask = true;
 	bool constructible;
 
 	for (uint32_t i = 0; i < info->num_types; i++) {
 		zend_type member = info->types[i];
 
-		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member)) {
-			const zend_collection_info *child =
-				(const zend_collection_info *) ZEND_TYPE_COLLECTION(member);
-
-			flags |= ZEND_COLLECTION_INFO_HAS_NESTED;
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member)
+		 || ZEND_TYPE_HAS_NAME(member)) {
 			all_mask = false;
-
-			/* Cached, not recomputed: the child already knows its own depth and
-			 * whether it contains a class name. */
-			if (child->depth + 1 > depth) {
-				depth = child->depth + 1;
-			}
-			if (ZEND_COLLECTION_INFO_HAS_FLAG(child, ZEND_COLLECTION_INFO_HAS_CLASS_NAME)) {
-				flags |= ZEND_COLLECTION_INFO_HAS_CLASS_NAME;
-			}
-			continue;
-		}
-
-		if (ZEND_TYPE_HAS_NAME(member)) {
-			flags |= ZEND_COLLECTION_INFO_HAS_CLASS_NAME;
-			all_mask = false;
+			break;
 		}
 	}
 
@@ -353,8 +330,7 @@ static void collection_info_classify(zend_collection_info *info)
 		zend_type member = info->types[0];
 
 		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member)) {
-			const zend_collection_info *child =
-				(const zend_collection_info *) ZEND_TYPE_COLLECTION(member);
+			const zend_collection_info *child = ZEND_COLLECTION_INFO_CHILD(member);
 
 			/* The child's own cached verdict; no descent. */
 			constructible =
@@ -369,7 +345,6 @@ static void collection_info_classify(zend_collection_info *info)
 	}
 
 	info->flags = flags;
-	info->depth = depth;
 
 	/* The builtin-only element check, or 0 when a mask test is not enough. */
 	info->fast_mask =
@@ -382,7 +357,7 @@ static const zend_collection_info *collection_info_find_in_chain(
 	const zend_collection_info *head, zend_type type)
 {
 	for (const zend_collection_info *cur = head; cur; cur = cur->next) {
-		if (zend_collection_info_matches_type(cur, type)) {
+		if (collection_info_matches_type(cur, type)) {
 			return cur;
 		}
 	}
@@ -467,8 +442,7 @@ static void collection_info_stringify(smart_str *str, const zend_collection_info
 			if (ZEND_TYPE_ALLOW_NULL(member)) {
 				smart_str_appendc(str, '?');
 			}
-			collection_info_stringify(str,
-				(const zend_collection_info *) ZEND_TYPE_COLLECTION(member));
+			collection_info_stringify(str, ZEND_COLLECTION_INFO_CHILD(member));
 			continue;
 		}
 

@@ -56,8 +56,6 @@
 
 BEGIN_EXTERN_C()
 
-#define ZEND_COLLECTION_INFO_PERMANENT           (1u << 0)
-
 /* Classification bits. All are computed once, during promotion, from members
  * that are already canonical, and are immutable for the life of the node.
  *
@@ -71,18 +69,14 @@ BEGIN_EXTERN_C()
  * of them unchanged. Only ..._VALUE_CONSTRUCTIBLE consults a per-kind policy,
  * and that policy is applied at promotion, not at read time. */
 
-/* Some member is a nested collection. */
-#define ZEND_COLLECTION_INFO_HAS_NESTED          (1u << 1)
-/* Some member is, or transitively contains, a class name. */
-#define ZEND_COLLECTION_INFO_HAS_CLASS_NAME      (1u << 2)
 /* Every member is a pure builtin mask: no class name, no nesting anywhere.
  * A node with this bit can be compared and checked without inspecting members
  * as structured types at all. */
-#define ZEND_COLLECTION_INFO_ALL_MASK_MEMBERS    (1u << 3)
+#define ZEND_COLLECTION_INFO_ALL_MASK_MEMBERS    (1u << 0)
 /* A runtime value of this type can be constructed: the members satisfy the
  * (narrower) element subset a value may hold. Replaces a recursive re-check at
  * every construction. */
-#define ZEND_COLLECTION_INFO_VALUE_CONSTRUCTIBLE (1u << 4)
+#define ZEND_COLLECTION_INFO_VALUE_CONSTRUCTIBLE (1u << 1)
 
 typedef struct _zend_collection_info {
 	uint32_t   kind;       /* zend_collection_kind */
@@ -92,10 +86,6 @@ typedef struct _zend_collection_info {
 	 * Readable by: anyone holding the node. Never recomputed, never written
 	 * again. Reusable by every future kind. */
 	uint32_t   flags;      /* ZEND_COLLECTION_INFO_* */
-	/* Nesting depth: 1 for vec[int], 2 for vec[vec[int]]. Derived from the
-	 * children's own cached depth, so computing it never descends. Kind
-	 * agnostic: it is max over members. */
-	uint32_t   depth;
 	/* The builtin-only element check for a single-member node, or 0 when the
 	 * type needs more than a mask test. Lets the element check run without
 	 * reading the member's zend_type. For kinds with more than one member this
@@ -117,6 +107,16 @@ typedef struct _zend_collection_info {
 
 #define ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(info) \
 	ZEND_COLLECTION_INFO_HAS_FLAG(info, ZEND_COLLECTION_INFO_VALUE_CONSTRUCTIBLE)
+
+/* Read a nested member as the canonical child node it is.
+ *
+ * Always use this rather than casting ZEND_TYPE_COLLECTION() by hand. The two
+ * structs share kind and num_types and diverge after, so a hand-written cast
+ * that picks the wrong one walks valid-looking but wrong offsets -- which is
+ * exactly the defect that reached a release build once, because NDEBUG had
+ * compiled out the assertion that would have caught it. */
+#define ZEND_COLLECTION_INFO_CHILD(member) \
+	((const zend_collection_info *) ZEND_TYPE_COLLECTION(member))
 
 #define ZEND_COLLECTION_INFO_SIZE(num_types) \
 	(sizeof(zend_collection_info) + ((num_types) - 1) * sizeof(zend_type))
@@ -160,20 +160,16 @@ typedef struct _zend_collection_info {
 ZEND_API bool zend_collection_key_is_supported(zend_type type);
 ZEND_API zend_ulong zend_collection_key_hash_type(zend_type type);
 
-/* (2) CANONICAL KEY. Cached at construction, never recomputed. */
-#define ZEND_COLLECTION_INFO_KEY(info) ((info)->hash)
-
-/* (3) CANONICAL EQUALITY. Both operands are already canonical, so identity is
- * the whole answer -- no structural walk. */
-ZEND_API bool zend_collection_info_equals(
-	const zend_collection_info *a, const zend_collection_info *b);
-
-/* BRIDGE -- canonical node against a not-yet-canonical descriptor. This is the
- * collision-resolution comparison, and the only place a node is compared by
- * walking a raw tree. Also used by the runtime type check, so verifying a value
- * against a declared type costs no allocation. */
-ZEND_API bool zend_collection_info_matches_type(
-	const zend_collection_info *info, zend_type type);
+/* (2) CANONICAL KEY is `info->hash`, cached at construction and never
+ * recomputed. (3) CANONICAL EQUALITY between two canonical nodes is pointer
+ * identity -- there is deliberately no helper for it, because a function call
+ * would only obscure that it is a plain comparison.
+ *
+ * The BRIDGE comparison (canonical node against a raw descriptor, used to
+ * resolve collisions) is internal to zend_collection_info.c: everything outside
+ * holds nodes and compares them by identity. Keeping it private is what stops
+ * callers from reaching for a structural walk they do not need.
+ */
 
 /* PROMOTION. Canonicalize a compiler- or extension-produced descriptor and
  * return the borrowed node for it. Structurally identical descriptors always
