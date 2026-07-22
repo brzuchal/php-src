@@ -326,6 +326,10 @@ struct _zend_executor_globals {
 
 	HashTable callable_convert_cache;
 
+	/* Request tier of canonical collection type nodes. Owns every node it
+	 * holds; values borrow. Destroyed in zend_shutdown_executor_values(). */
+	HashTable collection_types;
+
 	void *reserved[ZEND_MAX_RESERVED_RESOURCES];
 };
 

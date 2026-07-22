@@ -63,7 +63,8 @@ typedef struct _zend_collection_info {
 	uint32_t   num_types;
 	uint32_t   flags;      /* ZEND_COLLECTION_INFO_* */
 	uint32_t   fast_mask;  /* derived: builtin-only check, 0 when not applicable */
-	zend_ulong hash;       /* derived: structural hash, cached for nesting */
+	zend_ulong hash;       /* derived: structural key, cached; never recomputed */
+	struct _zend_collection_info *next; /* chain of nodes sharing this key */
 	zend_type  types[1];   /* nested collection slots hold zend_collection_info* */
 } zend_collection_info;
 
@@ -112,10 +113,37 @@ ZEND_API zend_ulong zend_collection_key_hash_type(zend_type type);
 /* (2) CANONICAL KEY. Cached at construction, never recomputed. */
 #define ZEND_COLLECTION_INFO_KEY(info) ((info)->hash)
 
-/* (3) CANONICAL EQUALITY, promotion, tier lifecycle and diagnostics arrive with
- * the intern table; they are deliberately absent here because nothing can
- * construct a node yet, and declaring an API before it can be exercised invites
- * untested code. */
+/* (3) CANONICAL EQUALITY. Both operands are already canonical, so identity is
+ * the whole answer -- no structural walk. */
+ZEND_API bool zend_collection_info_equals(
+	const zend_collection_info *a, const zend_collection_info *b);
+
+/* BRIDGE -- canonical node against a not-yet-canonical descriptor. This is the
+ * collision-resolution comparison, and the only place a node is compared by
+ * walking a raw tree. Also used by the runtime type check, so verifying a value
+ * against a declared type costs no allocation. */
+ZEND_API bool zend_collection_info_matches_type(
+	const zend_collection_info *info, zend_type type);
+
+/* PROMOTION. Canonicalize a compiler- or extension-produced descriptor and
+ * return the borrowed node for it. Structurally identical descriptors always
+ * return the same pointer, regardless of where they were allocated; descriptor
+ * pointer identity is never consulted. Returns NULL for forms outside the
+ * supported boundary. `type` is only read, never retained, so arena and SHM
+ * memory neither escapes into the node nor is freed by it. */
+ZEND_API const zend_collection_info *zend_collection_info_intern(zend_type type);
+
+/* "vec[int]", "vec[vec[Foo]]" -- for diagnostics. Caller owns the result. */
+ZEND_API zend_string *zend_collection_info_to_string(const zend_collection_info *info);
+
+/* Request tier lifecycle. Init runs in init_executor(); shutdown runs at the
+ * end of zend_shutdown_executor_values() per INV-4. */
+void zend_collection_info_request_init(void);
+void zend_collection_info_request_shutdown(void);
+
+/* Exercise chain separation from inside the engine boundary: a real hash
+ * collision cannot be requested from PHP, so the behaviour is tested instead. */
+ZEND_API bool zend_collection_info_collision_selftest(void);
 
 END_EXTERN_C()
 

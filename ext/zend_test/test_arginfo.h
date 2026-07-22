@@ -1,5 +1,5 @@
 /* This is a generated file, edit test.stub.php instead.
- * Stub hash: 4119733c8f0939091c9baa3ef353fabd6f1c5e5f
+ * Stub hash: 3ca496115a595a68abeeb88085b774f2d66349d4
  * Has decl header: yes */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_trigger_bailout, 0, 0, IS_NEVER, 0)
@@ -172,6 +172,15 @@ ZEND_END_ARG_INFO()
 
 #define arginfo_zend_test_collection_key_unsupported arginfo_zend_test_array_return
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_collection_intern, 0, 1, IS_ARRAY, 1)
+	ZEND_ARG_TYPE_INFO(0, function, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+#define arginfo_zend_test_vec_type_id arginfo_zend_test_vec_count
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_collection_collision_selftest, 0, 0, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_zend_ini_parse_quantity, 0, 1, IS_LONG, 0)
 	ZEND_ARG_TYPE_INFO(0, str, IS_STRING, 0)
 ZEND_END_ARG_INFO()
@@ -215,8 +224,7 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_override_libxml_global
 ZEND_END_ARG_INFO()
 #endif
 
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_is_pcre_bundled, 0, 0, _IS_BOOL, 0)
-ZEND_END_ARG_INFO()
+#define arginfo_zend_test_is_pcre_bundled arginfo_zend_test_collection_collision_selftest
 
 #if defined(PHP_WIN32)
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_set_fmode, 0, 1, IS_VOID, 0)
@@ -240,7 +248,7 @@ ZEND_END_ARG_INFO()
 
 #define arginfo_zend_test_gh18756 arginfo_zend_test_void_return
 
-#define arginfo_zend_test_opcache_preloading arginfo_zend_test_is_pcre_bundled
+#define arginfo_zend_test_opcache_preloading arginfo_zend_test_collection_collision_selftest
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_zend_test_uri_parser, 0, 2, IS_ARRAY, 0)
 	ZEND_ARG_TYPE_INFO(0, uri, IS_STRING, 0)
@@ -249,7 +257,7 @@ ZEND_END_ARG_INFO()
 
 #define arginfo_zend_test_gh19792 arginfo_zend_test_void_return
 
-#define arginfo_ZendTestNS2_namespaced_func arginfo_zend_test_is_pcre_bundled
+#define arginfo_ZendTestNS2_namespaced_func arginfo_zend_test_collection_collision_selftest
 
 #define arginfo_ZendTestNS2_namespaced_deprecated_func arginfo_zend_test_void_return
 
@@ -257,7 +265,7 @@ ZEND_END_ARG_INFO()
 
 #define arginfo_ZendTestNS2_namespaced_deprecated_aliased_func arginfo_zend_test_void_return
 
-#define arginfo_ZendTestNS2_ZendSubNS_namespaced_func arginfo_zend_test_is_pcre_bundled
+#define arginfo_ZendTestNS2_ZendSubNS_namespaced_func arginfo_zend_test_collection_collision_selftest
 
 #define arginfo_ZendTestNS2_ZendSubNS_namespaced_deprecated_func arginfo_zend_test_void_return
 
@@ -293,9 +301,9 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_class__ZendTestChildClass_returnsThrowable, 0, 0, Exception, 0)
 ZEND_END_ARG_INFO()
 
-#define arginfo_class_ZendAttributeTest_testMethod arginfo_zend_test_is_pcre_bundled
+#define arginfo_class_ZendAttributeTest_testMethod arginfo_zend_test_collection_collision_selftest
 
-#define arginfo_class__ZendTestTrait_testMethod arginfo_zend_test_is_pcre_bundled
+#define arginfo_class__ZendTestTrait_testMethod arginfo_zend_test_collection_collision_selftest
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_class_ZendTestAttributeWithArguments___construct, 0, 0, 1)
 	ZEND_ARG_TYPE_INFO(0, arg, IS_MIXED, 0)
@@ -379,6 +387,9 @@ static ZEND_FUNCTION(zend_test_collection_key_supported);
 static ZEND_FUNCTION(zend_test_collection_key_positional);
 static ZEND_FUNCTION(zend_test_collection_key_provenance);
 static ZEND_FUNCTION(zend_test_collection_key_unsupported);
+static ZEND_FUNCTION(zend_test_collection_intern);
+static ZEND_FUNCTION(zend_test_vec_type_id);
+static ZEND_FUNCTION(zend_test_collection_collision_selftest);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_quantity);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_uquantity);
 static ZEND_FUNCTION(zend_test_zend_ini_str);
@@ -525,6 +536,9 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_test_collection_key_positional, arginfo_zend_test_collection_key_positional)
 	ZEND_FE(zend_test_collection_key_provenance, arginfo_zend_test_collection_key_provenance)
 	ZEND_FE(zend_test_collection_key_unsupported, arginfo_zend_test_collection_key_unsupported)
+	ZEND_FE(zend_test_collection_intern, arginfo_zend_test_collection_intern)
+	ZEND_FE(zend_test_vec_type_id, arginfo_zend_test_vec_type_id)
+	ZEND_FE(zend_test_collection_collision_selftest, arginfo_zend_test_collection_collision_selftest)
 	ZEND_FE(zend_test_zend_ini_parse_quantity, arginfo_zend_test_zend_ini_parse_quantity)
 	ZEND_FE(zend_test_zend_ini_parse_uquantity, arginfo_zend_test_zend_ini_parse_uquantity)
 	ZEND_FE(zend_test_zend_ini_str, arginfo_zend_test_zend_ini_str)

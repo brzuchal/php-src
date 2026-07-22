@@ -21,20 +21,19 @@
 #include "zend_API.h"
 #include "zend_operators.h"
 #include "zend_compile.h"
+#include "zend_collection_info.h"
 
 ZEND_API bool zend_vec_type_is_supported(zend_type type)
 {
-	/* Unions and intersections have no single element representation, and
-	 * literal names cannot be owned by a value.
+	/* The element subset a *value* may hold, which is narrower than the subset
+	 * a type may name: canonicalization accepts any builtin mask, while a value
+	 * still requires exactly one element kind.
 	 *
-	 * Arena-backed types are rejected outright, and that has a consequence worth
-	 * stating plainly: the compiler marks every descriptor it builds with
-	 * _ZEND_TYPE_ARENA_BIT, so a *declared* type such as vec[int] cannot be used
-	 * to construct a runtime value today. Only types assembled independently,
-	 * as ext/zend_test does, are accepted. Lifting this is a prerequisite for
-	 * literals and for any other path that must build a value from a
-	 * compiler-produced descriptor; it needs a defined hand-off for arena
-	 * memory, which outlives no value, before the restriction can be relaxed. */
+	 * The arena clause is now unreachable for anything reaching a value. Node
+	 * members have provenance stripped during promotion, so the former
+	 * restriction -- that a declared vec[int] could not construct a value
+	 * because every compiler descriptor is arena-marked -- is discharged. It is
+	 * kept as a guard against a raw descriptor being passed in by mistake. */
 	if (ZEND_TYPE_IS_TYPE_LIST(type)
 	 || ZEND_TYPE_HAS_LITERAL_NAME(type)
 	 || ZEND_TYPE_USES_ARENA(type)) {
@@ -42,17 +41,24 @@ ZEND_API bool zend_vec_type_is_supported(zend_type type)
 	}
 
 	/* A nested collection, e.g. the inner vec[int] of vec[vec[int]]. Supported
-	 * so that runtime values never lag the types the compiler accepts. */
+	 * so that runtime values never lag the types the compiler accepts.
+	 *
+	 * The pointer here is a canonical zend_collection_info, not a compiler
+	 * zend_collection_type: this function inspects members of an already
+	 * promoted node, and promotion replaces nested descriptors with child
+	 * nodes. The two structs share kind and num_types but diverge after them,
+	 * so reading this as a descriptor would walk the wrong offsets. */
 	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
-		const zend_collection_type *desc = ZEND_TYPE_COLLECTION(type);
+		const zend_collection_info *child =
+			(const zend_collection_info *) ZEND_TYPE_COLLECTION(type);
 
-		if (desc->kind != ZEND_COLLECTION_TYPE_VEC || desc->num_types != 1) {
+		if (child->kind != ZEND_COLLECTION_TYPE_VEC || child->num_types != 1) {
 			return false;
 		}
 		if ((ZEND_TYPE_FULL_MASK(type) & _ZEND_TYPE_MAY_BE_MASK) != 0) {
 			return false;
 		}
-		return zend_vec_type_is_supported(desc->types[0]);
+		return zend_vec_type_is_supported(child->types[0]);
 	}
 
 	if (ZEND_TYPE_HAS_NAME(type)) {
@@ -81,55 +87,7 @@ ZEND_API bool zend_vec_type_is_supported(zend_type type)
 	}
 }
 
-ZEND_API void zend_vec_type_copy(zend_type *dst, zend_type src)
-{
-	ZEND_ASSERT(zend_vec_type_is_supported(src));
-
-	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(src)) {
-		/* Deep-copy the descriptor so the value owns its element type outright,
-		 * released exactly once by zend_vec_type_dtor(). The case this actually
-		 * guards is a caller-owned temporary, which would otherwise be freed
-		 * underneath the value. Arena and persistent descriptors never reach
-		 * here at all: zend_vec_type_is_supported() rejects them, which is also
-		 * what keeps the pefree() in the destructor from ever seeing memory it
-		 * does not own. */
-		const zend_collection_type *sd = ZEND_TYPE_COLLECTION(src);
-		zend_collection_type *dd = zend_type_collection_alloc(
-			sd->kind, sd->num_types, /* persistent */ false);
-		zend_type copy = ZEND_TYPE_INIT_NONE(0);
-
-		for (uint32_t i = 0; i < sd->num_types; i++) {
-			zend_vec_type_copy(&dd->types[i], sd->types[i]);
-		}
-		ZEND_TYPE_SET_COLLECTION(copy, dd);
-		*dst = copy;
-		return;
-	}
-
-	if (ZEND_TYPE_HAS_NAME(src)) {
-		zend_string_addref(ZEND_TYPE_NAME(src));
-	}
-	*dst = src;
-}
-
-ZEND_API void zend_vec_type_dtor(zend_type type)
-{
-	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
-		zend_collection_type *desc = ZEND_TYPE_COLLECTION(type);
-
-		for (uint32_t i = 0; i < desc->num_types; i++) {
-			zend_vec_type_dtor(desc->types[i]);
-		}
-		pefree(desc, /* persistent */ false);
-		return;
-	}
-
-	if (ZEND_TYPE_HAS_NAME(type)) {
-		zend_string_release(ZEND_TYPE_NAME(type));
-	}
-}
-
-static zend_vec *zend_vec_alloc(uint32_t count, zend_type element_type)
+static zend_vec *zend_vec_alloc(uint32_t count, const zend_collection_info *type)
 {
 	/* safe_emalloc computes count * sizeof(zval) + header with overflow
 	 * checking, so a large count cannot silently wrap the allocation size. */
@@ -147,7 +105,8 @@ static zend_vec *zend_vec_alloc(uint32_t count, zend_type element_type)
 	/* Zero until an element is actually installed, so a failure part-way
 	 * through construction never leaves destroy() reading uninitialised slots. */
 	vec->count = 0;
-	zend_vec_type_copy(&vec->element_type, element_type);
+	/* Borrowed: owned by the request intern tier, never released here. */
+	vec->type = type;
 
 	return vec;
 }
@@ -157,17 +116,13 @@ static zend_vec *zend_vec_alloc(uint32_t count, zend_type element_type)
 static bool zend_vec_element_matches(zend_type element_type, zval *value)
 {
 	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(element_type)) {
-		const zend_collection_type *desc = ZEND_TYPE_COLLECTION(element_type);
-
+		/* Both sides are canonical, so a nested collection element check is a
+		 * pointer comparison rather than a structural walk. */
 		if (Z_TYPE_P(value) != IS_COLLECTION) {
 			return false;
 		}
-		ZEND_ASSERT(GC_TYPE(Z_COUNTED_P(value)) == IS_VEC_GC);
-		if (desc->kind != ZEND_COLLECTION_TYPE_VEC || desc->num_types != 1) {
-			return false;
-		}
-		return zend_type_structurally_equals(
-			Z_VEC_P(value)->element_type, desc->types[0]);
+		return Z_VEC_P(value)->type
+			== (const zend_collection_info *) ZEND_TYPE_COLLECTION(element_type);
 	}
 
 	if (ZEND_TYPE_HAS_NAME(element_type)) {
@@ -187,7 +142,7 @@ static bool zend_vec_append(zend_vec *vec, zval *value)
 {
 	ZVAL_DEREF(value);
 
-	if (!zend_vec_element_matches(vec->element_type, value)) {
+	if (!zend_vec_element_matches(ZEND_VEC_ELEMENT_TYPE(vec), value)) {
 		return false;
 	}
 	/* Install first, then publish the slot by raising count. */
@@ -196,9 +151,12 @@ static bool zend_vec_append(zend_vec *vec, zval *value)
 	return true;
 }
 
-ZEND_API zend_vec *zend_vec_create(const HashTable *values, zend_type element_type)
+ZEND_API zend_vec *zend_vec_create(const HashTable *values, const zend_collection_info *type)
 {
-	zend_vec *vec = zend_vec_alloc(zend_hash_num_elements(values), element_type);
+	ZEND_ASSERT(type != NULL && type->num_types >= 1);
+	ZEND_ASSERT(zend_vec_type_is_supported(type->types[0]));
+
+	zend_vec *vec = zend_vec_alloc(zend_hash_num_elements(values), type);
 	zval *entry;
 
 	ZEND_HASH_FOREACH_VAL((HashTable *) values, entry) {
@@ -226,13 +184,18 @@ ZEND_API void ZEND_FASTCALL zend_vec_destroy(zend_vec *vec)
 		i_zval_ptr_dtor(p);
 		p++;
 	}
-	zend_vec_type_dtor(vec->element_type);
 	efree(vec);
 }
 
 ZEND_API uint32_t zend_vec_lifecycle_selftest(void)
 {
 	zend_type str_type = ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
+	union {
+		zend_collection_type desc;
+		char buf[ZEND_TYPE_COLLECTION_SIZE(1)];
+	} probe;
+	zend_type probe_type = ZEND_TYPE_INIT_NONE(0);
+	const zend_collection_info *vec_of_string;
 	zend_string *a = zend_string_init("a", 1, 0);
 	zend_string *b = zend_string_init("b", 1, 0);
 	zend_string *spare = zend_string_init("spare", 5, 0);
@@ -242,7 +205,16 @@ ZEND_API uint32_t zend_vec_lifecycle_selftest(void)
 
 	/* Reserve four slots but install only two, so the vec spends the rest of
 	 * this function in the partially-populated state. */
-	vec = zend_vec_alloc(4, str_type);
+	/* Promote vec[string] once; the node is borrowed for the rest of this
+	 * function and owned by the request tier. */
+	probe.desc.kind = ZEND_COLLECTION_TYPE_VEC;
+	probe.desc.num_types = 1;
+	probe.desc.types[0] = str_type;
+	ZEND_TYPE_SET_COLLECTION(probe_type, &probe.desc);
+	vec_of_string = zend_collection_info_intern(probe_type);
+	ZEND_ASSERT(vec_of_string != NULL);
+
+	vec = zend_vec_alloc(4, vec_of_string);
 	if (vec->count == 0) {
 		result |= ZEND_VEC_SELFTEST_ALLOC_EMPTY;
 	}

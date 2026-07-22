@@ -17,6 +17,8 @@
 #include "zend.h"
 #include "zend_collection_info.h"
 #include "zend_types.h"
+#include "zend_smart_str.h"
+#include "zend_compile.h"
 
 /* Structural hashing of collection descriptors -- the *probe* side of the
  * canonicalization key. See zend_collection_info.h for the separation between
@@ -162,4 +164,296 @@ ZEND_API zend_ulong zend_collection_key_hash_type(zend_type type)
 		&& "collection key: unsupported descriptor form");
 
 	return collection_key_hash_type(COLLECTION_KEY_SEED, type);
+}
+
+/* ---------------------------------------------------------------------------
+ * Canonicalization: request-local interning of collection types.
+ *
+ * Ownership (docs/first-class-collections/runtime-type-ownership.md):
+ *
+ *   Who owns nodes        The request tier, EG(collection_types), owns every
+ *                         node it holds. Nothing else does.
+ *   What values hold      A borrowed zend_collection_info*. Values never own,
+ *                         addref or release a node (INV-5), so constructing
+ *                         and destroying a vec costs no type-ownership work.
+ *   When nodes die        All at once, at the end of
+ *                         zend_shutdown_executor_values(), after the object
+ *                         store has been freed. That function is the hook
+ *                         point rather than shutdown_executor(), because
+ *                         preload calls it directly and never calls the other.
+ *   Request shutdown      Bulk teardown; each node releases only its own
+ *                         class-name strings. Nested nodes are borrowed and
+ *                         are freed by the same sweep, so no recursion.
+ *   Collisions            Nodes sharing a key are chained through ->next and
+ *                         separated by full structural comparison. A shared
+ *                         key never merges two types; it only lengthens a
+ *                         chain.
+ *
+ * A node never embeds a compiler descriptor: nested members point at other
+ * canonical nodes, and the arena bit is stripped from every member, so no
+ * arena or SHM pointer can be reached from a runtime value.
+ * ------------------------------------------------------------------------- */
+
+static bool collection_info_matches_member(zend_type node_slot, zend_type desc_slot)
+{
+	if (ZEND_TYPE_PURE_MASK(node_slot) != ZEND_TYPE_PURE_MASK(desc_slot)) {
+		return false;
+	}
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(node_slot)
+	 || ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(desc_slot)) {
+		if (!ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(node_slot)
+		 || !ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(desc_slot)) {
+			return false;
+		}
+		/* The node side is a canonical child; the descriptor side is still a
+		 * compiler descriptor, so this recurses rather than comparing pointers. */
+		return zend_collection_info_matches_type(
+			(const zend_collection_info *) ZEND_TYPE_COLLECTION(node_slot), desc_slot);
+	}
+	if (ZEND_TYPE_HAS_NAME(node_slot) || ZEND_TYPE_HAS_NAME(desc_slot)) {
+		if (!ZEND_TYPE_HAS_NAME(node_slot) || !ZEND_TYPE_HAS_NAME(desc_slot)) {
+			return false;
+		}
+		/* Case-insensitive, matching zend_type_structurally_equals() and the
+		 * key's own folding. */
+		return zend_string_equals_ci(ZEND_TYPE_NAME(node_slot), ZEND_TYPE_NAME(desc_slot));
+	}
+	return true;
+}
+
+ZEND_API bool zend_collection_info_matches_type(const zend_collection_info *info, zend_type type)
+{
+	if (!ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
+		return false;
+	}
+
+	const zend_collection_type *desc = ZEND_TYPE_COLLECTION(type);
+
+	if (info->kind != desc->kind || info->num_types != desc->num_types) {
+		return false;
+	}
+	for (uint32_t i = 0; i < info->num_types; i++) {
+		if (!collection_info_matches_member(info->types[i], desc->types[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+ZEND_API bool zend_collection_info_equals(
+	const zend_collection_info *a, const zend_collection_info *b)
+{
+	/* Both sides are canonical, so identity is the whole answer. */
+	return a == b;
+}
+
+/* Derived: the builtin-only element check, or 0 when the type needs more than
+ * a mask test. A cache computed once at construction from immutable members,
+ * so it cannot drift from what it summarizes. */
+static uint32_t collection_info_compute_fast_mask(const zend_collection_info *info)
+{
+	if (info->num_types != 1) {
+		return 0;
+	}
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(info->types[0])
+	 || ZEND_TYPE_HAS_NAME(info->types[0])) {
+		return 0;
+	}
+	return ZEND_TYPE_PURE_MASK(info->types[0]);
+}
+
+/* Walk a key's chain, separating members by full structural comparison. A
+ * shared key never merges two types; it only makes this walk longer. */
+static const zend_collection_info *collection_info_find_in_chain(
+	const zend_collection_info *head, zend_type type)
+{
+	for (const zend_collection_info *cur = head; cur; cur = cur->next) {
+		if (zend_collection_info_matches_type(cur, type)) {
+			return cur;
+		}
+	}
+	return NULL;
+}
+
+ZEND_API const zend_collection_info *zend_collection_info_intern(zend_type type)
+{
+	if (!zend_collection_key_is_supported(type)) {
+		return NULL;
+	}
+
+	zend_ulong key = zend_collection_key_hash_type(type);
+	zend_collection_info *node =
+		zend_hash_index_find_ptr(&EG(collection_types), key);
+	const zend_collection_info *hit = collection_info_find_in_chain(node, type);
+
+	if (hit) {
+		return hit;
+	}
+
+	const zend_collection_type *desc = ZEND_TYPE_COLLECTION(type);
+	zend_collection_info *created = emalloc(ZEND_COLLECTION_INFO_SIZE(desc->num_types));
+
+	created->kind = desc->kind;
+	created->num_types = desc->num_types;
+	created->flags = 0;
+	created->hash = key;
+
+	for (uint32_t i = 0; i < desc->num_types; i++) {
+		zend_type member = desc->types[i];
+
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member)) {
+			/* Bottom-up: the child is canonicalized first, and the node stores
+			 * a borrowed pointer to it rather than a copy of the descriptor. */
+			const zend_collection_info *child = zend_collection_info_intern(member);
+
+			/* Support was validated for the whole tree above, so a supported
+			 * parent cannot contain an unsupported child. */
+			ZEND_ASSERT(child != NULL);
+
+			zend_type slot = ZEND_TYPE_INIT_NONE(0);
+			ZEND_TYPE_FULL_MASK(slot) = ZEND_TYPE_PURE_MASK(member);
+			ZEND_TYPE_SET_COLLECTION(slot, (void *) child);
+			created->types[i] = slot;
+			continue;
+		}
+
+		created->types[i] = member;
+		/* Provenance never survives promotion: a node member is request-owned
+		 * or borrowed from another node, never arena- or SHM-backed. */
+		ZEND_TYPE_FULL_MASK(created->types[i]) &= ~_ZEND_TYPE_ARENA_BIT;
+
+		if (ZEND_TYPE_HAS_NAME(created->types[i])) {
+			/* A no-op for the interned names the compiler produces, and a real
+			 * reference for extension-supplied ones. */
+			zend_string_addref(ZEND_TYPE_NAME(created->types[i]));
+		}
+	}
+
+	created->fast_mask = collection_info_compute_fast_mask(created);
+
+	/* Re-read the chain head: canonicalizing children above may have inserted
+	 * into this same bucket. */
+	created->next = zend_hash_index_find_ptr(&EG(collection_types), key);
+	zend_hash_index_update_ptr(&EG(collection_types), key, created);
+
+	return created;
+}
+
+static void collection_info_stringify(smart_str *str, const zend_collection_info *info)
+{
+	smart_str_appends(str, zend_collection_type_kind_name(info->kind));
+	smart_str_appendc(str, '[');
+
+	for (uint32_t i = 0; i < info->num_types; i++) {
+		if (i != 0) {
+			smart_str_appends(str, ", ");
+		}
+		zend_type member = info->types[i];
+
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member)) {
+			if (ZEND_TYPE_ALLOW_NULL(member)) {
+				smart_str_appendc(str, '?');
+			}
+			collection_info_stringify(str,
+				(const zend_collection_info *) ZEND_TYPE_COLLECTION(member));
+			continue;
+		}
+
+		zend_string *rendered = zend_type_to_string(member);
+		smart_str_append(str, rendered);
+		zend_string_release(rendered);
+	}
+
+	smart_str_appendc(str, ']');
+}
+
+ZEND_API zend_string *zend_collection_info_to_string(const zend_collection_info *info)
+{
+	smart_str str = {0};
+
+	collection_info_stringify(&str, info);
+	smart_str_0(&str);
+
+	return str.s;
+}
+
+void zend_collection_info_request_init(void)
+{
+	zend_hash_init(&EG(collection_types), 8, NULL, NULL, 0);
+}
+
+void zend_collection_info_request_shutdown(void)
+{
+	zend_collection_info *head;
+
+	ZEND_HASH_FOREACH_PTR(&EG(collection_types), head) {
+		zend_collection_info *cur = head;
+
+		while (cur) {
+			zend_collection_info *next = cur->next;
+
+			/* Only this node's own strings. Nested nodes are borrowed and are
+			 * freed by this same sweep. */
+			for (uint32_t i = 0; i < cur->num_types; i++) {
+				if (ZEND_TYPE_HAS_NAME(cur->types[i])) {
+					zend_string_release(ZEND_TYPE_NAME(cur->types[i]));
+				}
+			}
+			efree(cur);
+			cur = next;
+		}
+	} ZEND_HASH_FOREACH_END();
+
+	zend_hash_destroy(&EG(collection_types));
+	/* Leave a valid empty table: preload runs this teardown and then keeps
+	 * using the executor globals. */
+	zend_hash_init(&EG(collection_types), 8, NULL, NULL, 0);
+}
+
+/* Collisions cannot be produced on demand from PHP -- they need two structurally
+ * different types whose FNV keys agree. So the *behaviour* is exercised instead:
+ * two real canonical nodes are chained as if they shared a key, and the chain
+ * walk must still return each one only for its own descriptor. */
+ZEND_API bool zend_collection_info_collision_selftest(void)
+{
+	union {
+		zend_collection_type desc;
+		char buf[ZEND_TYPE_COLLECTION_SIZE(1)];
+	} a, b;
+	zend_type ta = ZEND_TYPE_INIT_NONE(0);
+	zend_type tb = ZEND_TYPE_INIT_NONE(0);
+	zend_type m_long = ZEND_TYPE_INIT_MASK(1u << IS_LONG);
+	zend_type m_string = ZEND_TYPE_INIT_MASK(1u << IS_STRING);
+	const zend_collection_info *node_a, *node_b;
+	zend_collection_info *mutable_b;
+	zend_collection_info *saved_next;
+	bool ok;
+
+	a.desc.kind = ZEND_COLLECTION_TYPE_VEC;
+	a.desc.num_types = 1;
+	a.desc.types[0] = m_long;
+	ZEND_TYPE_SET_COLLECTION(ta, &a.desc);
+
+	b.desc.kind = ZEND_COLLECTION_TYPE_VEC;
+	b.desc.num_types = 1;
+	b.desc.types[0] = m_string;
+	ZEND_TYPE_SET_COLLECTION(tb, &b.desc);
+
+	node_a = zend_collection_info_intern(ta);
+	node_b = zend_collection_info_intern(tb);
+	if (!node_a || !node_b || node_a == node_b) {
+		return false;
+	}
+
+	/* Splice A onto B's chain, so a walk from B sees both. Restored below. */
+	mutable_b = (zend_collection_info *) node_b;
+	saved_next = mutable_b->next;
+	mutable_b->next = (zend_collection_info *) node_a;
+
+	ok = collection_info_find_in_chain(node_b, tb) == node_b
+	  && collection_info_find_in_chain(node_b, ta) == node_a;
+
+	mutable_b->next = saved_next;
+
+	return ok;
 }

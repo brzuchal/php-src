@@ -29,6 +29,7 @@
 #include "zend_ptr_stack.h"
 #include "zend_constants.h"
 #include "zend_vec.h"
+#include "zend_collection_info.h"
 #include "zend_extensions.h"
 #include "zend_ini.h"
 #include "zend_exceptions.h"
@@ -1070,16 +1071,14 @@ static bool zend_check_and_resolve_property_or_class_constant_class_type(
  * invariant. Never routed through the class or scalar paths. */
 static bool zend_check_collection_type(const zend_type *type, const zval *arg)
 {
-	const zend_collection_type *desc = ZEND_TYPE_COLLECTION(*type);
-
 	if (Z_TYPE_P(arg) != IS_COLLECTION) {
 		return false;
 	}
-	/* vec is the only kind, and carries exactly one element type on the value. */
-	if (desc->kind != ZEND_COLLECTION_TYPE_VEC || desc->num_types != 1) {
-		return false;
-	}
-	return zend_type_structurally_equals(Z_VEC_P(arg)->element_type, desc->types[0]);
+	/* The value carries a canonical node; the declaration is still a compiler
+	 * descriptor. Comparing them directly keeps this check allocation-free --
+	 * interning here would allocate inside a type check. Once the VM caches the
+	 * promoted declaration, this becomes a pointer comparison. */
+	return zend_collection_info_matches_type(Z_VEC_P(arg)->type, *type);
 }
 
 static zend_always_inline bool i_zend_check_property_type(const zend_property_info *info, zval *property, bool strict)

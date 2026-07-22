@@ -31,6 +31,7 @@
 #include "zend_closures.h"
 #include "zend_generators.h"
 #include "zend_vm.h"
+#include "zend_collection_info.h"
 #include "zend_float.h"
 #include "zend_fibers.h"
 #include "zend_weakrefs.h"
@@ -201,6 +202,7 @@ void init_executor(void) /* {{{ */
 	zend_weakrefs_init();
 
 	zend_hash_init(&EG(callable_convert_cache), 8, NULL, ZVAL_PTR_DTOR, 0);
+	zend_collection_info_request_init();
 
 	EG(active) = 1;
 }
@@ -429,6 +431,12 @@ ZEND_API void zend_shutdown_executor_values(bool fast_shutdown)
 	}
 
 	zend_objects_store_free_object_storage(&EG(objects_store), fast_shutdown);
+
+	/* INV-4: after the object store, so every value that could borrow a
+	 * canonical type node is already gone. This function rather than
+	 * shutdown_executor() is the hook point, because preload calls it
+	 * directly and never calls shutdown_executor(). */
+	zend_collection_info_request_shutdown();
 }
 
 void shutdown_executor(void) /* {{{ */

@@ -353,6 +353,13 @@ namespace {
     /** @return array<string, bool> */
     function zend_test_collection_key_unsupported(): array {}
 
+    /** @return array<string, mixed>|null */
+    function zend_test_collection_intern(string $function): ?array {}
+
+    function zend_test_vec_type_id(mixed $vec): int {}
+
+    function zend_test_collection_collision_selftest(): bool {}
+
     function zend_test_zend_ini_parse_quantity(string $str): int {}
     function zend_test_zend_ini_parse_uquantity(string $str): int {}
 

@@ -21,6 +21,7 @@
 #include <stddef.h>
 
 #include "zend_types.h"
+#include "zend_collection_info.h"
 
 BEGIN_EXTERN_C()
 
@@ -32,16 +33,20 @@ BEGIN_EXTERN_C()
  * them. Nothing here may be passed to zend_array_dup(), SEPARATE_ARRAY() or
  * the array persistence paths.
  *
- * The declared element type is an embedded zend_type, restricted to the subset
- * a runtime value can own safely (see zend_vec_type_is_supported): a pure
- * builtin mask, or a single refcounted class-name zend_string. Type lists,
- * literal names and arena-backed types are not supported yet. */
+ * The declared type is a *borrowed* canonical node owned by the request intern
+ * tier (see zend_collection_info.h). A vec never owns, copies, addrefs or
+ * releases it, so construction and destruction do no type-ownership work, and
+ * an arena or SHM descriptor cannot be reached from a value: promotion strips
+ * provenance and stores nested members as canonical child nodes. */
 typedef struct _zend_vec {
 	zend_refcounted_h gc;
-	zend_type         element_type;
+	const zend_collection_info *type;   /* borrowed; the whole vec[T], not just T */
 	uint32_t          count;
 	zval              elements[1];
 } zend_vec;
+
+/* The declared element type of a vec: T in vec[T]. */
+#define ZEND_VEC_ELEMENT_TYPE(vec) ((vec)->type->types[0])
 
 /* offsetof is the only layout contract; do not assume a fixed header size. */
 #define ZEND_VEC_HEADER_SIZE     offsetof(zend_vec, elements)
@@ -62,28 +67,20 @@ typedef struct _zend_vec {
 #define ZEND_VEC_COUNT(vec)      ((vec)->count)
 #define ZEND_VEC_ELEMENTS(vec)   ((vec)->elements)
 
-/* The single definition of the element-type subset a vec may own. True for a
- * pure builtin mask, or a single class-name zend_string with no additional
- * may-be bits (i.e. no union, no nullable). False for everything else,
- * including type lists, literal names and arena-backed types. A HAS_NAME type
- * carries a refcounted class name only; it is not a resolved zend_class_entry,
- * and class lookup / autoload / instanceof are future concerns. */
+/* The element subset a value may hold: a pure builtin mask of exactly one
+ * element kind, or a single class-name zend_string with no extra may-be bits.
+ * Narrower than what canonicalization accepts as a *type*.
+ *
+ * Operates on members of a canonical node, so a nested member is read as a
+ * zend_collection_info child, never as a compiler descriptor. */
 ZEND_API bool zend_vec_type_is_supported(zend_type type);
-
-/* Copy a supported element type into *dst by value, taking ownership of a
- * class-name zend_string via addref. Asserts the type is supported. */
-ZEND_API void zend_vec_type_copy(zend_type *dst, zend_type src);
-
-/* Drop ownership of a supported element type: release a class-name
- * zend_string. A no-op for pure masks. */
-ZEND_API void zend_vec_type_dtor(zend_type type);
 
 /* Build a vec from a packed list of values. This is the only construction
  * entry point: reserving storage and installing elements are private to
  * zend_vec.c, so the capacity invariant they share cannot be violated from
  * outside. On any element failing validation the partially built vec is
  * destroyed, touching only the slots already installed, and NULL is returned. */
-ZEND_API zend_vec *zend_vec_create(const HashTable *values, zend_type element_type);
+ZEND_API zend_vec *zend_vec_create(const HashTable *values, const zend_collection_info *type);
 
 /* Exercise the private construction path's invariants from inside the engine
  * boundary, so they keep direct coverage without re-exporting the two-step

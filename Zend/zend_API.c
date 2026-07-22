@@ -21,6 +21,7 @@
 #include "zend.h"
 #include "zend_compile.h"
 #include "zend_vec.h"
+#include "zend_collection_info.h"
 #include "zend_execute.h"
 #include "zend_API.h"
 #include "zend_hash.h"
@@ -173,15 +174,9 @@ ZEND_API zend_string *zend_zval_collection_type_name(const zval *arg)
 		return NULL;
 	}
 
-	zend_collection_type desc;
-	desc.kind = ZEND_COLLECTION_TYPE_VEC;
-	desc.num_types = 1;
-	desc.types[0] = Z_VEC_P(arg)->element_type;
-
-	zend_type type = ZEND_TYPE_INIT_NONE(0);
-	ZEND_TYPE_SET_COLLECTION(type, &desc);
-
-	return zend_type_to_string(type);
+	/* Rendered from the value's canonical node, so nested types print in full
+	 * ("vec[vec[int]]") without rebuilding a descriptor. */
+	return zend_collection_info_to_string(Z_VEC_P(arg)->type);
 }
 
 ZEND_API const char *zend_zval_type_name(const zval *arg)
