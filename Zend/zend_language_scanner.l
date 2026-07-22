@@ -1615,7 +1615,40 @@ OPTIONAL_WHITESPACE_OR_COMMENTS ({WHITESPACE}|{MULTI_LINE_COMMENT}|{SINGLE_LINE_
 }
 
 <ST_IN_SCRIPTING>"::" {
+	yy_push_state(ST_AFTER_DOUBLE_COLON);
 	RETURN_TOKEN(T_PAAMAYIM_NEKUDOTAYIM);
+}
+
+/* Compound collection heads. Recognised only when the head name is immediately
+ * followed by '[', so no identifier is reserved: `function vec()`, `class vec`,
+ * `const vec`, `$o->vec` and `Foo::vec` all keep working. re2c runs with
+ * --case-inverted, so these match case-insensitively.
+ *
+ * The token swallows its bracket, so it must register with the scanner's
+ * nesting stack or the matching ']' reports "Unmatched ']'". */
+<ST_IN_SCRIPTING>"vec[" { enter_nesting('['); RETURN_TOKEN(T_VEC_LBRACKET); }
+<ST_IN_SCRIPTING>"map[" { enter_nesting('['); RETURN_TOKEN(T_MAP_LBRACKET); }
+<ST_IN_SCRIPTING>"set[" { enter_nesting('['); RETURN_TOKEN(T_SET_LBRACKET); }
+<ST_IN_SCRIPTING>"tuple[" { enter_nesting('['); RETURN_TOKEN(T_TUPLE_LBRACKET); }
+<ST_IN_SCRIPTING>"shape[" { enter_nesting('['); RETURN_TOKEN(T_SHAPE_LBRACKET); }
+
+/* A collection head can never follow '::' -- the grammar admits only
+ * identifier / member_name / simple_variable / '{' there. Intercept exactly the
+ * head-plus-bracket sequence, hand the '[' back, and emit the T_STRING that
+ * baseline emits. Every other input pops immediately and is rescanned by the
+ * normal ST_IN_SCRIPTING rules, so no keyword tokenisation changes.
+ * ('->' and '?->' need no equivalent: they already push
+ * ST_LOOKING_FOR_PROPERTY, where the compound rules do not exist.) */
+<ST_AFTER_DOUBLE_COLON>("vec"|"map"|"set"|"tuple"|"shape")"[" {
+	yyless(yyleng - 1);
+	yy_pop_state();
+	RETURN_TOKEN_WITH_STR(T_STRING, 0);
+}
+
+<ST_AFTER_DOUBLE_COLON>{ANY_CHAR} {
+	yyless(0);
+	yy_pop_state();
+	goto restart;
 }
 
 <ST_IN_SCRIPTING>"..." {

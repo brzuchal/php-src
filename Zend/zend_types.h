@@ -130,7 +130,11 @@ typedef struct {
 /* Runtime kind of a collection type. Grows as further collection types are
  * added; the descriptor below is generic over all of them. */
 typedef enum {
-	ZEND_COLLECTION_TYPE_VEC = 0,
+	ZEND_COLLECTION_TYPE_VEC   = 0,
+	ZEND_COLLECTION_TYPE_MAP   = 1,
+	ZEND_COLLECTION_TYPE_SET   = 2,
+	ZEND_COLLECTION_TYPE_TUPLE = 3,
+	ZEND_COLLECTION_TYPE_SHAPE = 4,
 } zend_collection_type_kind;
 
 /* Reified parameter of a collection type declaration such as vec[int]. Stored

@@ -1453,30 +1453,35 @@ typedef struct {
 	const char *name;
 	size_t      name_len;
 	uint32_t    kind;
-	uint32_t    num_types;   /* required arity of the parameter list */
+	uint32_t    num_types;   /* required arity, or 0 for variable */
+	bool        runtime_ready;
 } zend_collection_type_info;
 
+/* num_types 0 means "variable arity, at least one". runtime_ready marks kinds
+ * whose value representation exists; the parser accepts the whole family, and
+ * the compiler rejects the rest with a clear diagnostic. */
 static const zend_collection_type_info collection_type_infos[] = {
-	{ZEND_STRL("vec"), ZEND_COLLECTION_TYPE_VEC, 1},
-	{NULL, 0, 0, 0}
+	{ZEND_STRL("vec"),   ZEND_COLLECTION_TYPE_VEC,   1, true},
+	{ZEND_STRL("map"),   ZEND_COLLECTION_TYPE_MAP,   2, false},
+	{ZEND_STRL("set"),   ZEND_COLLECTION_TYPE_SET,   1, false},
+	{ZEND_STRL("tuple"), ZEND_COLLECTION_TYPE_TUPLE, 0, false},
+	{ZEND_STRL("shape"), ZEND_COLLECTION_TYPE_SHAPE, 0, false},
+	{NULL, 0, 0, 0, false}
 };
 
-ZEND_API const char *zend_collection_type_kind_name(uint32_t kind) {
+static const zend_collection_type_info *zend_collection_type_by_kind(uint32_t kind) {
 	for (const zend_collection_type_info *info = collection_type_infos; info->name; info++) {
 		if (info->kind == kind) {
-			return info->name;
+			return info;
 		}
 	}
 	return NULL;
 }
 
-static const zend_collection_type_info *zend_lookup_collection_type_by_name(
-		const zend_string *name) {
+ZEND_API const char *zend_collection_type_kind_name(uint32_t kind) {
 	for (const zend_collection_type_info *info = collection_type_infos; info->name; info++) {
-		if (ZSTR_LEN(name) == info->name_len
-		 && zend_binary_strcasecmp(ZSTR_VAL(name), ZSTR_LEN(name),
-				info->name, info->name_len) == 0) {
-			return info;
+		if (info->kind == kind) {
+			return info->name;
 		}
 	}
 	return NULL;
@@ -7606,25 +7611,26 @@ static zend_type zend_compile_typename(zend_ast *ast);
  * nullable parameters and class parameters all work without special cases. */
 static zend_type zend_compile_collection_typename(zend_ast *ast)
 {
-	zend_ast *name_ast = ast->child[0];
-	const zend_ast_list *args = zend_ast_get_list(ast->child[1]);
-	zend_string *name = zend_ast_get_str(name_ast);
+	/* The kind is decided lexically and recorded on the node, so this is
+	 * independent of how the parser recognised the head. Adjacency between the
+	 * head and '[' is required: the soft `name '[' args ']'` production is
+	 * deliberately absent, so `vec [int]`, `\Ns\vec[int]` and `Foo[int]` are
+	 * syntax errors rather than compile errors. See
+	 * implementation-notes/parser-architecture-decision.md. */
+	const zend_ast_list *args = zend_ast_get_list(ast->child[0]);
+	const zend_collection_type_info *info = zend_collection_type_by_kind(ast->attr);
 
-	if ((name_ast->attr & ZEND_NAME_NOT_FQ) != ZEND_NAME_NOT_FQ) {
-		zend_error_noreturn(E_COMPILE_ERROR,
-			"Collection type \"%s\" must be unqualified", ZSTR_VAL(name));
-	}
+	ZEND_ASSERT(info != NULL && "collection AST carries an unknown kind");
 
-	const zend_collection_type_info *info = zend_lookup_collection_type_by_name(name);
-	if (info == NULL) {
-		zend_error_noreturn(E_COMPILE_ERROR,
-			"Unknown collection type \"%s\"", ZSTR_VAL(name));
-	}
-	if (args->children != info->num_types) {
+	if (info->num_types != 0 && args->children != info->num_types) {
 		zend_error_noreturn(E_COMPILE_ERROR,
 			"Collection type %s expects %u parameter%s, %u given",
 			info->name, info->num_types, info->num_types == 1 ? "" : "s",
 			args->children);
+	}
+	if (!info->runtime_ready) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Collection type %s is not implemented yet", info->name);
 	}
 
 	zend_collection_type *desc = zend_arena_alloc(&CG(arena),

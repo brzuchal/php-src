@@ -1,8 +1,8 @@
 --TEST--
-collection types: unknown collection kind
+collection types: only the five heads form a collection type
 --FILE--
 <?php
 function f(Foo[int] $x) {}
 ?>
 --EXPECTF--
-Fatal error: Unknown collection type "Foo" in %s on line %d
+Parse error: syntax error, unexpected token "[", expecting variable in %s on line %d
