@@ -2057,11 +2057,15 @@ static ZEND_COLD void zend_ast_export_type(smart_str *str, zend_ast *ast, int in
 		return;
 	}
 	if (ast->kind == ZEND_AST_TYPE_COLLECTION) {
-		const zend_ast_list *args = zend_ast_get_list(ast->child[1]);
+		/* One child, the parameter list; the head is not stored as a name node,
+		 * because the kind is recorded in `attr` so that the AST does not depend
+		 * on how the parser spelled the head. */
+		const zend_ast_list *args = zend_ast_get_list(ast->child[0]);
 		if (ast->attr & ZEND_TYPE_NULLABLE) {
 			smart_str_appendc(str, '?');
 		}
-		zend_ast_export_ns_name(str, ast->child[0], 0, indent);
+		smart_str_appends(str,
+			zend_collection_type_kind_name(ast->attr & ~ZEND_TYPE_NULLABLE));
 		smart_str_appendc(str, '[');
 		for (uint32_t i = 0; i < args->children; i++) {
 			if (i != 0) {
