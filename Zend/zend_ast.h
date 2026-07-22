@@ -70,6 +70,10 @@ enum _zend_ast_kind {
 	ZEND_AST_MATCH_ARM_LIST,
 	ZEND_AST_MODIFIER_LIST,
 	ZEND_AST_TYPE_COLLECTION_ARGS,
+	/* Element expressions of a collection literal, in source order. Plain
+	 * expressions: a collection literal has no keys, no by-reference elements
+	 * and no unpacking, so this is deliberately not a ZEND_AST_ARRAY. */
+	ZEND_AST_COLLECTION_ELEMENTS,
 
 	/* 0 child nodes */
 	ZEND_AST_MAGIC_CONST = 0 << ZEND_AST_NUM_CHILDREN_SHIFT,
@@ -140,6 +144,14 @@ enum _zend_ast_kind {
 	ZEND_AST_YIELD,
 	ZEND_AST_COALESCE,
 	ZEND_AST_ASSIGN_COALESCE,
+	/* Collection literal, e.g. vec[int]{1, 2}. child[0] is the
+	 * ZEND_AST_TYPE_COLLECTION_ARGS list -- the same node the type production
+	 * builds, so declarations and literals compile their descriptor through one
+	 * path -- and child[1] is the ZEND_AST_COLLECTION_ELEMENTS list. `attr`
+	 * carries the zend_collection_type_kind, exactly as for
+	 * ZEND_AST_TYPE_COLLECTION, so the node does not record how the parser
+	 * recognised the head. */
+	ZEND_AST_COLLECTION,
 
 	ZEND_AST_STATIC,
 	ZEND_AST_WHILE,

@@ -7606,10 +7606,15 @@ static zend_type zend_compile_typename(zend_ast *ast);
 
 static zend_type zend_compile_typename(zend_ast *ast);
 
-/* Compile a parameterized collection type such as vec[int]. Parameters are
- * compiled through the ordinary type compiler, so nesting (vec[vec[int]]),
- * nullable parameters and class parameters all work without special cases. */
-static zend_type zend_compile_collection_typename(zend_ast *ast)
+/* Compile a parameterized collection descriptor such as the vec[int] in either
+ * a type declaration or a literal. Parameters are compiled through the ordinary
+ * type compiler, so nesting (vec[vec[int]]), nullable parameters and class
+ * parameters all work without special cases.
+ *
+ * Declarations and literals share this one path deliberately: a literal's
+ * descriptor must mean exactly what the identically spelled declaration means,
+ * and two compilers would be two chances for them to drift apart. */
+static zend_type zend_compile_collection_descriptor(uint32_t kind, zend_ast *args_ast)
 {
 	/* The kind is decided lexically and recorded on the node, so this is
 	 * independent of how the parser recognised the head. Adjacency between the
@@ -7617,8 +7622,8 @@ static zend_type zend_compile_collection_typename(zend_ast *ast)
 	 * deliberately absent, so `vec [int]`, `\Ns\vec[int]` and `Foo[int]` are
 	 * syntax errors rather than compile errors. See
 	 * implementation-notes/parser-architecture-decision.md. */
-	const zend_ast_list *args = zend_ast_get_list(ast->child[0]);
-	const zend_collection_type_info *info = zend_collection_type_by_kind(ast->attr);
+	const zend_ast_list *args = zend_ast_get_list(args_ast);
+	const zend_collection_type_info *info = zend_collection_type_by_kind(kind);
 
 	ZEND_ASSERT(info != NULL && "collection AST carries an unknown kind");
 
@@ -7645,6 +7650,11 @@ static zend_type zend_compile_collection_typename(zend_ast *ast)
 	ZEND_TYPE_SET_COLLECTION(type, desc);
 	ZEND_TYPE_FULL_MASK(type) |= _ZEND_TYPE_ARENA_BIT;
 	return type;
+}
+
+static zend_type zend_compile_collection_typename(zend_ast *ast)
+{
+	return zend_compile_collection_descriptor(ast->attr, ast->child[0]);
 }
 
 static zend_type zend_compile_typename_ex(
@@ -11459,6 +11469,22 @@ static void zend_compile_array(znode *result, zend_ast *ast) /* {{{ */
 }
 /* }}} */
 
+/* Compile a collection literal such as vec[int]{1, 2}.
+ *
+ * Not implemented yet: the descriptor has nowhere to live until the op_array
+ * carries a descriptor table, and there is no construction opcode to read it.
+ * The syntax is accepted by the parser so that the AST shape is fixed first;
+ * this is the only thing between it and a working literal. */
+static void zend_compile_collection_literal(znode *result, const zend_ast *ast)
+{
+	const zend_collection_type_info *info = zend_collection_type_by_kind(ast->attr);
+
+	ZEND_ASSERT(info != NULL && "collection literal AST carries an unknown kind");
+
+	zend_error_noreturn(E_COMPILE_ERROR,
+		"Collection literals are not implemented yet");
+}
+
 static void zend_compile_const(znode *result, const zend_ast *ast) /* {{{ */
 {
 	zend_ast *name_ast = ast->child[0];
@@ -12032,6 +12058,17 @@ static void zend_compile_const_expr(zend_ast **ast_ptr, void *context) /* {{{ */
 		return;
 	}
 
+	/* D-10. A collection literal builds a request-bound value: its type node is
+	 * owned by the request intern tier, so a folded constant could not survive
+	 * into SHM or into another request. Rejecting it here rather than only by
+	 * omission from zend_is_allowed_in_const_expr() buys a diagnostic that says
+	 * what is wrong, and keeps the invariant stated where it is enforced. The
+	 * omission stays as the backstop. */
+	if (ast->kind == ZEND_AST_COLLECTION) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Collection literals are not allowed in constant expressions");
+	}
+
 	if (!zend_is_allowed_in_const_expr(ast->kind)) {
 		zend_error_noreturn(E_COMPILE_ERROR, "Constant expression contains invalid operations");
 	}
@@ -12365,6 +12402,9 @@ static void zend_compile_expr_inner(znode *result, zend_ast *ast) /* {{{ */
 			return;
 		case ZEND_AST_ARRAY:
 			zend_compile_array(result, ast);
+			return;
+		case ZEND_AST_COLLECTION:
+			zend_compile_collection_literal(result, ast);
 			return;
 		case ZEND_AST_CONST:
 			zend_compile_const(result, ast);
