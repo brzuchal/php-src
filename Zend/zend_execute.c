@@ -1074,11 +1074,16 @@ static bool zend_check_collection_type(const zend_type *type, const zval *arg)
 	if (Z_TYPE_P(arg) != IS_COLLECTION) {
 		return false;
 	}
-	/* The value carries a canonical node; the declaration is still a compiler
-	 * descriptor. Comparing them directly keeps this check allocation-free --
-	 * interning here would allocate inside a type check. Once the VM caches the
-	 * promoted declaration, this becomes a pointer comparison. */
-	return zend_collection_info_matches_type(Z_VEC_P(arg)->type, *type);
+	/* Both sides are canonical after the declaration is resolved, so the check
+	 * is a pointer comparison. The descriptor is walked at most once per
+	 * request, on the first execution that reaches this declaration; every
+	 * later execution answers from the resolution cache.
+	 *
+	 * Fails closed when the declaration is outside the supported boundary:
+	 * no node exists for it, so no value can satisfy it. */
+	const zend_collection_info *declared = zend_collection_info_resolve(*type);
+
+	return declared != NULL && Z_VEC_P(arg)->type == declared;
 }
 
 static zend_always_inline bool i_zend_check_property_type(const zend_property_info *info, zval *property, bool strict)

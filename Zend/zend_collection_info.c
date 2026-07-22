@@ -197,6 +197,25 @@ ZEND_API zend_ulong zend_collection_key_hash_type(zend_type type)
 
 #if ZEND_DEBUG
 static uint64_t collection_info_descents = 0;
+static uint64_t collection_info_promotions = 0;
+
+ZEND_API uint64_t zend_collection_info_promotion_count(void)
+{
+	return collection_info_promotions;
+}
+
+ZEND_API uint32_t zend_collection_info_node_count(void)
+{
+	uint32_t n = 0;
+	zend_collection_info *head;
+
+	ZEND_HASH_FOREACH_PTR(&EG(collection_types), head) {
+		for (const zend_collection_info *cur = head; cur; cur = cur->next) {
+			n++;
+		}
+	} ZEND_HASH_FOREACH_END();
+	return n;
+}
 
 ZEND_API uint64_t zend_collection_info_descent_count(void)
 {
@@ -471,9 +490,61 @@ ZEND_API zend_string *zend_collection_info_to_string(const zend_collection_info 
 	return str.s;
 }
 
+/* Resolve a declaration to its canonical node, promoting at most once per
+ * distinct descriptor per request.
+ *
+ * Lifetime      The cache is request-local and is destroyed with the intern
+ *               tier, in the same teardown, so a cached pointer can never
+ *               outlive the node it names.
+ * Invalidation  None is needed within a request: nodes are immutable and the
+ *               tier never evicts. Across requests both structures are rebuilt
+ *               from empty, so nothing stale can survive.
+ * Contents      Borrowed zend_collection_info* only. No compiler descriptor is
+ *               ever stored, and no ownership is taken (INV-1/INV-2).
+ * Keying        By descriptor address. Safe precisely because the cache is
+ *               request-local: an arena descriptor lives for the request, an
+ *               SHM or file-cache descriptor for at least that long, and the
+ *               table is discarded before either can be reused.
+ * opcache       Nothing is written into the descriptor, so SHM stays read-only
+ *               and shareable, and preload is unaffected -- a preloaded
+ *               descriptor is simply resolved again in each request that uses
+ *               it.
+ * Failure       A descriptor outside the supported boundary is not cached, so
+ *               a failed promotion cannot poison the entry; the next execution
+ *               retries and can succeed if the boundary later widens.
+ */
+ZEND_API const zend_collection_info *zend_collection_info_resolve(zend_type type)
+{
+	if (!ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
+		return NULL;
+	}
+
+	zend_ulong key = (zend_ulong) (uintptr_t) ZEND_TYPE_COLLECTION(type);
+	const zend_collection_info *cached =
+		zend_hash_index_find_ptr(&EG(collection_type_cache), key);
+
+	if (EXPECTED(cached != NULL)) {
+		return cached;
+	}
+
+#if ZEND_DEBUG
+	collection_info_promotions++;
+#endif
+
+	const zend_collection_info *info = zend_collection_info_intern(type);
+	if (!info) {
+		/* Deliberately not cached: see "Failure" above. */
+		return NULL;
+	}
+
+	zend_hash_index_add_new_ptr(&EG(collection_type_cache), key, (void *) info);
+	return info;
+}
+
 void zend_collection_info_request_init(void)
 {
 	zend_hash_init(&EG(collection_types), 8, NULL, NULL, 0);
+	zend_hash_init(&EG(collection_type_cache), 8, NULL, NULL, 0);
 }
 
 void zend_collection_info_request_shutdown(void)
@@ -498,10 +569,14 @@ void zend_collection_info_request_shutdown(void)
 		}
 	} ZEND_HASH_FOREACH_END();
 
+	/* The resolution cache holds only borrowed nodes, so it is dropped first
+	 * and frees nothing itself. */
+	zend_hash_destroy(&EG(collection_type_cache));
 	zend_hash_destroy(&EG(collection_types));
-	/* Leave a valid empty table: preload runs this teardown and then keeps
+	/* Leave valid empty tables: preload runs this teardown and then keeps
 	 * using the executor globals. */
 	zend_hash_init(&EG(collection_types), 8, NULL, NULL, 0);
+	zend_hash_init(&EG(collection_type_cache), 8, NULL, NULL, 0);
 }
 
 /* Collisions cannot be produced on demand from PHP -- they need two structurally

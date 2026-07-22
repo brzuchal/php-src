@@ -69,12 +69,14 @@ $a = $d();
 zend_test_collection_intern('takes_n2');
 var_dump($d() - $a === 2);
 
-echo "-- and it is exactly linear in depth, never in use count --\n";
+echo "-- and only on the first check: the resolution cache absorbs the rest --\n";
+/* takes_n1 was resolved just above, so every further check answers from the
+ * resolution cache and descends nothing at all. */
 $a = $d();
 for ($i = 0; $i < 10; $i++) {
     takes_n1($nested);
 }
-var_dump($d() - $a === 10);
+var_dump($d() - $a === 0);
 
 ?>
 --EXPECT--
@@ -87,5 +89,5 @@ bool(true)
 -- what still descends: the descriptor side of a lookup --
 bool(true)
 bool(true)
--- and it is exactly linear in depth, never in use count --
+-- and only on the first check: the resolution cache absorbs the rest --
 bool(true)

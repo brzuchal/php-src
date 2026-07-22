@@ -330,6 +330,10 @@ struct _zend_executor_globals {
 	 * holds; values borrow. Destroyed in zend_shutdown_executor_values(). */
 	HashTable collection_types;
 
+	/* Resolution cache: compiler descriptor address -> canonical node. Holds
+	 * borrowed nodes only, never descriptors, and is torn down with the tier. */
+	HashTable collection_type_cache;
+
 	void *reserved[ZEND_MAX_RESERVED_RESOURCES];
 };
 

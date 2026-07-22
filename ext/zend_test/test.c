@@ -1284,6 +1284,23 @@ static ZEND_FUNCTION(zend_test_vec_type_id)
 
 /* Cached classification of a canonical node. Every field here is written once,
  * during promotion, and read-only afterwards. */
+/* Cache-behaviour counters. NULL in release builds, where they do not exist. */
+static ZEND_FUNCTION(zend_test_collection_stats)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+#if ZEND_DEBUG
+	array_init(return_value);
+	add_assoc_long(return_value, "descents",
+		(zend_long) zend_collection_info_descent_count());
+	add_assoc_long(return_value, "promotions",
+		(zend_long) zend_collection_info_promotion_count());
+	add_assoc_long(return_value, "nodes",
+		(zend_long) zend_collection_info_node_count());
+#else
+	RETURN_NULL();
+#endif
+}
+
 static ZEND_FUNCTION(zend_test_collection_classify)
 {
 	zend_string *fname;

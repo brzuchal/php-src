@@ -183,6 +183,14 @@ ZEND_API bool zend_collection_info_matches_type(
  * memory neither escapes into the node nor is freed by it. */
 ZEND_API const zend_collection_info *zend_collection_info_intern(zend_type type);
 
+/* RESOLUTION CACHE. The runtime entry point for a *declaration*: returns the
+ * canonical node for a compiler descriptor, promoting at most once per distinct
+ * descriptor per request and answering from cache afterwards. Callers that hold
+ * a declaration should use this rather than intern(), so a repeated check never
+ * re-walks the descriptor. Returns NULL for unsupported forms, which are never
+ * cached. See the definition for lifetime, invalidation and opcache notes. */
+ZEND_API const zend_collection_info *zend_collection_info_resolve(zend_type type);
+
 /* "vec[int]", "vec[vec[Foo]]" -- for diagnostics. Caller owns the result. */
 ZEND_API zend_string *zend_collection_info_to_string(const zend_collection_info *info);
 
@@ -200,6 +208,10 @@ ZEND_API bool zend_collection_info_collision_selftest(void);
  * into a nested node, so tests can demonstrate that cached classification --
  * not recursion -- answers the common checks. Not present in release builds. */
 ZEND_API uint64_t zend_collection_info_descent_count(void);
+/* Promotions actually performed, i.e. resolution-cache misses. */
+ZEND_API uint64_t zend_collection_info_promotion_count(void);
+/* Live canonical nodes in the request tier. */
+ZEND_API uint32_t zend_collection_info_node_count(void);
 #endif
 
 END_EXTERN_C()

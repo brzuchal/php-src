@@ -365,6 +365,9 @@ namespace {
 
     function zend_test_collection_descents(): ?int {}
 
+    /** @return array<string, int>|null */
+    function zend_test_collection_stats(): ?array {}
+
     function zend_test_zend_ini_parse_quantity(string $str): int {}
     function zend_test_zend_ini_parse_uquantity(string $str): int {}
 

@@ -1,5 +1,5 @@
 /* This is a generated file, edit test.stub.php instead.
- * Stub hash: 59dea3161abbf8c9ebfb769a4ac322335a6a560a
+ * Stub hash: 52811b8c2aadf8c8e6cdaf9a0e95da21e248644a
  * Has decl header: yes */
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_trigger_bailout, 0, 0, 0)
@@ -161,6 +161,8 @@ ZEND_END_ARG_INFO()
 #define arginfo_zend_test_collection_classify arginfo_zend_test_collection_key
 
 #define arginfo_zend_test_collection_descents arginfo_zend_trigger_bailout
+
+#define arginfo_zend_test_collection_stats arginfo_zend_trigger_bailout
 
 #define arginfo_zend_test_zend_ini_parse_quantity arginfo_zend_create_unterminated_string
 
@@ -353,6 +355,7 @@ static ZEND_FUNCTION(zend_test_vec_type_id);
 static ZEND_FUNCTION(zend_test_collection_collision_selftest);
 static ZEND_FUNCTION(zend_test_collection_classify);
 static ZEND_FUNCTION(zend_test_collection_descents);
+static ZEND_FUNCTION(zend_test_collection_stats);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_quantity);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_uquantity);
 static ZEND_FUNCTION(zend_test_zend_ini_str);
@@ -476,6 +479,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_test_collection_collision_selftest, arginfo_zend_test_collection_collision_selftest)
 	ZEND_FE(zend_test_collection_classify, arginfo_zend_test_collection_classify)
 	ZEND_FE(zend_test_collection_descents, arginfo_zend_test_collection_descents)
+	ZEND_FE(zend_test_collection_stats, arginfo_zend_test_collection_stats)
 	ZEND_FE(zend_test_zend_ini_parse_quantity, arginfo_zend_test_zend_ini_parse_quantity)
 	ZEND_FE(zend_test_zend_ini_parse_uquantity, arginfo_zend_test_zend_ini_parse_uquantity)
 	ZEND_FE(zend_test_zend_ini_str, arginfo_zend_test_zend_ini_str)
