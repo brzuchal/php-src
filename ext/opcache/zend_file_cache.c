@@ -520,6 +520,7 @@ static void zend_file_cache_serialize_op_array(zend_op_array            *op_arra
 			SERIALIZE_PTR(op_array->literals);
 			SERIALIZE_PTR(op_array->opcodes);
 			SERIALIZE_PTR(op_array->arg_info);
+			SERIALIZE_PTR(op_array->collection_types);
 			SERIALIZE_PTR(op_array->vars);
 			SERIALIZE_STR(op_array->function_name);
 			SERIALIZE_STR(op_array->filename);
@@ -667,6 +668,19 @@ static void zend_file_cache_serialize_op_array(zend_op_array            *op_arra
 				}
 				zend_file_cache_serialize_type(&p->type, script, info, buf);
 				SERIALIZE_STR(p->doc_comment);
+				p++;
+			}
+		}
+
+		if (op_array->collection_types) {
+			zend_type *p, *end;
+
+			SERIALIZE_PTR(op_array->collection_types);
+			p = op_array->collection_types;
+			UNSERIALIZE_PTR(p);
+			end = p + op_array->last_collection_type;
+			while (p < end) {
+				zend_file_cache_serialize_type(p, script, info, buf);
 				p++;
 			}
 		}
@@ -1460,6 +1474,7 @@ static void zend_file_cache_unserialize_op_array(zend_op_array           *op_arr
 		UNSERIALIZE_PTR(op_array->literals);
 		UNSERIALIZE_PTR(op_array->opcodes);
 		UNSERIALIZE_PTR(op_array->arg_info);
+		UNSERIALIZE_PTR(op_array->collection_types);
 		UNSERIALIZE_PTR(op_array->vars);
 		UNSERIALIZE_STR(op_array->function_name);
 		UNSERIALIZE_STR(op_array->filename);
@@ -1579,6 +1594,19 @@ static void zend_file_cache_unserialize_op_array(zend_op_array           *op_arr
 				}
 				zend_file_cache_unserialize_type(&p->type, (op_array->fn_flags & ZEND_ACC_CLOSURE) ? NULL : op_array->scope, script, buf);
 				UNSERIALIZE_STR(p->doc_comment);
+				p++;
+			}
+		}
+
+		if (op_array->collection_types) {
+			zend_type *p, *end;
+
+			UNSERIALIZE_PTR(op_array->collection_types);
+			p = op_array->collection_types;
+			end = p + op_array->last_collection_type;
+			while (p < end) {
+				zend_file_cache_unserialize_type(p,
+					(op_array->fn_flags & ZEND_ACC_CLOSURE) ? NULL : op_array->scope, script, buf);
 				p++;
 			}
 		}

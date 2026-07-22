@@ -318,6 +318,13 @@ static void zend_persist_op_array_calc_ex(zend_op_array *op_array)
 		}
 	}
 
+	if (op_array->collection_types) {
+		ADD_SIZE(sizeof(zend_type) * op_array->last_collection_type);
+		for (uint32_t i = 0; i < op_array->last_collection_type; i++) {
+			zend_persist_type_calc(&op_array->collection_types[i]);
+		}
+	}
+
 	if (op_array->live_range) {
 		ADD_SIZE(sizeof(zend_live_range) * op_array->last_live_range);
 	}

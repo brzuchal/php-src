@@ -91,6 +91,9 @@ void init_op_array(zend_op_array *op_array, zend_function_type type, int initial
 	op_array->num_dynamic_func_defs = 0;
 	op_array->dynamic_func_defs = NULL;
 
+	op_array->last_collection_type = 0;
+	op_array->collection_types = NULL;
+
 	ZEND_MAP_PTR_INIT(op_array->run_time_cache, NULL);
 	op_array->cache_size = zend_op_array_extension_handles * sizeof(void*);
 
@@ -107,6 +110,22 @@ ZEND_API void destroy_zend_function(zend_function *function)
 
 	ZVAL_PTR(&tmp, function);
 	zend_function_dtor(&tmp);
+}
+
+uint32_t zend_op_array_add_collection_type(zend_op_array *op_array, zend_type type)
+{
+	/* One entry per literal site, appended in compilation order and never
+	 * renumbered. Growing one at a time is deliberate: a literal is rare
+	 * compared to an opcode or a literal zval, and a capacity field would have
+	 * to be persisted or recomputed for something that is reallocated a handful
+	 * of times per op_array at most. */
+	uint32_t index = op_array->last_collection_type++;
+
+	op_array->collection_types = safe_erealloc(op_array->collection_types,
+		op_array->last_collection_type, sizeof(zend_type), 0);
+	op_array->collection_types[index] = type;
+
+	return index;
 }
 
 ZEND_API zend_collection_type *zend_type_collection_alloc(uint32_t kind, uint32_t num_types, bool persistent) {
@@ -717,6 +736,15 @@ ZEND_API void destroy_op_array(zend_op_array *op_array)
 			zend_type_release(arg_info[i].type, /* persistent */ false);
 		}
 		efree(arg_info);
+	}
+	if (op_array->collection_types) {
+		/* Same rule as arg_info: the entries are types, so releasing one
+		 * releases the class names it names and leaves arena-allocated
+		 * descriptors to the arena. */
+		for (i = 0; i < op_array->last_collection_type; i++) {
+			zend_type_release(op_array->collection_types[i], /* persistent */ false);
+		}
+		efree(op_array->collection_types);
 	}
 	if (op_array->static_variables) {
 		zend_array_destroy(op_array->static_variables);

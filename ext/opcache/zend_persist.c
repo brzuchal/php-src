@@ -477,6 +477,10 @@ static void zend_persist_op_array_ex(zend_op_array *op_array, zend_persistent_sc
 				}
 				op_array->arg_info = arg_info;
 			}
+			if (op_array->collection_types) {
+				op_array->collection_types = zend_shared_alloc_get_xlat_entry(op_array->collection_types);
+				ZEND_ASSERT(op_array->collection_types != NULL);
+			}
 			if (op_array->live_range) {
 				op_array->live_range = zend_shared_alloc_get_xlat_entry(op_array->live_range);
 				ZEND_ASSERT(op_array->live_range != NULL);
@@ -671,6 +675,15 @@ static void zend_persist_op_array_ex(zend_op_array *op_array, zend_persistent_sc
 			arg_info++;
 		}
 		op_array->arg_info = arg_info;
+	}
+
+	if (op_array->collection_types) {
+		zend_type *types = zend_shared_memdup_put_free(op_array->collection_types,
+			sizeof(zend_type) * op_array->last_collection_type);
+		for (uint32_t i = 0; i < op_array->last_collection_type; i++) {
+			zend_persist_type(&types[i]);
+		}
+		op_array->collection_types = types;
 	}
 
 	if (op_array->live_range) {
