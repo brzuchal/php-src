@@ -1597,7 +1597,7 @@ OPTIONAL_WHITESPACE_OR_COMMENTS ({WHITESPACE}|{MULTI_LINE_COMMENT}|{SINGLE_LINE_
 	RETURN_TOKEN(T_NULLSAFE_OBJECT_OPERATOR);
 }
 
-<ST_IN_SCRIPTING,ST_LOOKING_FOR_PROPERTY>{WHITESPACE}+ {
+<ST_IN_SCRIPTING,ST_LOOKING_FOR_PROPERTY,ST_AFTER_DOUBLE_COLON>{WHITESPACE}+ {
 	goto return_whitespace;
 }
 
@@ -1638,7 +1638,12 @@ OPTIONAL_WHITESPACE_OR_COMMENTS ({WHITESPACE}|{MULTI_LINE_COMMENT}|{SINGLE_LINE_
  * baseline emits. Every other input pops immediately and is rescanned by the
  * normal ST_IN_SCRIPTING rules, so no keyword tokenisation changes.
  * ('->' and '?->' need no equivalent: they already push
- * ST_LOOKING_FOR_PROPERTY, where the compound rules do not exist.) */
+ * ST_LOOKING_FOR_PROPERTY, where the compound rules do not exist.)
+ *
+ * Trivia between '::' and the name must be consumed *inside* this state --
+ * the whitespace and comment rules list it alongside ST_IN_SCRIPTING -- or the
+ * catch-all below would pop on the space and let `Foo:: vec[0]` match the
+ * compound rule after all. */
 <ST_AFTER_DOUBLE_COLON>("vec"|"map"|"set"|"tuple"|"shape")"[" {
 	yyless(yyleng - 1);
 	yy_pop_state();
@@ -2493,7 +2498,7 @@ inline_char_handler:
 }
 
 
-<ST_IN_SCRIPTING,ST_LOOKING_FOR_PROPERTY>"#"|"//" {
+<ST_IN_SCRIPTING,ST_LOOKING_FOR_PROPERTY,ST_AFTER_DOUBLE_COLON>"#"|"//" {
 	while (YYCURSOR < YYLIMIT) {
 		switch (*YYCURSOR++) {
 			case '\r':
@@ -2517,7 +2522,7 @@ inline_char_handler:
 	RETURN_OR_SKIP_TOKEN(T_COMMENT);
 }
 
-<ST_IN_SCRIPTING,ST_LOOKING_FOR_PROPERTY>"/*"|"/**"{WHITESPACE} {
+<ST_IN_SCRIPTING,ST_LOOKING_FOR_PROPERTY,ST_AFTER_DOUBLE_COLON>"/*"|"/**"{WHITESPACE} {
 	int doc_com;
 
 	if (yyleng > 2) {
