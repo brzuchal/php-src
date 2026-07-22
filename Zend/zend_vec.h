@@ -82,8 +82,14 @@ ZEND_API bool zend_vec_type_is_supported(zend_type type);
  * entry point: reserving storage and installing elements are private to
  * zend_vec.c, so the capacity invariant they share cannot be violated from
  * outside. On any element failing validation the partially built vec is
- * destroyed, touching only the slots already installed, and NULL is returned. */
-ZEND_API zend_vec *zend_vec_create(const HashTable *values, const zend_collection_info *type);
+ * destroyed, touching only the slots already installed, and NULL is returned.
+ *
+ * `failed_index`, when not NULL, receives the position of the element that was
+ * rejected, so a caller can name it in a diagnostic without re-running the
+ * element check -- which is private, and would have to be exported for the
+ * caller to repeat it. It is written only when NULL is returned. */
+ZEND_API zend_vec *zend_vec_create(
+	const HashTable *values, const zend_collection_info *type, uint32_t *failed_index);
 
 /* Exercise the private construction path's invariants from inside the engine
  * boundary, so they keep direct coverage without re-exporting the two-step

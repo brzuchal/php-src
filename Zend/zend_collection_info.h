@@ -190,6 +190,14 @@ ZEND_API const zend_collection_info *zend_collection_info_resolve(zend_type type
 /* "vec[int]", "vec[vec[Foo]]" -- for diagnostics. Caller owns the result. */
 ZEND_API zend_string *zend_collection_info_to_string(const zend_collection_info *info);
 
+/* One member of a node -- "int", "vec[Foo]" -- for diagnostics that name the
+ * expected type of a single member. Caller owns the result. Use this rather
+ * than zend_type_to_string() on info->types[index]: a nested member points at a
+ * zend_collection_info, which the generic stringifier would misread as a
+ * zend_collection_type. */
+ZEND_API zend_string *zend_collection_info_member_to_string(
+		const zend_collection_info *info, uint32_t index);
+
 /* Request tier lifecycle. Init runs in init_executor(); shutdown runs at the
  * end of zend_shutdown_executor_values() per INV-4. */
 void zend_collection_info_request_init(void);

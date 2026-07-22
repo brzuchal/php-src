@@ -3463,6 +3463,16 @@ static zend_always_inline zend_result _zend_update_type_info(
 				UPDATE_SSA_TYPE(tmp, ssa_op->result_def);
 			}
 			break;
+		case ZEND_CONSTRUCT_COLLECTION:
+			/* A collection value has no may-be bit -- IS_COLLECTION sits above
+			 * the mask -- so this type cannot be described. Stay unconstrained,
+			 * exactly as zend_fetch_arg_info_type() does for a declared
+			 * collection: claiming MAY_BE_OBJECT or MAY_BE_ARRAY would be false
+			 * and would let a later pass specialise on it. RC1 is still known:
+			 * the value is freshly constructed and unaliased. */
+			tmp = MAY_BE_RC1|MAY_BE_ANY|MAY_BE_ARRAY_KEY_ANY|MAY_BE_ARRAY_OF_ANY|MAY_BE_ARRAY_OF_REF;
+			UPDATE_SSA_TYPE(tmp, ssa_op->result_def);
+			break;
 		case ZEND_ADD_ARRAY_UNPACK:
 			tmp = ssa_var_info[ssa_op->result_use].type;
 			ZEND_ASSERT(tmp & MAY_BE_ARRAY);

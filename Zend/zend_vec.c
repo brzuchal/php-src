@@ -147,7 +147,8 @@ static bool zend_vec_append(zend_vec *vec, zval *value)
 	return true;
 }
 
-ZEND_API zend_vec *zend_vec_create(const HashTable *values, const zend_collection_info *type)
+ZEND_API zend_vec *zend_vec_create(
+		const HashTable *values, const zend_collection_info *type, uint32_t *failed_index)
 {
 	ZEND_ASSERT(type != NULL && type->num_types >= 1);
 	/* Cached at promotion; no recursive re-derivation per construction. */
@@ -158,6 +159,12 @@ ZEND_API zend_vec *zend_vec_create(const HashTable *values, const zend_collectio
 
 	ZEND_HASH_FOREACH_VAL((HashTable *) values, entry) {
 		if (!zend_vec_append(vec, entry)) {
+			/* count is the number of elements already installed, so it is also
+			 * the position of the one that was rejected. Read before the vec is
+			 * destroyed. */
+			if (failed_index != NULL) {
+				*failed_index = vec->count;
+			}
 			/* Only the slots already installed are live, so this releases
 			 * exactly those and the element type, and nothing else. */
 			zend_vec_destroy(vec);

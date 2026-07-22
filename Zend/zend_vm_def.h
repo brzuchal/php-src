@@ -6532,6 +6532,61 @@ ZEND_VM_HANDLER(71, ZEND_INIT_ARRAY, CONST|TMP|VAR|CV|UNUSED, CONST|TMP|UNUSED|N
 	}
 }
 
+/* Build a collection value from the already evaluated elements of a literal.
+ *
+ * OP1 is the completed element array -- the literal's elements are compiled
+ * into an ordinary packed array first, so they are evaluated left to right by
+ * the existing array opcodes and freed by the existing live range if one of
+ * them throws. EXTENDED_VALUE indexes op_array->collection_types, which is
+ * where the compiled descriptor lives; it is not a literal index, because
+ * literals are relocated by compact_literals.c.
+ *
+ * The handler does no type work of its own: it does not create canonical
+ * nodes, parse type strings or promote descriptors. It looks the descriptor up,
+ * resolves it through the existing per-request cache, and constructs the value
+ * once, at full size. */
+ZEND_VM_HANDLER(212, ZEND_CONSTRUCT_COLLECTION, CONST|TMP, UNUSED, NUM)
+{
+	USE_OPLINE
+	zval *elements;
+	zend_type descriptor;
+	const zend_collection_info *info;
+	zend_vec *vec;
+	uint32_t failed_index = 0;
+
+	SAVE_OPLINE();
+	elements = GET_OP1_ZVAL_PTR(BP_VAR_R);
+	ZEND_ASSERT(Z_TYPE_P(elements) == IS_ARRAY);
+
+	/* Promotion happens at most once per request per literal site; every later
+	 * execution is a hash probe returning a borrowed node (INV-11). */
+	descriptor = EX(func)->op_array.collection_types[opline->extended_value];
+	info = zend_collection_info_resolve(descriptor);
+
+	if (UNEXPECTED(info == NULL)
+	 || UNEXPECTED(!ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(info))) {
+		zend_collection_not_constructible_error(descriptor);
+		FREE_OP1();
+		UNDEF_RESULT();
+		HANDLE_EXCEPTION();
+	}
+
+	vec = zend_vec_create(Z_ARRVAL_P(elements), info, &failed_index);
+	if (UNEXPECTED(vec == NULL)) {
+		/* Nothing partial escaped: zend_vec_create() destroyed what it had
+		 * built, and the elements are still owned by the array OP1, which is
+		 * released here (L2). */
+		zend_collection_element_type_error(info, Z_ARRVAL_P(elements), failed_index);
+		FREE_OP1();
+		UNDEF_RESULT();
+		HANDLE_EXCEPTION();
+	}
+
+	FREE_OP1();
+	ZVAL_VEC(EX_VAR(opline->result.var), vec);
+	ZEND_VM_NEXT_OPCODE();
+}
+
 ZEND_VM_COLD_CONST_HANDLER(51, ZEND_CAST, CONST|TMP|CV, ANY, TYPE)
 {
 	USE_OPLINE

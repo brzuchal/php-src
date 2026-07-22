@@ -848,6 +848,47 @@ ZEND_API bool zend_verify_scalar_type_hint(uint32_t type_mask, zval *arg, bool s
 	return zend_verify_weak_scalar_type_hint(type_mask, arg);
 }
 
+/* A collection type that cannot have values at all: an element type outside the
+ * subset a value may hold (vec[iterable], vec[int|string]), or a descriptor
+ * outside the canonicalization boundary. This is not decidable while compiling
+ * the literal -- for a nested parameter the answer is a property of the
+ * promoted child node, and promotion is per request -- so it is reported here,
+ * on the first execution that reaches the site. */
+static zend_never_inline ZEND_COLD void zend_collection_not_constructible_error(zend_type descriptor)
+{
+	zend_string *type_str = zend_type_to_string(descriptor);
+
+	zend_type_error("Cannot create a value of type %s", ZSTR_VAL(type_str));
+	zend_string_release(type_str);
+}
+
+/* One element of a collection literal does not satisfy the declared member
+ * type. `index` is the element's position, which is also its key: the literal
+ * is compiled into a packed array with sequential keys. */
+static zend_never_inline ZEND_COLD void zend_collection_element_type_error(
+		const zend_collection_info *info, const HashTable *values, uint32_t index)
+{
+	zend_string *type_str = zend_collection_info_to_string(info);
+	/* vec has a single member type, so every element is checked against
+	 * member 0. A kind whose members differ per position will pass the member
+	 * index it checked against instead. */
+	zend_string *member_str = zend_collection_info_member_to_string(info, 0);
+	zval *value = zend_hash_index_find((HashTable *) values, index);
+
+	ZEND_ASSERT(value != NULL);
+	ZVAL_DEREF(value);
+
+	zend_string *given_str = zend_zval_collection_type_name(value);
+	zend_type_error("Element %" PRIu32 " of %s must be of type %s, %s given",
+		index, ZSTR_VAL(type_str), ZSTR_VAL(member_str),
+		given_str ? ZSTR_VAL(given_str) : zend_zval_value_name(value));
+	if (given_str) {
+		zend_string_release(given_str);
+	}
+	zend_string_release(member_str);
+	zend_string_release(type_str);
+}
+
 static zend_never_inline ZEND_COLD void zend_verify_class_constant_type_error(const zend_class_constant *c, const zend_string *name, const zval *constant)
 {
 	zend_string *type_str = zend_type_to_string(c->type);

@@ -665,7 +665,7 @@ static zend_vec *zend_test_vec_build(zend_type elem, zval *vals, uint32_t n)
 	for (uint32_t i = 0; i < n; i++) {
 		zend_hash_next_index_insert_new(&ht, &vals[i]);
 	}
-	vec = zend_vec_create(&ht, info);
+	vec = zend_vec_create(&ht, info, NULL);
 	zend_hash_destroy(&ht);
 	return vec;
 }
@@ -1034,7 +1034,7 @@ static ZEND_FUNCTION(zend_test_make_vec)
 	ZEND_TYPE_SET_COLLECTION(probe_type, &probe.desc);
 
 	info = zend_collection_info_intern(probe_type);
-	vec = info ? zend_vec_create(values, info) : NULL;
+	vec = info ? zend_vec_create(values, info, NULL) : NULL;
 
 	if (owns_type) {
 		/* The canonical node took its own reference; drop the local one. */

@@ -427,6 +427,27 @@ ZEND_API const zend_collection_info *zend_collection_info_intern(zend_type type)
 	return created;
 }
 
+static void collection_info_stringify(smart_str *str, const zend_collection_info *info);
+
+/* One member of a canonical node. A nested member points at a
+ * zend_collection_info, not at a zend_collection_type, so it must not reach
+ * zend_type_to_string(): the two structs share kind and num_types and diverge
+ * after, so the generic stringifier would walk valid-looking wrong offsets. */
+static void collection_info_stringify_member(smart_str *str, zend_type member)
+{
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member)) {
+		if (ZEND_TYPE_ALLOW_NULL(member)) {
+			smart_str_appendc(str, '?');
+		}
+		collection_info_stringify(str, ZEND_COLLECTION_INFO_CHILD(member));
+		return;
+	}
+
+	zend_string *rendered = zend_type_to_string(member);
+	smart_str_append(str, rendered);
+	zend_string_release(rendered);
+}
+
 static void collection_info_stringify(smart_str *str, const zend_collection_info *info)
 {
 	smart_str_appends(str, zend_collection_type_kind_name(info->kind));
@@ -436,22 +457,22 @@ static void collection_info_stringify(smart_str *str, const zend_collection_info
 		if (i != 0) {
 			smart_str_appends(str, ", ");
 		}
-		zend_type member = info->types[i];
-
-		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member)) {
-			if (ZEND_TYPE_ALLOW_NULL(member)) {
-				smart_str_appendc(str, '?');
-			}
-			collection_info_stringify(str, ZEND_COLLECTION_INFO_CHILD(member));
-			continue;
-		}
-
-		zend_string *rendered = zend_type_to_string(member);
-		smart_str_append(str, rendered);
-		zend_string_release(rendered);
+		collection_info_stringify_member(str, info->types[i]);
 	}
 
 	smart_str_appendc(str, ']');
+}
+
+ZEND_API zend_string *zend_collection_info_member_to_string(
+		const zend_collection_info *info, uint32_t index)
+{
+	smart_str str = {0};
+
+	ZEND_ASSERT(index < info->num_types);
+	collection_info_stringify_member(&str, info->types[index]);
+	smart_str_0(&str);
+
+	return str.s;
 }
 
 ZEND_API zend_string *zend_collection_info_to_string(const zend_collection_info *info)

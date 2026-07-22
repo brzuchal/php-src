@@ -11471,18 +11471,51 @@ static void zend_compile_array(znode *result, zend_ast *ast) /* {{{ */
 
 /* Compile a collection literal such as vec[int]{1, 2}.
  *
- * Not implemented yet: the descriptor has nowhere to live until the op_array
- * carries a descriptor table, and there is no construction opcode to read it.
- * The syntax is accepted by the parser so that the AST shape is fixed first;
- * this is the only thing between it and a working literal. */
+ * The elements are compiled into an ordinary packed array first, and the
+ * collection is built from that completed array by a single opcode. That is
+ * what gives the literal ordinary PHP evaluation semantics for free: elements
+ * are evaluated left to right by the existing array opcodes, and if one of them
+ * throws, the partly built *array* is released by the live range the existing
+ * def/use analysis already emits for it. No partly built collection value can
+ * exist, because construction is one step at the end (INV-16, L2).
+ *
+ * The alternative -- appending into a collection as elements are evaluated --
+ * would need a mutable, partially populated, observable value, which is exactly
+ * what the immutable representation is designed not to have. */
 static void zend_compile_collection_literal(znode *result, const zend_ast *ast)
 {
-	const zend_collection_type_info *info = zend_collection_type_by_kind(ast->attr);
+	const zend_ast_list *elements = zend_ast_get_list(ast->child[1]);
+	zend_op *opline;
+	znode array;
+	uint32_t index;
 
-	ZEND_ASSERT(info != NULL && "collection literal AST carries an unknown kind");
+	/* Compiled through the declaration path, so vec[int]{...} means exactly
+	 * what the type vec[int] means: same arity check, same rejection of the
+	 * kinds without a value representation, same nested and class parameters.
+	 * Handed to the op_array immediately, so a compile error while compiling
+	 * the elements below cannot strand the class names it holds. */
+	index = zend_op_array_add_collection_type(CG(active_op_array),
+		zend_compile_collection_descriptor(ast->attr, ast->child[0]));
 
-	zend_error_noreturn(E_COMPILE_ERROR,
-		"Collection literals are not implemented yet");
+	if (elements->children == 0) {
+		zend_emit_op_tmp(&array, ZEND_INIT_ARRAY, NULL, NULL);
+	} else {
+		for (uint32_t i = 0; i < elements->children; i++) {
+			znode value;
+
+			zend_compile_expr(&value, elements->child[i]);
+			if (i == 0) {
+				opline = zend_emit_op_tmp(&array, ZEND_INIT_ARRAY, &value, NULL);
+				opline->extended_value = elements->children << ZEND_ARRAY_SIZE_SHIFT;
+			} else {
+				opline = zend_emit_op(NULL, ZEND_ADD_ARRAY_ELEMENT, &value, NULL);
+				SET_NODE(opline->result, &array);
+			}
+		}
+	}
+
+	opline = zend_emit_op_tmp(result, ZEND_CONSTRUCT_COLLECTION, &array, NULL);
+	opline->extended_value = index;
 }
 
 static void zend_compile_const(znode *result, const zend_ast *ast) /* {{{ */
