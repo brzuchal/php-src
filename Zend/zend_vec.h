@@ -67,12 +67,15 @@ typedef struct _zend_vec {
 #define ZEND_VEC_COUNT(vec)      ((vec)->count)
 #define ZEND_VEC_ELEMENTS(vec)   ((vec)->elements)
 
-/* The element subset a value may hold: a pure builtin mask of exactly one
- * element kind, or a single class-name zend_string with no extra may-be bits.
- * Narrower than what canonicalization accepts as a *type*.
+/* The element subset a value may hold, for a *leaf* member: a pure builtin mask
+ * of exactly one element kind, or a single class-name zend_string with no extra
+ * may-be bits. Narrower than what canonicalization accepts as a *type*.
  *
- * Operates on members of a canonical node, so a nested member is read as a
- * zend_collection_info child, never as a compiler descriptor. */
+ * Nested members are deliberately rejected here rather than walked: promotion
+ * classifies each node once and records the answer in its
+ * ZEND_COLLECTION_INFO_VALUE_CONSTRUCTIBLE bit, which is what construction
+ * reads. This function is the leaf policy that classification consults, not a
+ * runtime check. */
 ZEND_API bool zend_vec_type_is_supported(zend_type type);
 
 /* Build a vec from a packed list of values. This is the only construction

@@ -56,17 +56,67 @@
 
 BEGIN_EXTERN_C()
 
-#define ZEND_COLLECTION_INFO_PERMANENT (1u << 0)
+#define ZEND_COLLECTION_INFO_PERMANENT           (1u << 0)
+
+/* Classification bits. All are computed once, during promotion, from members
+ * that are already canonical, and are immutable for the life of the node.
+ *
+ * The rule that makes classification cheap is that promotion is bottom-up: when
+ * a parent is classified its children are already classified, so the parent
+ * *reads* their cached bits instead of descending. Classifying a node is
+ * therefore O(num_types), never O(tree), no matter how deeply it nests.
+ *
+ * Every bit below is kind-agnostic: it is defined in terms of "members", not of
+ * vec's single element, so map[K,V], tuple[A,B,C] and shape[...] can reuse all
+ * of them unchanged. Only ..._VALUE_CONSTRUCTIBLE consults a per-kind policy,
+ * and that policy is applied at promotion, not at read time. */
+
+/* Some member is a nested collection. */
+#define ZEND_COLLECTION_INFO_HAS_NESTED          (1u << 1)
+/* Some member is, or transitively contains, a class name. */
+#define ZEND_COLLECTION_INFO_HAS_CLASS_NAME      (1u << 2)
+/* Every member is a pure builtin mask: no class name, no nesting anywhere.
+ * A node with this bit can be compared and checked without inspecting members
+ * as structured types at all. */
+#define ZEND_COLLECTION_INFO_ALL_MASK_MEMBERS    (1u << 3)
+/* A runtime value of this type can be constructed: the members satisfy the
+ * (narrower) element subset a value may hold. Replaces a recursive re-check at
+ * every construction. */
+#define ZEND_COLLECTION_INFO_VALUE_CONSTRUCTIBLE (1u << 4)
 
 typedef struct _zend_collection_info {
 	uint32_t   kind;       /* zend_collection_kind */
 	uint32_t   num_types;
+	/* Classification. Computed: by promotion, once, after members are filled.
+	 * Valid: for the whole life of the node -- nodes are immutable.
+	 * Readable by: anyone holding the node. Never recomputed, never written
+	 * again. Reusable by every future kind. */
 	uint32_t   flags;      /* ZEND_COLLECTION_INFO_* */
-	uint32_t   fast_mask;  /* derived: builtin-only check, 0 when not applicable */
-	zend_ulong hash;       /* derived: structural key, cached; never recomputed */
-	struct _zend_collection_info *next; /* chain of nodes sharing this key */
-	zend_type  types[1];   /* nested collection slots hold zend_collection_info* */
+	/* Nesting depth: 1 for vec[int], 2 for vec[vec[int]]. Derived from the
+	 * children's own cached depth, so computing it never descends. Kind
+	 * agnostic: it is max over members. */
+	uint32_t   depth;
+	/* The builtin-only element check for a single-member node, or 0 when the
+	 * type needs more than a mask test. Lets the element check run without
+	 * reading the member's zend_type. For kinds with more than one member this
+	 * stays 0; a per-member equivalent can be added without disturbing it. */
+	uint32_t   fast_mask;
+	/* Structural key. Computed by promotion, cached; see the three key forms
+	 * documented below. Never recomputed. */
+	zend_ulong hash;
+	/* Chain of nodes sharing this key. Owned by the request tier; written only
+	 * by promotion while inserting. */
+	struct _zend_collection_info *next;
+	/* Members. A nested member's pointer is a canonical zend_collection_info
+	 * child, never a compiler zend_collection_type. */
+	zend_type  types[1];
 } zend_collection_info;
+
+#define ZEND_COLLECTION_INFO_HAS_FLAG(info, flag) \
+	((((info)->flags) & (flag)) != 0)
+
+#define ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(info) \
+	ZEND_COLLECTION_INFO_HAS_FLAG(info, ZEND_COLLECTION_INFO_VALUE_CONSTRUCTIBLE)
 
 #define ZEND_COLLECTION_INFO_SIZE(num_types) \
 	(sizeof(zend_collection_info) + ((num_types) - 1) * sizeof(zend_type))
@@ -144,6 +194,13 @@ void zend_collection_info_request_shutdown(void);
 /* Exercise chain separation from inside the engine boundary: a real hash
  * collision cannot be requested from PHP, so the behaviour is tested instead. */
 ZEND_API bool zend_collection_info_collision_selftest(void);
+
+#if ZEND_DEBUG
+/* Debug-only instrumentation. Counts member comparisons that had to descend
+ * into a nested node, so tests can demonstrate that cached classification --
+ * not recursion -- answers the common checks. Not present in release builds. */
+ZEND_API uint64_t zend_collection_info_descent_count(void);
+#endif
 
 END_EXTERN_C()
 

@@ -19,6 +19,7 @@
 #include "zend_types.h"
 #include "zend_smart_str.h"
 #include "zend_compile.h"
+#include "zend_vec.h"
 
 /* Structural hashing of collection descriptors -- the *probe* side of the
  * canonicalization key. See zend_collection_info.h for the separation between
@@ -194,6 +195,15 @@ ZEND_API zend_ulong zend_collection_key_hash_type(zend_type type)
  * arena or SHM pointer can be reached from a runtime value.
  * ------------------------------------------------------------------------- */
 
+#if ZEND_DEBUG
+static uint64_t collection_info_descents = 0;
+
+ZEND_API uint64_t zend_collection_info_descent_count(void)
+{
+	return collection_info_descents;
+}
+#endif
+
 static bool collection_info_matches_member(zend_type node_slot, zend_type desc_slot)
 {
 	if (ZEND_TYPE_PURE_MASK(node_slot) != ZEND_TYPE_PURE_MASK(desc_slot)) {
@@ -205,8 +215,13 @@ static bool collection_info_matches_member(zend_type node_slot, zend_type desc_s
 		 || !ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(desc_slot)) {
 			return false;
 		}
+#if ZEND_DEBUG
+		collection_info_descents++;
+#endif
 		/* The node side is a canonical child; the descriptor side is still a
-		 * compiler descriptor, so this recurses rather than comparing pointers. */
+		 * compiler descriptor, so this must descend. Only reachable for a node
+		 * that classification marked as nested -- see the fast path in
+		 * zend_collection_info_matches_type(). */
 		return zend_collection_info_matches_type(
 			(const zend_collection_info *) ZEND_TYPE_COLLECTION(node_slot), desc_slot);
 	}
@@ -232,6 +247,23 @@ ZEND_API bool zend_collection_info_matches_type(const zend_collection_info *info
 	if (info->kind != desc->kind || info->num_types != desc->num_types) {
 		return false;
 	}
+
+	/* Cached classification answers the common case outright: when no member is
+	 * a class name or a nested collection, the comparison is masks only, so
+	 * neither side is inspected as a structured type and nothing descends. */
+	if (ZEND_COLLECTION_INFO_HAS_FLAG(info, ZEND_COLLECTION_INFO_ALL_MASK_MEMBERS)) {
+		for (uint32_t i = 0; i < info->num_types; i++) {
+			zend_type desc_slot = desc->types[i];
+
+			if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(desc_slot)
+			 || ZEND_TYPE_HAS_NAME(desc_slot)
+			 || ZEND_TYPE_PURE_MASK(info->types[i]) != ZEND_TYPE_PURE_MASK(desc_slot)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	for (uint32_t i = 0; i < info->num_types; i++) {
 		if (!collection_info_matches_member(info->types[i], desc->types[i])) {
 			return false;
@@ -247,19 +279,82 @@ ZEND_API bool zend_collection_info_equals(
 	return a == b;
 }
 
-/* Derived: the builtin-only element check, or 0 when the type needs more than
- * a mask test. A cache computed once at construction from immutable members,
- * so it cannot drift from what it summarizes. */
-static uint32_t collection_info_compute_fast_mask(const zend_collection_info *info)
+/* Classify a node whose members are already filled and already canonical.
+ *
+ * This is the single place any classification field is written. It reads each
+ * child's *cached* metadata rather than descending, which is what keeps the
+ * cost O(num_types) instead of O(tree): by the time a parent is classified,
+ * promotion has already classified every child.
+ *
+ * All fields below are immutable afterwards. Nothing at runtime recomputes
+ * them, and nothing writes to a node once it is in the table. */
+static void collection_info_classify(zend_collection_info *info)
 {
-	if (info->num_types != 1) {
-		return 0;
+	uint32_t flags = 0;
+	uint32_t depth = 1;
+	bool all_mask = true;
+	bool constructible;
+
+	for (uint32_t i = 0; i < info->num_types; i++) {
+		zend_type member = info->types[i];
+
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member)) {
+			const zend_collection_info *child =
+				(const zend_collection_info *) ZEND_TYPE_COLLECTION(member);
+
+			flags |= ZEND_COLLECTION_INFO_HAS_NESTED;
+			all_mask = false;
+
+			/* Cached, not recomputed: the child already knows its own depth and
+			 * whether it contains a class name. */
+			if (child->depth + 1 > depth) {
+				depth = child->depth + 1;
+			}
+			if (ZEND_COLLECTION_INFO_HAS_FLAG(child, ZEND_COLLECTION_INFO_HAS_CLASS_NAME)) {
+				flags |= ZEND_COLLECTION_INFO_HAS_CLASS_NAME;
+			}
+			continue;
+		}
+
+		if (ZEND_TYPE_HAS_NAME(member)) {
+			flags |= ZEND_COLLECTION_INFO_HAS_CLASS_NAME;
+			all_mask = false;
+		}
 	}
-	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(info->types[0])
-	 || ZEND_TYPE_HAS_NAME(info->types[0])) {
-		return 0;
+
+	if (all_mask) {
+		flags |= ZEND_COLLECTION_INFO_ALL_MASK_MEMBERS;
 	}
-	return ZEND_TYPE_PURE_MASK(info->types[0]);
+
+	/* Whether a *value* of this type can be built. The element subset a value
+	 * may hold is narrower than the subset a type may name, and the policy is
+	 * per kind. Applying it here means construction never re-derives it. */
+	constructible = false;
+	if (info->kind == ZEND_COLLECTION_TYPE_VEC && info->num_types == 1) {
+		zend_type member = info->types[0];
+
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member)) {
+			const zend_collection_info *child =
+				(const zend_collection_info *) ZEND_TYPE_COLLECTION(member);
+
+			/* The child's own cached verdict; no descent. */
+			constructible =
+				ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(child)
+				&& (ZEND_TYPE_FULL_MASK(member) & _ZEND_TYPE_MAY_BE_MASK) == 0;
+		} else {
+			constructible = zend_vec_type_is_supported(member);
+		}
+	}
+	if (constructible) {
+		flags |= ZEND_COLLECTION_INFO_VALUE_CONSTRUCTIBLE;
+	}
+
+	info->flags = flags;
+	info->depth = depth;
+
+	/* The builtin-only element check, or 0 when a mask test is not enough. */
+	info->fast_mask =
+		(info->num_types == 1 && all_mask) ? ZEND_TYPE_PURE_MASK(info->types[0]) : 0;
 }
 
 /* Walk a key's chain, separating members by full structural comparison. A
@@ -295,7 +390,6 @@ ZEND_API const zend_collection_info *zend_collection_info_intern(zend_type type)
 
 	created->kind = desc->kind;
 	created->num_types = desc->num_types;
-	created->flags = 0;
 	created->hash = key;
 
 	for (uint32_t i = 0; i < desc->num_types; i++) {
@@ -329,7 +423,7 @@ ZEND_API const zend_collection_info *zend_collection_info_intern(zend_type type)
 		}
 	}
 
-	created->fast_mask = collection_info_compute_fast_mask(created);
+	collection_info_classify(created);
 
 	/* Re-read the chain head: canonicalizing children above may have inserted
 	 * into this same bucket. */

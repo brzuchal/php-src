@@ -360,6 +360,11 @@ namespace {
 
     function zend_test_collection_collision_selftest(): bool {}
 
+    /** @return array<string, mixed>|null */
+    function zend_test_collection_classify(string $function): ?array {}
+
+    function zend_test_collection_descents(): ?int {}
+
     function zend_test_zend_ini_parse_quantity(string $str): int {}
     function zend_test_zend_ini_parse_uquantity(string $str): int {}
 

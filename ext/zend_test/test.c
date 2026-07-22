@@ -1282,6 +1282,53 @@ static ZEND_FUNCTION(zend_test_vec_type_id)
 	RETURN_LONG((zend_long) (uintptr_t) Z_VEC_P(v)->type);
 }
 
+/* Cached classification of a canonical node. Every field here is written once,
+ * during promotion, and read-only afterwards. */
+static ZEND_FUNCTION(zend_test_collection_classify)
+{
+	zend_string *fname;
+	zend_type type;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(fname)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (!test_collection_first_param_type(fname, &type)) {
+		zend_argument_value_error(1, "must name a function with at least one parameter");
+		RETURN_THROWS();
+	}
+
+	const zend_collection_info *info = zend_collection_info_intern(type);
+	if (!info) {
+		RETURN_NULL();
+	}
+
+	array_init(return_value);
+	add_assoc_long(return_value, "num_types", (zend_long) info->num_types);
+	add_assoc_long(return_value, "depth", (zend_long) info->depth);
+	add_assoc_long(return_value, "fast_mask", (zend_long) info->fast_mask);
+	add_assoc_bool(return_value, "has_nested",
+		ZEND_COLLECTION_INFO_HAS_FLAG(info, ZEND_COLLECTION_INFO_HAS_NESTED));
+	add_assoc_bool(return_value, "has_class_name",
+		ZEND_COLLECTION_INFO_HAS_FLAG(info, ZEND_COLLECTION_INFO_HAS_CLASS_NAME));
+	add_assoc_bool(return_value, "all_mask_members",
+		ZEND_COLLECTION_INFO_HAS_FLAG(info, ZEND_COLLECTION_INFO_ALL_MASK_MEMBERS));
+	add_assoc_bool(return_value, "value_constructible",
+		ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(info));
+}
+
+/* Number of member comparisons that had to descend into a nested node. NULL in
+ * release builds, where the counter does not exist. */
+static ZEND_FUNCTION(zend_test_collection_descents)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+#if ZEND_DEBUG
+	RETURN_LONG((zend_long) zend_collection_info_descent_count());
+#else
+	RETURN_NULL();
+#endif
+}
+
 static ZEND_FUNCTION(zend_test_collection_collision_selftest)
 {
 	ZEND_PARSE_PARAMETERS_NONE();

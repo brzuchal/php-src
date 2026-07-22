@@ -40,25 +40,12 @@ ZEND_API bool zend_vec_type_is_supported(zend_type type)
 		return false;
 	}
 
-	/* A nested collection, e.g. the inner vec[int] of vec[vec[int]]. Supported
-	 * so that runtime values never lag the types the compiler accepts.
-	 *
-	 * The pointer here is a canonical zend_collection_info, not a compiler
-	 * zend_collection_type: this function inspects members of an already
-	 * promoted node, and promotion replaces nested descriptors with child
-	 * nodes. The two structs share kind and num_types but diverge after them,
-	 * so reading this as a descriptor would walk the wrong offsets. */
+	/* Leaf members only. A nested member is *not* decided here: promotion
+	 * classifies the child once and records the verdict in its
+	 * VALUE_CONSTRUCTIBLE bit, so nesting is answered by reading that bit
+	 * rather than by walking the child again on every construction. */
 	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
-		const zend_collection_info *child =
-			(const zend_collection_info *) ZEND_TYPE_COLLECTION(type);
-
-		if (child->kind != ZEND_COLLECTION_TYPE_VEC || child->num_types != 1) {
-			return false;
-		}
-		if ((ZEND_TYPE_FULL_MASK(type) & _ZEND_TYPE_MAY_BE_MASK) != 0) {
-			return false;
-		}
-		return zend_vec_type_is_supported(child->types[0]);
+		return false;
 	}
 
 	if (ZEND_TYPE_HAS_NAME(type)) {
@@ -113,8 +100,18 @@ static zend_vec *zend_vec_alloc(uint32_t count, const zend_collection_info *type
 
 /* Does `value` satisfy the declared element type? Shallow: a matching element
  * may itself be a mutable array or object, or a nested collection value. */
-static bool zend_vec_element_matches(zend_type element_type, zval *value)
+static bool zend_vec_element_matches(const zend_collection_info *info, zval *value)
 {
+	zend_type element_type;
+
+	/* Cached: for a builtin element type the whole check is a mask test, and
+	 * the member's zend_type is never read. This is the common case. */
+	if (info->fast_mask != 0) {
+		return (info->fast_mask & (1u << Z_TYPE_P(value))) != 0;
+	}
+
+	element_type = info->types[0];
+
 	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(element_type)) {
 		/* Both sides are canonical, so a nested collection element check is a
 		 * pointer comparison rather than a structural walk. */
@@ -142,7 +139,7 @@ static bool zend_vec_append(zend_vec *vec, zval *value)
 {
 	ZVAL_DEREF(value);
 
-	if (!zend_vec_element_matches(ZEND_VEC_ELEMENT_TYPE(vec), value)) {
+	if (!zend_vec_element_matches(vec->type, value)) {
 		return false;
 	}
 	/* Install first, then publish the slot by raising count. */
@@ -154,7 +151,8 @@ static bool zend_vec_append(zend_vec *vec, zval *value)
 ZEND_API zend_vec *zend_vec_create(const HashTable *values, const zend_collection_info *type)
 {
 	ZEND_ASSERT(type != NULL && type->num_types >= 1);
-	ZEND_ASSERT(zend_vec_type_is_supported(type->types[0]));
+	/* Cached at promotion; no recursive re-derivation per construction. */
+	ZEND_ASSERT(ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(type));
 
 	zend_vec *vec = zend_vec_alloc(zend_hash_num_elements(values), type);
 	zval *entry;
