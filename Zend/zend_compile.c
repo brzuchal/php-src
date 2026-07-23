@@ -10711,7 +10711,9 @@ static void zend_compile_binary_op(znode *result, zend_ast *ast) /* {{{ */
 					opline->extended_value =
 						(opcode == ZEND_IS_IDENTICAL) ?
 							(1 << Z_TYPE(left_node.u.constant)) :
-							(MAY_BE_ANY - (1 << Z_TYPE(left_node.u.constant)));
+							/* A complement mask means "not this scalar"; flag it open-world
+							 * so out-of-MAY_BE_ANY values (collections) match "!==". */
+							((MAY_BE_ANY - (1 << Z_TYPE(left_node.u.constant))) | MAY_BE_COLLECTION);
 					return;
 				}
 			} else if (right_node.op_type == IS_CONST) {
@@ -10720,7 +10722,9 @@ static void zend_compile_binary_op(znode *result, zend_ast *ast) /* {{{ */
 					opline->extended_value =
 						(opcode == ZEND_IS_IDENTICAL) ?
 							(1 << Z_TYPE(right_node.u.constant)) :
-							(MAY_BE_ANY - (1 << Z_TYPE(right_node.u.constant)));
+							/* A complement mask means "not this scalar"; flag it open-world
+							 * so out-of-MAY_BE_ANY values (collections) match "!==". */
+							((MAY_BE_ANY - (1 << Z_TYPE(right_node.u.constant))) | MAY_BE_COLLECTION);
 					return;
 				}
 			}

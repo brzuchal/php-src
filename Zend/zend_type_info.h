@@ -73,8 +73,30 @@
 #define MAY_BE_CLASS                (1<<24)
 #define MAY_BE_INDIRECT             (1<<25)
 
+/* Optimizer-domain flag for ZEND_TYPE_CHECK masks. It is deliberately NOT
+ * (1 << IS_COLLECTION): IS_COLLECTION (zval type code 21) positionally aliases
+ * MAY_BE_ARRAY_PACKED, so a collection has no representable bit in a MAY_BE_ANY
+ * mask. A collection value lives above the scalar universe MAY_BE_ANY spans
+ * (IS_NULL..IS_RESOURCE), so a "!==" complement mask (MAY_BE_ANY - {X}) can no
+ * longer stand for "not X" over the open world of values. This flag carries that
+ * open-world meaning: the compiler sets it on complement masks, the shift-based
+ * membership consumers (VM handler, SCCP) honour it for out-of-MAY_BE_ANY runtime
+ * types, and every consumer that does MAY_BE_ANY-domain arithmetic masks it off
+ * first. Keeping it in a free bit unrelated to IS_COLLECTION is what preserves the
+ * separation between runtime zval type codes and optimizer metadata. */
+#define MAY_BE_COLLECTION           (1u<<26)
+
 #define MAY_BE_RC1                  (1<<30) /* may be non-reference with refcount == 1 */
 #define MAY_BE_RCN                  (1u<<31) /* may be non-reference with refcount > 1  */
+
+/* Does runtime type `type` satisfy the ZEND_TYPE_CHECK mask `mask`? For the
+ * scalar universe (IS_NULL..IS_RESOURCE) this is the usual bit test. A value type
+ * above that universe (IS_COLLECTION) has no mask bit of its own, so it matches
+ * exactly the open-world complement masks flagged with MAY_BE_COLLECTION. Single
+ * source of truth shared by the VM handler and SCCP. */
+#define ZEND_TYPE_CHECK_MASK_MATCHES(mask, type) \
+	((((mask) >> (type)) & 1) || \
+	 ((type) == IS_COLLECTION && ((mask) & MAY_BE_COLLECTION)))
 
 
 #define MAY_BE_ANY_ARRAY \

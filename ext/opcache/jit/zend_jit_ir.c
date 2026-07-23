@@ -8254,7 +8254,9 @@ static int zend_jit_type_check(zend_jit_ctx *jit, const zend_op *opline, uint32_
 
 	if (op1_info & (MAY_BE_ANY|MAY_BE_REF)) {
 		mask = opline->extended_value;
-		if (!(op1_info & MAY_BE_GUARD) && !(op1_info & (MAY_BE_ANY - mask))) {
+		/* Use ~mask, not MAY_BE_ANY - mask: extended_value may carry the
+		 * out-of-domain MAY_BE_COLLECTION flag, which would underflow the subtraction. */
+		if (!(op1_info & MAY_BE_GUARD) && !(op1_info & (MAY_BE_ANY & ~mask))) {
 			jit_FREE_OP(jit, opline->op1_type, opline->op1, op1_info, opline);
 			if (exit_addr) {
 				if (smart_branch_opcode == ZEND_JMPNZ) {
@@ -8287,7 +8289,10 @@ static int zend_jit_type_check(zend_jit_ctx *jit, const zend_op *opline, uint32_
 			bool invert = false;
 			uint8_t type;
 
-			switch (mask) {
+			/* Match on the MAY_BE_ANY-domain bits only; a complement mask may also
+			 * carry MAY_BE_COLLECTION, and its "Z_TYPE != X" invert lowering is
+			 * already open-world correct for collections. */
+			switch (mask & MAY_BE_ANY) {
 				case MAY_BE_NULL:   type = IS_NULL;   break;
 				case MAY_BE_FALSE:  type = IS_FALSE;  break;
 				case MAY_BE_TRUE:   type = IS_TRUE;   break;

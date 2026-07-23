@@ -3962,7 +3962,10 @@ static zend_always_inline zend_result _zend_update_type_info(
 			UPDATE_SSA_TYPE(MAY_BE_STRING|MAY_BE_RC1|MAY_BE_RCN, ssa_op->result_def);
 			break;
 		case ZEND_TYPE_CHECK: {
-			uint32_t expected_type_mask = opline->extended_value;
+			/* Strip the open-world MAY_BE_COLLECTION flag: inference stays in the
+				 * MAY_BE_ANY domain (operands are never collection-typed) and would
+				 * otherwise underflow the "MAY_BE_ANY - expected_type_mask" below. */
+				uint32_t expected_type_mask = opline->extended_value & MAY_BE_ANY;
 			if (t1 & MAY_BE_UNDEF) {
 				t1 |= MAY_BE_NULL;
 			}

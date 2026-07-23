@@ -8928,7 +8928,7 @@ ZEND_VM_HOT_NOCONST_HANDLER(123, ZEND_TYPE_CHECK, CONST|TMP|CV, ANY, TYPE_MASK)
 	int result = 0;
 
 	value = GET_OP1_ZVAL_PTR_UNDEF(BP_VAR_R);
-	if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+	if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 ZEND_VM_C_LABEL(type_check_resource):
 		if (opline->extended_value != MAY_BE_RESOURCE
 		 || EXPECTED(NULL != zend_rsrc_list_get_rsrc_type(Z_RES_P(value)))) {
@@ -8936,7 +8936,7 @@ ZEND_VM_C_LABEL(type_check_resource):
 		}
 	} else if ((OP1_TYPE & (IS_CV|IS_VAR)) && Z_ISREF_P(value)) {
 		value = Z_REFVAL_P(value);
-		if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+		if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 			ZEND_VM_C_GOTO(type_check_resource);
 		}
 	} else if (OP1_TYPE == IS_CV && UNEXPECTED(Z_TYPE_P(value) == IS_UNDEF)) {

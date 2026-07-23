@@ -2272,7 +2272,8 @@ propagate_arg:
 					}
 					if (op1_type != IS_UNKNOWN
 					 && (opline->extended_value == (1 << op1_type)
-					  || opline->extended_value == MAY_BE_ANY - (1 << op1_type))) {
+					  /* strip the open-world flag so a scalar "!==" still matches its complement */
+					  || (opline->extended_value & ~MAY_BE_COLLECTION) == MAY_BE_ANY - (1 << op1_type))) {
 						/* add guards only for exact checks, to avoid code duplication */
 						ADD_OP1_TRACE_GUARD();
 					}

@@ -698,7 +698,7 @@ static inline void ct_eval_type_check(zval *result, uint32_t type_mask, zval *op
 	} else if (type == PARTIAL_OBJECT) {
 		type = IS_OBJECT;
 	}
-	ZVAL_BOOL(result, (type_mask >> type) & 1);
+	ZVAL_BOOL(result, ZEND_TYPE_CHECK_MASK_MATCHES(type_mask, type));
 }
 
 static inline zend_result ct_eval_in_array(zval *result, uint32_t extended_value, zval *op1, zval *op2) {

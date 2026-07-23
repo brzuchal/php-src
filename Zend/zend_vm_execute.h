@@ -6121,7 +6121,7 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_
 	int result = 0;
 
 	value = RT_CONSTANT(opline, opline->op1);
-	if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+	if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 type_check_resource:
 		if (opline->extended_value != MAY_BE_RESOURCE
 		 || EXPECTED(NULL != zend_rsrc_list_get_rsrc_type(Z_RES_P(value)))) {
@@ -6129,7 +6129,7 @@ type_check_resource:
 		}
 	} else if ((IS_CONST & (IS_CV|IS_VAR)) && Z_ISREF_P(value)) {
 		value = Z_REFVAL_P(value);
-		if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+		if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 			goto type_check_resource;
 		}
 	} else if (IS_CONST == IS_CV && UNEXPECTED(Z_TYPE_P(value) == IS_UNDEF)) {
@@ -18304,7 +18304,7 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_T
 	int result = 0;
 
 	value = _get_zval_ptr_tmp(opline->op1.var EXECUTE_DATA_CC);
-	if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+	if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 type_check_resource:
 		if (opline->extended_value != MAY_BE_RESOURCE
 		 || EXPECTED(NULL != zend_rsrc_list_get_rsrc_type(Z_RES_P(value)))) {
@@ -18312,7 +18312,7 @@ type_check_resource:
 		}
 	} else if ((IS_TMP_VAR & (IS_CV|IS_VAR)) && Z_ISREF_P(value)) {
 		value = Z_REFVAL_P(value);
-		if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+		if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 			goto type_check_resource;
 		}
 	} else if (IS_TMP_VAR == IS_CV && UNEXPECTED(Z_TYPE_P(value) == IS_UNDEF)) {
@@ -41103,7 +41103,7 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_T
 	int result = 0;
 
 	value = EX_VAR(opline->op1.var);
-	if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+	if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 type_check_resource:
 		if (opline->extended_value != MAY_BE_RESOURCE
 		 || EXPECTED(NULL != zend_rsrc_list_get_rsrc_type(Z_RES_P(value)))) {
@@ -41111,7 +41111,7 @@ type_check_resource:
 		}
 	} else if ((IS_CV & (IS_CV|IS_VAR)) && Z_ISREF_P(value)) {
 		value = Z_REFVAL_P(value);
-		if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+		if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 			goto type_check_resource;
 		}
 	} else if (IS_CV == IS_CV && UNEXPECTED(Z_TYPE_P(value) == IS_UNDEF)) {
@@ -59160,7 +59160,7 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_TYPE_
 	int result = 0;
 
 	value = RT_CONSTANT(opline, opline->op1);
-	if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+	if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 type_check_resource:
 		if (opline->extended_value != MAY_BE_RESOURCE
 		 || EXPECTED(NULL != zend_rsrc_list_get_rsrc_type(Z_RES_P(value)))) {
@@ -59168,7 +59168,7 @@ type_check_resource:
 		}
 	} else if ((IS_CONST & (IS_CV|IS_VAR)) && Z_ISREF_P(value)) {
 		value = Z_REFVAL_P(value);
-		if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+		if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 			goto type_check_resource;
 		}
 	} else if (IS_CONST == IS_CV && UNEXPECTED(Z_TYPE_P(value) == IS_UNDEF)) {
@@ -71241,7 +71241,7 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_TYPE_C
 	int result = 0;
 
 	value = _get_zval_ptr_tmp(opline->op1.var EXECUTE_DATA_CC);
-	if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+	if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 type_check_resource:
 		if (opline->extended_value != MAY_BE_RESOURCE
 		 || EXPECTED(NULL != zend_rsrc_list_get_rsrc_type(Z_RES_P(value)))) {
@@ -71249,7 +71249,7 @@ type_check_resource:
 		}
 	} else if ((IS_TMP_VAR & (IS_CV|IS_VAR)) && Z_ISREF_P(value)) {
 		value = Z_REFVAL_P(value);
-		if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+		if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 			goto type_check_resource;
 		}
 	} else if (IS_TMP_VAR == IS_CV && UNEXPECTED(Z_TYPE_P(value) == IS_UNDEF)) {
@@ -93940,7 +93940,7 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_TYPE_C
 	int result = 0;
 
 	value = EX_VAR(opline->op1.var);
-	if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+	if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 type_check_resource:
 		if (opline->extended_value != MAY_BE_RESOURCE
 		 || EXPECTED(NULL != zend_rsrc_list_get_rsrc_type(Z_RES_P(value)))) {
@@ -93948,7 +93948,7 @@ type_check_resource:
 		}
 	} else if ((IS_CV & (IS_CV|IS_VAR)) && Z_ISREF_P(value)) {
 		value = Z_REFVAL_P(value);
-		if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+		if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 			goto type_check_resource;
 		}
 	} else if (IS_CV == IS_CV && UNEXPECTED(Z_TYPE_P(value) == IS_UNDEF)) {
