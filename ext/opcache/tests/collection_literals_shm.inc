@@ -13,6 +13,23 @@ function ocl_empty(): int {
     return zend_test_vec_count(vec[int]{});
 }
 
+/* A multi-member tuple descriptor: exercises a persisted descriptor with more
+ * than one member type, and the positional element check after unserialization. */
+function ocl_tuple(): string {
+    $t = tuple[int, string, vec[int]]{1, 'a', vec[int]{2, 3}};
+    return zend_test_vec_get($t, 0) . ',' . zend_test_vec_get($t, 1)
+        . ',' . zend_test_vec_count(zend_test_vec_get($t, 2));
+}
+
+function ocl_tuple_bad(): string {
+    try {
+        $t = tuple[int, string]{1, 2};
+    } catch (TypeError $e) {
+        return $e->getMessage();
+    }
+    return 'not rejected';
+}
+
 /* Returned so a caller can check that repeated executions of a *persisted*
  * literal site keep borrowing the same canonical node. */
 function ocl_make(int $n) {
@@ -46,5 +63,7 @@ function ocl_report(): string {
         ocl_empty(),
         implode(',', $c->pair()),
         $c->bad(),
+        ocl_tuple(),
+        ocl_tuple_bad(),
     ]);
 }

@@ -98,47 +98,53 @@ static zend_vec *zend_vec_alloc(uint32_t count, const zend_collection_info *type
 	return vec;
 }
 
-/* Does `value` satisfy the declared element type? Shallow: a matching element
- * may itself be a mutable array or object, or a nested collection value. */
-static bool zend_vec_element_matches(const zend_collection_info *info, zval *value)
+/* Does `value` satisfy member `member_idx` of the type? Shallow: a matching
+ * element may itself be a mutable array or object, or a nested collection value.
+ *
+ * The member index generalises the check for positional kinds: vec and set have
+ * one member and always pass 0; tuple checks element i against member i. The
+ * fast_mask shortcut applies only to a single-member all-builtin node, so it is
+ * gated on member 0. */
+static bool collection_member_matches(
+		const zend_collection_info *info, uint32_t member_idx, zval *value)
 {
-	zend_type element_type;
+	zend_type member_type;
 
-	/* Cached: for a builtin element type the whole check is a mask test, and
-	 * the member's zend_type is never read. This is the common case. */
-	if (info->fast_mask != 0) {
+	/* Cached: for a builtin member type the whole check is a mask test, and the
+	 * member's zend_type is never read. This is the common case. */
+	if (member_idx == 0 && info->fast_mask != 0) {
 		return (info->fast_mask & (1u << Z_TYPE_P(value))) != 0;
 	}
 
-	element_type = info->types[0];
+	member_type = info->types[member_idx];
 
-	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(element_type)) {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member_type)) {
 		/* Both sides are canonical, so a nested collection element check is a
 		 * pointer comparison rather than a structural walk. */
 		if (Z_TYPE_P(value) != IS_COLLECTION) {
 			return false;
 		}
-		return Z_VEC_P(value)->type == ZEND_COLLECTION_INFO_CHILD(element_type);
+		return Z_VEC_P(value)->type == ZEND_COLLECTION_INFO_CHILD(member_type);
 	}
 
-	if (ZEND_TYPE_HAS_NAME(element_type)) {
+	if (ZEND_TYPE_HAS_NAME(member_type)) {
 		zend_class_entry *ce;
 
 		if (Z_TYPE_P(value) != IS_OBJECT) {
 			return false;
 		}
-		ce = zend_lookup_class(ZEND_TYPE_NAME(element_type));
+		ce = zend_lookup_class(ZEND_TYPE_NAME(member_type));
 		return ce != NULL && instanceof_function(Z_OBJCE_P(value), ce);
 	}
 
-	return ZEND_TYPE_CONTAINS_CODE(element_type, Z_TYPE_P(value));
+	return ZEND_TYPE_CONTAINS_CODE(member_type, Z_TYPE_P(value));
 }
 
 static bool zend_vec_append(zend_vec *vec, zval *value)
 {
 	ZVAL_DEREF(value);
 
-	if (!zend_vec_element_matches(vec->type, value)) {
+	if (!collection_member_matches(vec->type, 0, value)) {
 		return false;
 	}
 	/* Install first, then publish the slot by raising count. */
@@ -173,6 +179,63 @@ ZEND_API zend_vec *zend_vec_create(
 	} ZEND_HASH_FOREACH_END();
 
 	return vec;
+}
+
+/* Build a tuple: a fixed-arity, positional collection. Storage is the same
+ * packed layout as a vec -- header plus contiguous zvals -- so destruction and
+ * GC traversal are shared; only the element check differs. Element i is checked
+ * against member i, and the element count equals the arity, which the compiler
+ * has already enforced against the descriptor. */
+static zend_vec *zend_tuple_create(
+		const HashTable *values, const zend_collection_info *type, uint32_t *failed_index)
+{
+	ZEND_ASSERT(type->kind == ZEND_COLLECTION_TYPE_TUPLE);
+	ZEND_ASSERT(ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(type));
+	/* Compile-time arity guarantees this; a mismatch would index a member out
+	 * of range below. */
+	ZEND_ASSERT(zend_hash_num_elements(values) == type->num_types);
+
+	zend_vec *tuple = zend_vec_alloc(type->num_types, type);
+	zval *entry;
+	uint32_t i = 0;
+
+	ZEND_HASH_FOREACH_VAL((HashTable *) values, entry) {
+		zval *value = entry;
+
+		ZVAL_DEREF(value);
+		if (!collection_member_matches(type, i, value)) {
+			if (failed_index != NULL) {
+				*failed_index = i;
+			}
+			/* count == i, so only the i already installed are released. */
+			zend_vec_destroy(tuple);
+			return NULL;
+		}
+		/* Install first, then publish the slot by raising count. */
+		ZVAL_COPY(&tuple->elements[i], value);
+		tuple->count++;
+		i++;
+	} ZEND_HASH_FOREACH_END();
+
+	return tuple;
+}
+
+/* The single construction entry point for the VM: dispatch on the resolved
+ * node's kind. Every kind that reaches here is value-constructible -- the
+ * handler checks that first -- so a kind with no case is a contradiction, not a
+ * runtime possibility. `values` holds the already-evaluated elements. */
+ZEND_API zend_vec *zend_collection_construct(
+		const HashTable *values, const zend_collection_info *type, uint32_t *failed_index)
+{
+	switch (type->kind) {
+		case ZEND_COLLECTION_TYPE_VEC:
+			return zend_vec_create(values, type, failed_index);
+		case ZEND_COLLECTION_TYPE_TUPLE:
+			return zend_tuple_create(values, type, failed_index);
+		default:
+			ZEND_ASSERT(0 && "construct reached for a non-constructible kind");
+			return NULL;
+	}
 }
 
 ZEND_API void ZEND_FASTCALL zend_vec_destroy(zend_vec *vec)

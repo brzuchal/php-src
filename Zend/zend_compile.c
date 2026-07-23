@@ -1464,7 +1464,7 @@ static const zend_collection_type_info collection_type_infos[] = {
 	{ZEND_STRL("vec"),   ZEND_COLLECTION_TYPE_VEC,   1, true},
 	{ZEND_STRL("map"),   ZEND_COLLECTION_TYPE_MAP,   2, false},
 	{ZEND_STRL("set"),   ZEND_COLLECTION_TYPE_SET,   1, false},
-	{ZEND_STRL("tuple"), ZEND_COLLECTION_TYPE_TUPLE, 0, false},
+	{ZEND_STRL("tuple"), ZEND_COLLECTION_TYPE_TUPLE, 0, true},
 	{ZEND_STRL("shape"), ZEND_COLLECTION_TYPE_SHAPE, 0, false},
 	{NULL, 0, 0, 0, false}
 };
@@ -11484,10 +11484,23 @@ static void zend_compile_array(znode *result, zend_ast *ast) /* {{{ */
  * what the immutable representation is designed not to have. */
 static void zend_compile_collection_literal(znode *result, const zend_ast *ast)
 {
+	const zend_ast_list *args = zend_ast_get_list(ast->child[0]);
 	const zend_ast_list *elements = zend_ast_get_list(ast->child[1]);
 	zend_op *opline;
 	znode array;
 	uint32_t index;
+
+	/* tuple binds element i to member i, so the element count must equal the
+	 * declared arity exactly. Both are statically known, so this is a compile
+	 * error, and it is kind-specific: vec and set place no element-count
+	 * constraint. Checked before the descriptor is registered or any element is
+	 * emitted, so a wrong arity fails cleanly. */
+	if (ast->attr == ZEND_COLLECTION_TYPE_TUPLE
+	 && elements->children != args->children) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Collection type tuple expects %u element%s, %u given",
+			args->children, args->children == 1 ? "" : "s", elements->children);
+	}
 
 	/* Compiled through the declaration path, so vec[int]{...} means exactly
 	 * what the type vec[int] means: same arity check, same rejection of the

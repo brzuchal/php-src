@@ -28,5 +28,5 @@ var_dump(count($ids) === 1);
 ?>
 --EXPECT--
 bool(true)
-3|2|0|10,1|Element 1 of vec[int] must be of type int, string given
+3|2|0|10,1|Element 1 of vec[int] must be of type int, string given|1,a,2|Element 1 of tuple[int,string] must be of type string, int given
 bool(true)

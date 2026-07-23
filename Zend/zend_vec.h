@@ -91,6 +91,16 @@ ZEND_API bool zend_vec_type_is_supported(zend_type type);
 ZEND_API zend_vec *zend_vec_create(
 	const HashTable *values, const zend_collection_info *type, uint32_t *failed_index);
 
+/* Construct a value of any packed collection kind (vec, tuple) from a list of
+ * already-evaluated elements, dispatching on the resolved node's kind. This is
+ * the entry point the construction opcode uses; direct per-kind creators stay
+ * internal to zend_vec.c. `type` must be value-constructible. `failed_index`,
+ * when not NULL, receives the position of a rejected element; written only when
+ * NULL is returned. Storage is shared across kinds, so the result is destroyed
+ * with zend_vec_destroy() regardless of kind. */
+ZEND_API zend_vec *zend_collection_construct(
+	const HashTable *values, const zend_collection_info *type, uint32_t *failed_index);
+
 /* Exercise the private construction path's invariants from inside the engine
  * boundary, so they keep direct coverage without re-exporting the two-step
  * constructor. Returns a bitmask of the checks that passed. */

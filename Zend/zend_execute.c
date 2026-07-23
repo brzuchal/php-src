@@ -869,10 +869,12 @@ static zend_never_inline ZEND_COLD void zend_collection_element_type_error(
 		const zend_collection_info *info, const HashTable *values, uint32_t index)
 {
 	zend_string *type_str = zend_collection_info_to_string(info);
-	/* vec has a single member type, so every element is checked against
-	 * member 0. A kind whose members differ per position will pass the member
-	 * index it checked against instead. */
-	zend_string *member_str = zend_collection_info_member_to_string(info, 0);
+	/* Which member type the failed element was checked against. vec and set have
+	 * one member, so it is always member 0 no matter the element position; tuple
+	 * is positional, so member i answers element i. This mirrors the per-index
+	 * check in collection_member_matches(). */
+	uint32_t member_idx = (info->kind == ZEND_COLLECTION_TYPE_TUPLE) ? index : 0;
+	zend_string *member_str = zend_collection_info_member_to_string(info, member_idx);
 	zval *value = zend_hash_index_find((HashTable *) values, index);
 
 	ZEND_ASSERT(value != NULL);

@@ -1,12 +1,12 @@
 --TEST--
-collection literals: the parser accepts all five heads, the compiler gates four
+collection literals: the parser accepts all five heads, the compiler gates the unimplemented ones
 --FILE--
 <?php
 
 /* The literal grammar is shared across the five heads and records only the
- * kind, so the four kinds without a value representation are rejected by the
- * same compiler gate that rejects them in type positions -- not by a bare
- * syntax error, which would say nothing about why. */
+ * kind, so the kinds without a value representation are rejected by the same
+ * compiler gate that rejects them in type positions -- not by a bare syntax
+ * error, which would say nothing about why. */
 
 $php = getenv('TEST_PHP_EXECUTABLE_ESCAPED');
 
@@ -34,7 +34,7 @@ foreach (['$x = vec [int]{1};', '$x = vec/*c*/[int]{1};'] as $code) {
 vec: accepted
 map: Fatal error: Collection type map is not implemented yet in Command line code on line 1
 set: Fatal error: Collection type set is not implemented yet in Command line code on line 1
-tuple: Fatal error: Collection type tuple is not implemented yet in Command line code on line 1
+tuple: accepted
 shape: Fatal error: Collection type shape is not implemented yet in Command line code on line 1
 Parse error: syntax error, unexpected token "{" in Command line code on line 1
 Parse error: syntax error, unexpected token "{" in Command line code on line 1

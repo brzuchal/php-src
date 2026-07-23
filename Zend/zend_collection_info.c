@@ -293,6 +293,24 @@ static bool collection_info_matches_type(const zend_collection_info *info, zend_
 	return true;
 }
 
+/* Whether a single member can appear in a *value*: the leaf subset a value may
+ * hold, or a nested collection that is itself value-constructible. Reads the
+ * child's cached verdict rather than descending, so a parent stays O(num_types).
+ *
+ * This is the shared per-member rule. Kinds compose it differently -- vec and
+ * tuple accept a nested member here, set does not (see the classifier) -- but
+ * the leaf policy has one definition. */
+static bool collection_member_is_value_constructible(zend_type member)
+{
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member)) {
+		const zend_collection_info *child = ZEND_COLLECTION_INFO_CHILD(member);
+
+		return ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(child)
+			&& (ZEND_TYPE_FULL_MASK(member) & _ZEND_TYPE_MAY_BE_MASK) == 0;
+	}
+	return zend_vec_type_is_supported(member);
+}
+
 /* Classify a node whose members are already filled and already canonical.
  *
  * This is the single place any classification field is written. It reads each
@@ -326,19 +344,27 @@ static void collection_info_classify(zend_collection_info *info)
 	 * may hold is narrower than the subset a type may name, and the policy is
 	 * per kind. Applying it here means construction never re-derives it. */
 	constructible = false;
-	if (info->kind == ZEND_COLLECTION_TYPE_VEC && info->num_types == 1) {
-		zend_type member = info->types[0];
-
-		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member)) {
-			const zend_collection_info *child = ZEND_COLLECTION_INFO_CHILD(member);
-
-			/* The child's own cached verdict; no descent. */
-			constructible =
-				ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(child)
-				&& (ZEND_TYPE_FULL_MASK(member) & _ZEND_TYPE_MAY_BE_MASK) == 0;
-		} else {
-			constructible = zend_vec_type_is_supported(member);
-		}
+	switch (info->kind) {
+		case ZEND_COLLECTION_TYPE_VEC:
+			/* One element type; a nested collection element is allowed. */
+			constructible = info->num_types == 1
+				&& collection_member_is_value_constructible(info->types[0]);
+			break;
+		case ZEND_COLLECTION_TYPE_TUPLE:
+			/* Positional: element i is checked against member i, so every
+			 * member must be constructible, each on the shared per-member rule
+			 * vec applies to its single element. Arity is fixed by the
+			 * descriptor and enforced against the element count at compile
+			 * time. */
+			constructible = info->num_types >= 1;
+			for (uint32_t i = 0; constructible && i < info->num_types; i++) {
+				constructible = collection_member_is_value_constructible(info->types[i]);
+			}
+			break;
+		default:
+			/* map, set, shape: no value representation reaches construction
+			 * yet, so no node is constructible. */
+			break;
 	}
 	if (constructible) {
 		flags |= ZEND_COLLECTION_INFO_VALUE_CONSTRUCTIBLE;
@@ -455,7 +481,10 @@ static void collection_info_stringify(smart_str *str, const zend_collection_info
 
 	for (uint32_t i = 0; i < info->num_types; i++) {
 		if (i != 0) {
-			smart_str_appends(str, ", ");
+			/* No space after the comma: matches zend_type_to_string_resolved(),
+			 * which renders the *declared* type, so "expected" and "given" read
+			 * the same. First visible for a multi-member kind (tuple). */
+			smart_str_appendc(str, ',');
 		}
 		collection_info_stringify_member(str, info->types[i]);
 	}

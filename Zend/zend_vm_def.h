@@ -6571,11 +6571,11 @@ ZEND_VM_HANDLER(212, ZEND_CONSTRUCT_COLLECTION, CONST|TMP, UNUSED, NUM)
 		HANDLE_EXCEPTION();
 	}
 
-	vec = zend_vec_create(Z_ARRVAL_P(elements), info, &failed_index);
+	vec = zend_collection_construct(Z_ARRVAL_P(elements), info, &failed_index);
 	if (UNEXPECTED(vec == NULL)) {
-		/* Nothing partial escaped: zend_vec_create() destroyed what it had
-		 * built, and the elements are still owned by the array OP1, which is
-		 * released here (L2). */
+		/* Nothing partial escaped: construction destroyed what it had built,
+		 * and the elements are still owned by the array OP1, which is released
+		 * here (L2). */
 		zend_collection_element_type_error(info, Z_ARRVAL_P(elements), failed_index);
 		FREE_OP1();
 		UNDEF_RESULT();

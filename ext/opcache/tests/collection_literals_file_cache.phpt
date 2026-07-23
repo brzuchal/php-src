@@ -43,6 +43,6 @@ foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir,
 ?>
 --EXPECT--
 cached: yes
-cold: 3|2|0|10,1|Element 1 of vec[int] must be of type int, string given
-warm: 3|2|0|10,1|Element 1 of vec[int] must be of type int, string given
+cold: 3|2|0|10,1|Element 1 of vec[int] must be of type int, string given|1,a,2|Element 1 of tuple[int,string] must be of type string, int given
+warm: 3|2|0|10,1|Element 1 of vec[int] must be of type int, string given|1,a,2|Element 1 of tuple[int,string] must be of type string, int given
 identical: true
