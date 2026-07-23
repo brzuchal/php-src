@@ -1003,6 +1003,8 @@ uint32_t zend_op_array_add_collection_type(zend_op_array *op_array, zend_type ty
 ZEND_API zend_collection_type *zend_type_collection_alloc(uint32_t kind, uint32_t num_types, bool persistent);
 /* Source-level name of a collection kind ("vec"), or NULL if unknown. */
 ZEND_API const char *zend_collection_type_kind_name(uint32_t kind);
+/* The reverse: resolve a kind name ("vec") to its kind. False if unknown. */
+ZEND_API bool zend_collection_kind_by_name(const char *name, size_t name_len, uint32_t *kind);
 /* Structural (invariant) identity of two types, recursing into descriptors. */
 ZEND_API bool zend_type_structurally_equals(zend_type a, zend_type b);
 ZEND_API zend_string *zend_create_member_string(const zend_string *class_name, const zend_string *member_name);

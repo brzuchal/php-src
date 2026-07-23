@@ -28,6 +28,7 @@
 #include "zend_enum.h"
 #include "zend_exceptions.h"
 #include "zend_types.h"
+#include "zend_vec.h"
 /* }}} */
 
 struct php_serialize_data {
@@ -232,13 +233,25 @@ again:
 			struc = Z_REFVAL_P(struc);
 			goto again;
 		case IS_COLLECTION: {
-			/* Collections have no display semantics yet. Report the real runtime
-			 * type rather than UNKNOWN:0; contents are deliberately not shown. */
+			/* type(count) { elements }, mirroring the array layout with the full
+			 * runtime type as the label. Positional, so numeric indices and no
+			 * keys. */
+			zend_vec *vec = Z_VEC_P(struc);
 			zend_string *name = zend_zval_collection_type_name(struc);
-			php_printf("%s%s\n", COMMON, name ? ZSTR_VAL(name) : "collection");
+			uint32_t vcount = ZEND_VEC_COUNT(vec);
+			zval *elements = ZEND_VEC_ELEMENTS(vec);
+
+			php_printf("%s%s(%u) {\n", COMMON, name ? ZSTR_VAL(name) : "collection", vcount);
 			if (name) {
 				zend_string_release(name);
 			}
+			for (uint32_t i = 0; i < vcount; i++) {
+				php_array_element_dump(&elements[i], i, NULL, level);
+			}
+			if (level > 1) {
+				php_printf("%*c", level - 1, ' ');
+			}
+			PUTS("}\n");
 			break;
 		}
 		default:
@@ -436,11 +449,25 @@ PHPAPI void php_debug_zval_dump(zval *struc, int level) /* {{{ */
 		PUTS("}\n");
 		break;
 	case IS_COLLECTION: {
+		/* type(count) refcount(R){ elements }, mirroring the array/object debug
+		 * layout. A collection is always refcounted. */
+		zend_vec *vec = Z_VEC_P(struc);
 		zend_string *name = zend_zval_collection_type_name(struc);
-		php_printf("%s\n", name ? ZSTR_VAL(name) : "collection");
+		uint32_t vcount = ZEND_VEC_COUNT(vec);
+		zval *elements = ZEND_VEC_ELEMENTS(vec);
+
+		php_printf("%s(%u) refcount(%u){\n",
+			name ? ZSTR_VAL(name) : "collection", vcount, Z_REFCOUNT_P(struc));
 		if (name) {
 			zend_string_release(name);
 		}
+		for (uint32_t i = 0; i < vcount; i++) {
+			zval_array_element_dump(&elements[i], i, NULL, level);
+		}
+		if (level > 1) {
+			php_printf("%*c", level - 1, ' ');
+		}
+		PUTS("}\n");
 		break;
 	}
 	default:
@@ -694,11 +721,36 @@ again:
 		case IS_REFERENCE:
 			struc = Z_REFVAL_P(struc);
 			goto again;
-		case IS_COLLECTION:
-			/* Exporting as NULL would silently round-trip to the wrong value.
-			 * Collections have no export representation yet. */
-			zend_type_error("Cannot export a collection value");
-			return FAILURE;
+		case IS_COLLECTION: {
+			/* Collection literal syntax -- a *source* representation that evals
+			 * back to an equal value, e.g. vec[int]{1, 2, 3}. The type is
+			 * rendered from the canonical node; elements follow the array
+			 * layout (indent level+1, close at level-1). */
+			zend_vec *vec = Z_VEC_P(struc);
+			zend_string *type = zend_collection_info_to_string(vec->type);
+			uint32_t count = ZEND_VEC_COUNT(vec);
+			zval *elements = ZEND_VEC_ELEMENTS(vec);
+
+			if (level > 1) {
+				smart_str_appendc(buf, '\n');
+				buffer_append_spaces(buf, level - 1);
+			}
+			smart_str_append(buf, type);
+			zend_string_release(type);
+			smart_str_appendl(buf, "{\n", 2);
+			for (uint32_t i = 0; i < count; i++) {
+				buffer_append_spaces(buf, level + 1);
+				if (php_var_export_ex(&elements[i], level + 2, buf) == FAILURE) {
+					return FAILURE;
+				}
+				smart_str_appendl(buf, ",\n", 2);
+			}
+			if (level > 1) {
+				buffer_append_spaces(buf, level - 1);
+			}
+			smart_str_appendc(buf, '}');
+			break;
+		}
 		default:
 			smart_str_appendl(buf, "NULL", 4);
 			break;
@@ -1071,6 +1123,64 @@ static zend_always_inline bool php_serialize_check_stack_limit(void)
 	return false;
 }
 
+/* The serialize member letter for a builtin element mask, or 0 if the mask is
+ * not one of the constructible builtins. Uses serialize()'s own value letters
+ * as type tags; see implementation-notes/collection-serialization-format.md.
+ * The unserializer's inverse is php_collection_builtin_member_mask(). */
+static char php_collection_builtin_member_letter(uint32_t mask)
+{
+	switch (mask) {
+		case (1u << IS_LONG):                    return 'i';
+		case (1u << IS_DOUBLE):                  return 'd';
+		case (1u << IS_STRING):                  return 's';
+		case ((1u << IS_FALSE) | (1u << IS_TRUE)): return 'b';
+		case (1u << IS_ARRAY):                   return 'a';
+		default:                                 return 0;
+	}
+}
+
+/* Emit a collection's element-type tree as the structural descriptor:
+ * "kindname:arity:{member...}". A member is a builtin letter (i/d/s/b/a), a
+ * class c:<len>:"<name>";, or a nested l:<descriptor>;. The member tags are
+ * lowercase so they never mean the same as serialize()'s value-position C
+ * (custom object) and L (a collection value). Reads the canonical node
+ * directly; a nested member is a child node, never a type string. */
+static void php_collection_serialize_descriptor(smart_str *buf, const zend_collection_info *node)
+{
+	const char *kind_name = zend_collection_type_kind_name(node->kind);
+
+	/* A serializable value's node always has a known kind. */
+	ZEND_ASSERT(kind_name != NULL);
+	smart_str_appends(buf, kind_name);
+	smart_str_appendc(buf, ':');
+	smart_str_append_unsigned(buf, node->num_types);
+	smart_str_appendl(buf, ":{", 2);
+	for (uint32_t i = 0; i < node->num_types; i++) {
+		zend_type member = node->types[i];
+
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member)) {
+			smart_str_appendl(buf, "l:", 2);
+			php_collection_serialize_descriptor(buf, ZEND_COLLECTION_INFO_CHILD(member));
+			smart_str_appendc(buf, ';');
+		} else if (ZEND_TYPE_HAS_NAME(member)) {
+			zend_string *name = ZEND_TYPE_NAME(member);
+			smart_str_appendl(buf, "c:", 2);
+			smart_str_append_unsigned(buf, ZSTR_LEN(name));
+			smart_str_appendl(buf, ":\"", 2);
+			smart_str_appendl(buf, ZSTR_VAL(name), ZSTR_LEN(name));
+			smart_str_appendl(buf, "\";", 2);
+		} else {
+			/* A constructible builtin leaf; the value could not have been built
+			 * otherwise, so the letter is always defined. */
+			char letter = php_collection_builtin_member_letter(ZEND_TYPE_PURE_MASK(member));
+			ZEND_ASSERT(letter != 0);
+			smart_str_appendc(buf, letter);
+			smart_str_appendc(buf, ';');
+		}
+	}
+	smart_str_appendc(buf, '}');
+}
+
 static void php_var_serialize_intern(smart_str *buf, zval *struc, php_serialize_data_t var_hash, bool in_rcn_array, bool is_root) /* {{{ */
 {
 	zend_long var_already;
@@ -1340,11 +1450,28 @@ again:
 		case IS_REFERENCE:
 			struc = Z_REFVAL_P(struc);
 			goto again;
-		case IS_COLLECTION:
-			/* Emitting i:0; would silently round-trip a collection as integer
-			 * zero. Collections have no serialization format yet. */
-			zend_type_error("Cannot serialize a collection value");
+		case IS_COLLECTION: {
+			/* L:<descriptor>:<count>:{<elements>} -- see
+			 * implementation-notes/collection-serialization-format.md. The kind
+			 * lives in the descriptor, so vec/tuple/set share one token. */
+			zend_vec *vec = Z_VEC_P(struc);
+			uint32_t count = ZEND_VEC_COUNT(vec);
+			zval *elements = ZEND_VEC_ELEMENTS(vec);
+
+			smart_str_appendl(buf, "L:", 2);
+			php_collection_serialize_descriptor(buf, vec->type);
+			smart_str_appendc(buf, ':');
+			smart_str_append_unsigned(buf, count);
+			smart_str_appendl(buf, ":{", 2);
+			for (uint32_t i = 0; i < count; i++) {
+				/* Elements are plain values; the element type is carried by the
+				 * descriptor, not repeated per element. Not is_root, so nested
+				 * collections serialize the same way recursively. */
+				php_var_serialize_intern(buf, &elements[i], var_hash, false, false);
+			}
+			smart_str_appendc(buf, '}');
 			return;
+		}
 		default:
 			smart_str_appendl(buf, "i:0;", 4);
 			return;

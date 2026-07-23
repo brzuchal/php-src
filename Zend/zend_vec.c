@@ -191,9 +191,18 @@ static zend_vec *zend_tuple_create(
 {
 	ZEND_ASSERT(type->kind == ZEND_COLLECTION_TYPE_TUPLE);
 	ZEND_ASSERT(ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(type));
-	/* Compile-time arity guarantees this; a mismatch would index a member out
-	 * of range below. */
-	ZEND_ASSERT(zend_hash_num_elements(values) == type->num_types);
+
+	/* The element count must equal the arity: element i is checked against
+	 * member i, so a longer list would index a member -- and a tuple slot --
+	 * out of range. The literal compiler enforces this, but unserialize()
+	 * reconstructs from untrusted input, so this is a runtime check, not an
+	 * assert: a mismatch fails construction rather than overflowing. */
+	if (zend_hash_num_elements(values) != type->num_types) {
+		if (failed_index != NULL) {
+			*failed_index = type->num_types;
+		}
+		return NULL;
+	}
 
 	zend_vec *tuple = zend_vec_alloc(type->num_types, type);
 	zval *entry;

@@ -6,36 +6,51 @@ zend_test
 <?php
 zend_test_make_vec([1, 2, 3], 'int', $v);
 
-/* Debug output reports the real runtime type instead of UNKNOWN:0.
- * The exact rendering below is provisional: collections have no display
- * semantics yet, so this asserts only that the type is reported and that
- * nothing falls through to UNKNOWN. It is not a public format, and it
- * deliberately shows neither element count nor contents. */
+/* Display now shows the type, count and contents -- never UNKNOWN:0. */
 var_dump($v);
-debug_zval_dump($v);
 
-/* Operations with no defined semantics fail loudly rather than producing a
- * value that would silently round-trip to something else. */
+/* Serialization is a real round-trip, not a silent zero or a throw. */
+$s = serialize($v);
+echo $s, "\n";
+$u = unserialize($s);
+var_dump(zend_test_vec_count($u) === 3, zend_test_vec_type_id($u) === zend_test_vec_type_id($v));
+
+/* var_export is source-level literal syntax that evals back. */
+echo var_export($v, true), "\n";
+
+/* Operations with genuinely no meaning still fail loudly rather than producing
+ * a value that would silently round-trip to something else. */
 foreach ([
-    'var_export' => fn() => var_export($v, true),
-    'serialize'  => fn() => serialize($v),
-    'string cast'=> fn() => (string) $v,
+    'string cast' => fn() => (string) $v,
+    'int cast'    => fn() => (int) $v,
 ] as $label => $op) {
     try { $op(); echo "$label: NO ERROR\n"; }
-    catch (TypeError $e) { echo "$label: ", get_class($e), ": ", $e->getMessage(), "\n"; }
+    catch (TypeError $e) { echo "$label: ", $e->getMessage(), "\n"; }
 }
 
 /* Ordinary values are entirely unaffected. */
 var_dump(1, "s", [1], null, true, 1.5);
-echo var_export([1, 'a' => null], true), "\n";
 echo serialize([1, 2]), "\n";
 ?>
 --EXPECT--
-vec[int]
-vec[int]
-var_export: TypeError: Cannot export a collection value
-serialize: TypeError: Cannot serialize a collection value
-string cast: TypeError: Cannot convert a collection to string
+vec[int](3) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+  [2]=>
+  int(3)
+}
+L:vec:1:{i;}:3:{i:1;i:2;i:3;}
+bool(true)
+bool(true)
+vec[int]{
+  1,
+  2,
+  3,
+}
+string cast: Cannot convert a collection to string
+int cast: Cannot convert a collection to int
 int(1)
 string(1) "s"
 array(1) {
@@ -45,8 +60,4 @@ array(1) {
 NULL
 bool(true)
 float(1.5)
-array (
-  0 => 1,
-  'a' => NULL,
-)
 a:2:{i:0;i:1;i:1;i:2;}

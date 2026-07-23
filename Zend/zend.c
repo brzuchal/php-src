@@ -24,6 +24,7 @@
 #include "zend_API.h"
 #include "zend_exceptions.h"
 #include "zend_builtin_functions.h"
+#include "zend_vec.h"
 #include "zend_ini.h"
 #include "zend_vm.h"
 #include "zend_dtrace.h"
@@ -608,6 +609,44 @@ static void zend_print_zval_r_to_buf(smart_str *buf, zval *expr, int indent) /* 
 		case IS_STRING:
 			smart_str_append(buf, Z_STR_P(expr));
 			break;
+		case IS_COLLECTION: {
+			/* type name, then the element listing in the same "(\n [i] => v \n)"
+			 * shape print_hash() uses for arrays, over the packed elements. */
+			zend_vec *vec = Z_VEC_P(expr);
+			zend_string *name = zend_zval_collection_type_name(expr);
+			uint32_t count = ZEND_VEC_COUNT(vec);
+			zval *elements = ZEND_VEC_ELEMENTS(vec);
+			int i;
+
+			if (name) {
+				smart_str_append(buf, name);
+				zend_string_release(name);
+			} else {
+				smart_str_appends(buf, "collection");
+			}
+			smart_str_appendc(buf, '\n');
+			for (i = 0; i < indent; i++) {
+				smart_str_appendc(buf, ' ');
+			}
+			smart_str_appends(buf, "(\n");
+			indent += PRINT_ZVAL_INDENT;
+			for (uint32_t j = 0; j < count; j++) {
+				for (i = 0; i < indent; i++) {
+					smart_str_appendc(buf, ' ');
+				}
+				smart_str_appendc(buf, '[');
+				smart_str_append_long(buf, (zend_long) j);
+				smart_str_appends(buf, "] => ");
+				zend_print_zval_r_to_buf(buf, &elements[j], indent + PRINT_ZVAL_INDENT);
+				smart_str_appends(buf, "\n");
+			}
+			indent -= PRINT_ZVAL_INDENT;
+			for (i = 0; i < indent; i++) {
+				smart_str_appendc(buf, ' ');
+			}
+			smart_str_appends(buf, ")\n");
+			break;
+		}
 		default:
 			{
 				zend_string *str = zval_get_string_func(expr);

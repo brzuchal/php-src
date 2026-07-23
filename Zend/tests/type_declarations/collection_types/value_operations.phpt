@@ -79,6 +79,17 @@ collection / collection
 collection / collection
 collection / collection
 -- A4: the full parameterised name is still rendered by var_dump --
-vec[int]
-tuple[int,string]
-set[string]
+vec[int](1) {
+  [0]=>
+  int(1)
+}
+tuple[int,string](2) {
+  [0]=>
+  int(1)
+  [1]=>
+  string(1) "a"
+}
+set[string](1) {
+  [0]=>
+  string(1) "x"
+}

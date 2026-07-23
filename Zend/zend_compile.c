@@ -1487,6 +1487,19 @@ ZEND_API const char *zend_collection_type_kind_name(uint32_t kind) {
 	return NULL;
 }
 
+/* Reverse of zend_collection_type_kind_name(): the source-level kind name back
+ * to its kind. The one source of truth for both directions, so the serializer
+ * and unserializer cannot disagree on a name. */
+ZEND_API bool zend_collection_kind_by_name(const char *name, size_t name_len, uint32_t *kind) {
+	for (const zend_collection_type_info *info = collection_type_infos; info->name; info++) {
+		if (info->name_len == name_len && memcmp(info->name, name, name_len) == 0) {
+			*kind = info->kind;
+			return true;
+		}
+	}
+	return false;
+}
+
 zend_string *zend_type_to_string_resolved(const zend_type type, const zend_class_entry *scope) {
 	zend_string *str = NULL;
 
