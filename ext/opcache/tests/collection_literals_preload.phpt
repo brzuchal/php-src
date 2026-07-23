@@ -26,6 +26,7 @@ var_dump(zend_test_vec_get(zend_test_vec_get($nested, 0), 0));
 
 echo (new PreloadedLiteralC())->m(), "\n";
 echo preloaded_literal_tuple(), "\n";
+var_dump(preloaded_literal_set());
 
 // Repeated execution of a preloaded site resolves once and reuses the node.
 $ids = [];
@@ -41,4 +42,5 @@ int(2)
 string(1) "a"
 Element 1 of vec[int] must be of type int, string given
 7,seven
+int(3)
 bool(true)

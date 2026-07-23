@@ -220,6 +220,61 @@ static zend_vec *zend_tuple_create(
 	return tuple;
 }
 
+/* Is `value` already present in the elements installed so far? Equality is
+ * ===: zend_is_identical() compares scalars and arrays by value and objects by
+ * identity, which is the deduplication rule a set uses. The scan is over the
+ * kept elements only; for the leaf element types a set admits this is a plain
+ * value/identity test with no recursion into collections. */
+static bool zend_set_contains(const zend_vec *set, const zval *value)
+{
+	for (uint32_t i = 0; i < set->count; i++) {
+		if (zend_is_identical(&set->elements[i], value)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/* Build a set: a single-member collection whose elements are unique. Storage is
+ * the shared packed layout; duplicates are silently dropped, keeping the first
+ * occurrence, so the value holds at most one of each element and preserves
+ * source order among the kept ones. Capacity is the input length, an upper
+ * bound; the unused tail past count is never read, exactly as for a vec whose
+ * construction stopped early. */
+static zend_vec *zend_set_create(
+		const HashTable *values, const zend_collection_info *type, uint32_t *failed_index)
+{
+	ZEND_ASSERT(type->kind == ZEND_COLLECTION_TYPE_SET);
+	ZEND_ASSERT(ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(type));
+
+	zend_vec *set = zend_vec_alloc(zend_hash_num_elements(values), type);
+	zval *entry;
+	uint32_t input_idx = 0;
+
+	ZEND_HASH_FOREACH_VAL((HashTable *) values, entry) {
+		zval *value = entry;
+
+		ZVAL_DEREF(value);
+		if (!collection_member_matches(type, 0, value)) {
+			/* The reported position is the element's place in the source, not
+			 * its place among the kept elements, which dedup would skew. */
+			if (failed_index != NULL) {
+				*failed_index = input_idx;
+			}
+			zend_vec_destroy(set);
+			return NULL;
+		}
+		/* Silent dedup: a repeat is not an error, it is set semantics. */
+		if (!zend_set_contains(set, value)) {
+			ZVAL_COPY(&set->elements[set->count], value);
+			set->count++;
+		}
+		input_idx++;
+	} ZEND_HASH_FOREACH_END();
+
+	return set;
+}
+
 /* The single construction entry point for the VM: dispatch on the resolved
  * node's kind. Every kind that reaches here is value-constructible -- the
  * handler checks that first -- so a kind with no case is a contradiction, not a
@@ -232,6 +287,8 @@ ZEND_API zend_vec *zend_collection_construct(
 			return zend_vec_create(values, type, failed_index);
 		case ZEND_COLLECTION_TYPE_TUPLE:
 			return zend_tuple_create(values, type, failed_index);
+		case ZEND_COLLECTION_TYPE_SET:
+			return zend_set_create(values, type, failed_index);
 		default:
 			ZEND_ASSERT(0 && "construct reached for a non-constructible kind");
 			return NULL;

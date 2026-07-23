@@ -33,7 +33,7 @@ foreach (['$x = vec [int]{1};', '$x = vec/*c*/[int]{1};'] as $code) {
 --EXPECT--
 vec: accepted
 map: Fatal error: Collection type map is not implemented yet in Command line code on line 1
-set: Fatal error: Collection type set is not implemented yet in Command line code on line 1
+set: accepted
 tuple: accepted
 shape: Fatal error: Collection type shape is not implemented yet in Command line code on line 1
 Parse error: syntax error, unexpected token "{" in Command line code on line 1

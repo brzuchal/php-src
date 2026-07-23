@@ -12,6 +12,10 @@ function preloaded_literal_tuple(): string {
     return zend_test_vec_get($t, 0) . ',' . zend_test_vec_get($t, 1);
 }
 
+function preloaded_literal_set(): int {
+    return zend_test_vec_count(set[string]{'a', 'b', 'a', 'c', 'b'});
+}
+
 class PreloadedLiteralC {
     public function m(): string {
         try {

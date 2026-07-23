@@ -1463,7 +1463,7 @@ typedef struct {
 static const zend_collection_type_info collection_type_infos[] = {
 	{ZEND_STRL("vec"),   ZEND_COLLECTION_TYPE_VEC,   1, true},
 	{ZEND_STRL("map"),   ZEND_COLLECTION_TYPE_MAP,   2, false},
-	{ZEND_STRL("set"),   ZEND_COLLECTION_TYPE_SET,   1, false},
+	{ZEND_STRL("set"),   ZEND_COLLECTION_TYPE_SET,   1, true},
 	{ZEND_STRL("tuple"), ZEND_COLLECTION_TYPE_TUPLE, 0, true},
 	{ZEND_STRL("shape"), ZEND_COLLECTION_TYPE_SHAPE, 0, false},
 	{NULL, 0, 0, 0, false}

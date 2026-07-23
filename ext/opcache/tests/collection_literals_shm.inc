@@ -30,6 +30,13 @@ function ocl_tuple_bad(): string {
     return 'not rejected';
 }
 
+/* A persisted set descriptor, and its deduplication running after the script
+ * has been unserialized from SHM. */
+function ocl_set(): int {
+    $s = set[int]{1, 2, 2, 3, 1};
+    return zend_test_vec_count($s);
+}
+
 /* Returned so a caller can check that repeated executions of a *persisted*
  * literal site keep borrowing the same canonical node. */
 function ocl_make(int $n) {
@@ -65,5 +72,6 @@ function ocl_report(): string {
         $c->bad(),
         ocl_tuple(),
         ocl_tuple_bad(),
+        ocl_set(),
     ]);
 }

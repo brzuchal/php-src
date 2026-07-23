@@ -361,9 +361,21 @@ static void collection_info_classify(zend_collection_info *info)
 				constructible = collection_member_is_value_constructible(info->types[i]);
 			}
 			break;
+		case ZEND_COLLECTION_TYPE_SET:
+			/* A set deduplicates its elements, which needs value equality. That
+			 * is defined for leaf elements (=== -- scalars and arrays by value,
+			 * objects by identity) but not for nested collection values, whose
+			 * equality is a separate unimplemented stage. So set is restricted
+			 * to a leaf member: zend_vec_type_is_supported() is exactly that
+			 * policy and already rejects a nested descriptor, unlike the shared
+			 * per-member helper, which accepts one. set[vec[...]] is therefore
+			 * not constructible yet. */
+			constructible = info->num_types == 1
+				&& zend_vec_type_is_supported(info->types[0]);
+			break;
 		default:
-			/* map, set, shape: no value representation reaches construction
-			 * yet, so no node is constructible. */
+			/* map, shape: no value representation reaches construction yet, so
+			 * no node is constructible. */
 			break;
 	}
 	if (constructible) {
