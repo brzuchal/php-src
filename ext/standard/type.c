@@ -71,6 +71,10 @@ PHP_FUNCTION(get_debug_type)
 			} else {
 				RETURN_INTERNED_STR(ZSTR_KNOWN(ZEND_STR_CLOSED_RESOURCE));
 			}
+		case IS_COLLECTION:
+			/* Coarse category only; the parameterised name is not recoverable
+			 * from a bare type code (see zend_zval_get_legacy_type). */
+			RETURN_INTERNED_STR(ZSTR_KNOWN(ZEND_STR_COLLECTION));
 		default:
 			RETURN_INTERNED_STR(ZSTR_KNOWN(ZEND_STR_UNKNOWN));
 	}

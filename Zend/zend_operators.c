@@ -2400,6 +2400,26 @@ ZEND_API int ZEND_FASTCALL zend_compare(zval *op1, zval *op2) /* {{{ */
 					continue;
 				}
 
+				if (UNEXPECTED(Z_TYPE_P(op1) == IS_COLLECTION)
+				 || UNEXPECTED(Z_TYPE_P(op2) == IS_COLLECTION)) {
+					/* Collections have no ordering or non-strict equality yet.
+					 * Every comparison operator (==, !=, <, <=>, and the
+					 * internal comparators behind sort() and non-strict
+					 * in_array()/array_search()) funnels here, and the
+					 * scalar-coercion fallback below would drive a collection
+					 * into ZEND_UNREACHABLE() -- undefined in release, an abort
+					 * in debug. Fail explicitly instead, matching the other
+					 * unsupported collection operations (serialize, var_export,
+					 * string cast). Strict identity (===/!==) never reaches
+					 * this: it is answered by zend_is_identical(). Structural
+					 * comparison is a separate, unimplemented stage. */
+					zend_type_error("Cannot compare collection values");
+					/* Uncomparable: for a caller that ignores EG(exception),
+					 * this makes ==, <, <=, >, >= all false. The exception is
+					 * the real signal. */
+					return ZEND_UNCOMPARABLE;
+				}
+
 				if (Z_TYPE_P(op1) == IS_OBJECT
 				 || Z_TYPE_P(op2) == IS_OBJECT) {
 					zval *object, *other;
@@ -2514,6 +2534,14 @@ ZEND_API bool ZEND_FASTCALL zend_is_identical(const zval *op1, const zval *op2) 
 				zend_hash_compare(Z_ARRVAL_P(op1), Z_ARRVAL_P(op2), (compare_func_t) hash_zval_identical_function, 1) == 0);
 		case IS_OBJECT:
 			return (Z_OBJ_P(op1) == Z_OBJ_P(op2));
+		case IS_COLLECTION:
+			/* Interim identity: two collection values are identical iff they
+			 * are the same value, by pointer. This is reflexive ($a === $a is
+			 * true) and distinguishes separately constructed but structurally
+			 * equal values, which stay non-identical until structural equality
+			 * is designed. Z_COUNTED is the collection's refcounted header, the
+			 * same object-like identity IS_OBJECT uses above. */
+			return (Z_COUNTED_P(op1) == Z_COUNTED_P(op2));
 		default:
 			return 0;
 	}

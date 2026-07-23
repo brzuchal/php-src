@@ -162,10 +162,9 @@ ZEND_API const char *zend_zval_value_name(const zval *arg)
  *
  * The name is produced by the shared type stringifier rather than formatted
  * here, so the kind[...] spelling has exactly one definition and stays correct
- * for further collection kinds. The descriptor is assembled from whatever
- * parameters the payload exposes: today's vec payload carries a single element
- * type, but nothing below is specific to that beyond num_types, and a payload
- * exposing more would be assembled the same way with a descriptor sized to fit. */
+ * across kinds. It reads the value's canonical node directly and iterates its
+ * members, so a single-member vec[int] and a multi-member tuple[int,string] or
+ * set[int] all render the same way, with no per-kind branch here. */
 ZEND_API zend_string *zend_zval_collection_type_name(const zval *arg)
 {
 	ZVAL_DEREF(arg);
@@ -220,6 +219,12 @@ ZEND_API zend_string *zend_zval_get_legacy_type(const zval *arg) /* {{{ */
 			} else {
 				return ZSTR_KNOWN(ZEND_STR_CLOSED_RESOURCE);
 			}
+		case IS_COLLECTION:
+			/* The coarse category only, "collection". The parameterised name
+			 * (vec[int], tuple[int,string]) is not recoverable from a bare type
+			 * code and is deliberately not produced here; var_dump and the type
+			 * diagnostics render it through zend_zval_collection_type_name(). */
+			return ZSTR_KNOWN(ZEND_STR_COLLECTION);
 		default:
 			return NULL;
 	}
