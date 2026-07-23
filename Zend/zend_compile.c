@@ -101,6 +101,16 @@ static zend_op *zend_delayed_compile_var(znode *result, zend_ast *ast, uint32_t 
 static void zend_compile_expr(znode *result, zend_ast *ast);
 static void zend_compile_stmt(zend_ast *ast);
 static void zend_compile_assign(znode *result, zend_ast *ast, bool stmt, uint32_t type);
+static void zend_compile_collection_literal_contextual(znode *result, const zend_ast *ast, uint32_t source, uint32_t arg_num);
+static void zend_compile_collection_return(znode *result, const zend_ast *ast);
+
+/* A contextual collection literal is a head with no bracketed element type,
+ * `vec{...}`: the AST records no type-argument child. It is only valid where a
+ * declared type supplies the element type (return, typed argument). */
+static zend_always_inline bool zend_ast_is_contextual_collection(const zend_ast *ast)
+{
+	return ast != NULL && ast->kind == ZEND_AST_COLLECTION && ast->child[0] == NULL;
+}
 
 #ifdef ZEND_CHECK_STACK_LIMIT
 zend_never_inline static void zend_stack_limit_error(void)
@@ -1498,6 +1508,28 @@ ZEND_API bool zend_collection_kind_by_name(const char *name, size_t name_len, ui
 		}
 	}
 	return false;
+}
+
+/* Build the AST node for a contextual collection literal `vec{...}`. The head
+ * token carries the source-cased head name; resolve it (case-insensitively, as
+ * the head is) to a kind so the node is identical to an explicit literal with no
+ * type arguments: attr = kind, child[0] = NULL, child[1] = elements. The scanner
+ * only emits the head token for the five names, so resolution always succeeds. */
+ZEND_API zend_ast *zend_ast_create_collection_literal(zend_ast *head, zend_ast *elements) {
+	zend_string *name = zend_ast_get_str(head);
+	uint32_t kind = 0;
+
+	for (const zend_collection_type_info *info = collection_type_infos; info->name; info++) {
+		if (ZSTR_LEN(name) == info->name_len
+		 && zend_binary_strcasecmp(ZSTR_VAL(name), ZSTR_LEN(name), info->name, info->name_len) == 0) {
+			kind = info->kind;
+			break;
+		}
+	}
+
+	zend_ast *node = zend_ast_create_ex(ZEND_AST_COLLECTION, kind, NULL, elements);
+	zend_ast_destroy(head);
+	return node;
 }
 
 zend_string *zend_type_to_string_resolved(const zend_type type, const zend_class_entry *scope) {
@@ -4006,7 +4038,24 @@ static uint32_t zend_compile_args(
 				} while (0);
 			}
 		} else {
-			zend_compile_expr(&arg_node, arg);
+			if (zend_ast_is_contextual_collection(arg)) {
+				/* A contextual literal argument takes its element type from the
+				 * callee's parameter N, read at runtime -- the callee is not
+				 * soundly known at compile time (autoload, conditional
+				 * declaration, opcache reuse). Named or out-of-order arguments
+				 * cannot be mapped to a fixed position here, so they are deferred
+				 * to the explicit form. */
+				if (arg_name != NULL || arg_num == (uint32_t) -1) {
+					const zend_collection_type_info *ci = zend_collection_type_by_kind(arg->attr);
+					zend_error_noreturn(E_COMPILE_ERROR,
+						"Cannot infer the element type of %s{} passed as a named argument. "
+						"Write %s[...]{...} to state the element type", ci->name, ci->name);
+				}
+				zend_compile_collection_literal_contextual(&arg_node, arg,
+					ZEND_COLLECTION_SOURCE_ARG, arg_num);
+			} else {
+				zend_compile_expr(&arg_node, arg);
+			}
 			if (arg_node.op_type == IS_VAR) {
 				/* pass ++$a or something similar */
 				if (fbc && arg_num != (uint32_t) -1) {
@@ -6062,6 +6111,8 @@ static void zend_compile_return(const zend_ast *ast) /* {{{ */
 	} else if (by_ref && zend_is_variable_or_call(expr_ast)) {
 		zend_assert_not_short_circuited(expr_ast);
 		zend_compile_var(&expr_node, expr_ast, BP_VAR_W, true);
+	} else if (zend_ast_is_contextual_collection(expr_ast)) {
+		zend_compile_collection_return(&expr_node, expr_ast);
 	} else {
 		zend_compile_expr(&expr_node, expr_ast);
 	}
@@ -11499,13 +11550,82 @@ static void zend_compile_array(znode *result, zend_ast *ast) /* {{{ */
  * The alternative -- appending into a collection as elements are evaluated --
  * would need a mutable, partially populated, observable value, which is exactly
  * what the immutable representation is designed not to have. */
+/* Emit the element list of a collection literal as an array TMP (INIT_ARRAY +
+ * ADD_ARRAY_ELEMENT). Reusing the array opcodes is what gives left-to-right
+ * evaluation and the no-partial-value guarantee for free (zend_calc_live_ranges
+ * frees the array if an element throws). Shared by the explicit and contextual
+ * literal compilers. */
+static void zend_compile_collection_elements(znode *array, const zend_ast_list *elements)
+{
+	zend_op *opline;
+
+	if (elements->children == 0) {
+		zend_emit_op_tmp(array, ZEND_INIT_ARRAY, NULL, NULL);
+		return;
+	}
+	for (uint32_t i = 0; i < elements->children; i++) {
+		znode value;
+
+		zend_compile_expr(&value, elements->child[i]);
+		if (i == 0) {
+			opline = zend_emit_op_tmp(array, ZEND_INIT_ARRAY, &value, NULL);
+			opline->extended_value = elements->children << ZEND_ARRAY_SIZE_SHIFT;
+		} else {
+			opline = zend_emit_op(NULL, ZEND_ADD_ARRAY_ELEMENT, &value, NULL);
+			SET_NODE(opline->result, array);
+		}
+	}
+}
+
+/* A contextual literal `vec{...}` whose element type comes from a declared type
+ * at the use site. `source` is RETURN or ARG and `arg_num` is the 1-based
+ * argument position (0 for RETURN). No descriptor is registered: the type is
+ * read at runtime from the return/parameter type, so the opcode carries only the
+ * source, the head's kind (to validate against the expected type) and, for ARG,
+ * the argument number. The head still names the kind; only the element type is
+ * contextual. */
+static void zend_compile_collection_literal_contextual(
+		znode *result, const zend_ast *ast, uint32_t source, uint32_t arg_num)
+{
+	const zend_collection_type_info *info = zend_collection_type_by_kind(ast->attr);
+	znode array;
+	zend_op *opline;
+
+	if (!info->runtime_ready) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Collection type %s is not implemented yet", info->name);
+	}
+
+	zend_compile_collection_elements(&array, zend_ast_get_list(ast->child[1]));
+
+	opline = zend_emit_op_tmp(result, ZEND_CONSTRUCT_COLLECTION, &array, NULL);
+	opline->op2.num = source | (ast->attr << ZEND_COLLECTION_SOURCE_KIND_SHIFT);
+	opline->extended_value = arg_num;
+}
+
 static void zend_compile_collection_literal(znode *result, const zend_ast *ast)
 {
-	const zend_ast_list *args = zend_ast_get_list(ast->child[0]);
 	const zend_ast_list *elements = zend_ast_get_list(ast->child[1]);
 	zend_op *opline;
 	znode array;
 	uint32_t index;
+
+	if (ast->child[0] == NULL) {
+		/* Contextual literal reached through the generic expression path: this
+		 * position supplies no expected type. The return and argument compilers
+		 * intercept the positions that do, so arriving here means no source
+		 * exists -- fail closed, never guess a type from the elements. */
+		const zend_collection_type_info *info = zend_collection_type_by_kind(ast->attr);
+		if (!info->runtime_ready) {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Collection type %s is not implemented yet", info->name);
+		}
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Cannot infer the element type of %s{}: no expected type is available here. "
+			"Write %s[...]{...} to state the element type", info->name, info->name);
+	}
+
+	const zend_ast_list *args = zend_ast_get_list(ast->child[0]);
 
 	/* tuple binds element i to member i, so the element count must equal the
 	 * declared arity exactly. Both are statically known, so this is a compile
@@ -11527,25 +11647,50 @@ static void zend_compile_collection_literal(znode *result, const zend_ast *ast)
 	index = zend_op_array_add_collection_type(CG(active_op_array),
 		zend_compile_collection_descriptor(ast->attr, ast->child[0]));
 
-	if (elements->children == 0) {
-		zend_emit_op_tmp(&array, ZEND_INIT_ARRAY, NULL, NULL);
-	} else {
-		for (uint32_t i = 0; i < elements->children; i++) {
-			znode value;
-
-			zend_compile_expr(&value, elements->child[i]);
-			if (i == 0) {
-				opline = zend_emit_op_tmp(&array, ZEND_INIT_ARRAY, &value, NULL);
-				opline->extended_value = elements->children << ZEND_ARRAY_SIZE_SHIFT;
-			} else {
-				opline = zend_emit_op(NULL, ZEND_ADD_ARRAY_ELEMENT, &value, NULL);
-				SET_NODE(opline->result, &array);
-			}
-		}
-	}
+	zend_compile_collection_elements(&array, elements);
 
 	opline = zend_emit_op_tmp(result, ZEND_CONSTRUCT_COLLECTION, &array, NULL);
 	opline->extended_value = index;
+	/* op2 is UNUSED for this opcode, so op2.num is not initialised by init_op;
+	 * set the source explicitly (the VM reads it to choose the descriptor path). */
+	opline->op2.num = ZEND_COLLECTION_SOURCE_EXPLICIT;
+}
+
+/* return vec{...}: the enclosing declared return type supplies the element type,
+ * and it is known at compile time, so validate here -- a missing, non-collection
+ * or wrong-kind return type is a compile error rather than a runtime one. */
+static void zend_compile_collection_return(znode *result, const zend_ast *ast)
+{
+	const zend_collection_type_info *info = zend_collection_type_by_kind(ast->attr);
+
+	if (!info->runtime_ready) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Collection type %s is not implemented yet", info->name);
+	}
+	if (!(CG(active_op_array)->fn_flags & ZEND_ACC_HAS_RETURN_TYPE)) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Cannot infer the element type of %s{}: the enclosing function declares no return type. "
+			"Write %s[...]{...} to state the element type", info->name, info->name);
+	}
+
+	zend_type return_type = CG(active_op_array)->arg_info[-1].type;
+	if (!ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(return_type)
+	 || ZEND_TYPE_COLLECTION(return_type)->kind != ast->attr) {
+		zend_string *str = zend_type_to_string(return_type);
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Cannot return %s{} where %s is the declared return type", info->name, ZSTR_VAL(str));
+	}
+	if (ast->attr == ZEND_COLLECTION_TYPE_TUPLE) {
+		uint32_t arity = ZEND_TYPE_COLLECTION(return_type)->num_types;
+		const zend_ast_list *elements = zend_ast_get_list(ast->child[1]);
+		if (elements->children != arity) {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Collection type tuple expects %u element%s, %u given",
+				arity, arity == 1 ? "" : "s", elements->children);
+		}
+	}
+
+	zend_compile_collection_literal_contextual(result, ast, ZEND_COLLECTION_SOURCE_RETURN, 0);
 }
 
 static void zend_compile_const(znode *result, const zend_ast *ast) /* {{{ */

@@ -1005,6 +1005,8 @@ ZEND_API zend_collection_type *zend_type_collection_alloc(uint32_t kind, uint32_
 ZEND_API const char *zend_collection_type_kind_name(uint32_t kind);
 /* The reverse: resolve a kind name ("vec") to its kind. False if unknown. */
 ZEND_API bool zend_collection_kind_by_name(const char *name, size_t name_len, uint32_t *kind);
+/* Build a contextual collection-literal AST node (vec{...}) from a head token. */
+ZEND_API zend_ast *zend_ast_create_collection_literal(zend_ast *head, zend_ast *elements);
 /* Structural (invariant) identity of two types, recursing into descriptors. */
 ZEND_API bool zend_type_structurally_equals(zend_type a, zend_type b);
 ZEND_API zend_string *zend_create_member_string(const zend_string *class_name, const zend_string *member_name);

@@ -94,6 +94,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %token T_SET_LBRACKET   "set["
 %token T_TUPLE_LBRACKET "tuple["
 %token T_SHAPE_LBRACKET "shape["
+%token <ast> T_COLLECTION_HEAD "collection head (e.g. vec{)"
 %token <ast> T_NAME_FULLY_QUALIFIED "fully qualified name"
 %token <ast> T_NAME_RELATIVE "namespace-relative name"
 %token <ast> T_NAME_QUALIFIED "namespaced name"
@@ -256,7 +257,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %token T_ERROR
 
 %type <ast> top_statement namespace_name name statement function_declaration_statement
-%type <ast> class_declaration_statement trait_declaration_statement legacy_namespace_name
+%type <ast> class_declaration_statement trait_declaration_statement legacy_namespace_name class_decl_name
 %type <ast> interface_declaration_statement interface_extends_list
 %type <ast> group_use_declaration inline_use_declarations inline_use_declaration
 %type <ast> mixed_group_use_declaration use_declaration unprefixed_use_declaration
@@ -368,6 +369,16 @@ name:
 	|	T_NAME_QUALIFIED							{ $$ = $1; $$->attr = ZEND_NAME_NOT_FQ; }
 	|	T_NAME_FULLY_QUALIFIED						{ $$ = $1; $$->attr = ZEND_NAME_FQ; }
 	|	T_NAME_RELATIVE								{ $$ = $1; $$->attr = ZEND_NAME_RELATIVE; }
+;
+
+/* The name introduced by a class/interface/trait/enum declaration. Accepts a
+ * collection head token so `class Vec{` (head name with an adjacent body brace)
+ * still declares a class. Kept separate from `name` so the head never becomes a
+ * constant expression (which is what would reintroduce the property-hook
+ * shift/reduce conflict). */
+class_decl_name:
+		T_STRING			{ $$ = $1; }
+	|	T_COLLECTION_HEAD	{ $$ = $1; }
 ;
 
 attribute_decl:
@@ -609,10 +620,10 @@ is_variadic:
 
 class_declaration_statement:
 		class_modifiers T_CLASS { $<num>$ = CG(zend_lineno); }
-		T_STRING extends_from implements_list backup_doc_comment '{' class_statement_list '}'
+		class_decl_name extends_from implements_list backup_doc_comment '{' class_statement_list '}'
 			{ $$ = zend_ast_create_decl(ZEND_AST_CLASS, $1, $<num>3, $7, zend_ast_get_str($4), $5, $6, $9, NULL, NULL); }
 	|	T_CLASS { $<num>$ = CG(zend_lineno); }
-		T_STRING extends_from implements_list backup_doc_comment '{' class_statement_list '}'
+		class_decl_name extends_from implements_list backup_doc_comment '{' class_statement_list '}'
 			{ $$ = zend_ast_create_decl(ZEND_AST_CLASS, 0, $<num>2, $6, zend_ast_get_str($3), $4, $5, $8, NULL, NULL); }
 ;
 
@@ -642,19 +653,19 @@ class_modifier:
 
 trait_declaration_statement:
 		T_TRAIT { $<num>$ = CG(zend_lineno); }
-		T_STRING backup_doc_comment '{' class_statement_list '}'
+		class_decl_name backup_doc_comment '{' class_statement_list '}'
 			{ $$ = zend_ast_create_decl(ZEND_AST_CLASS, ZEND_ACC_TRAIT, $<num>2, $4, zend_ast_get_str($3), NULL, NULL, $6, NULL, NULL); }
 ;
 
 interface_declaration_statement:
 		T_INTERFACE { $<num>$ = CG(zend_lineno); }
-		T_STRING interface_extends_list backup_doc_comment '{' class_statement_list '}'
+		class_decl_name interface_extends_list backup_doc_comment '{' class_statement_list '}'
 			{ $$ = zend_ast_create_decl(ZEND_AST_CLASS, ZEND_ACC_INTERFACE, $<num>2, $5, zend_ast_get_str($3), NULL, $4, $7, NULL, NULL); }
 ;
 
 enum_declaration_statement:
 		T_ENUM { $<num>$ = CG(zend_lineno); }
-		T_STRING enum_backing_type implements_list backup_doc_comment '{' class_statement_list '}'
+		class_decl_name enum_backing_type implements_list backup_doc_comment '{' class_statement_list '}'
 			{ $$ = zend_ast_create_decl(ZEND_AST_CLASS, ZEND_ACC_ENUM|ZEND_ACC_FINAL, $<num>2, $6, zend_ast_get_str($3), NULL, $5, $8, NULL, $4); }
 ;
 
@@ -881,6 +892,7 @@ type_without_static:
 	|	T_CALLABLE	{ $$ = zend_ast_create_ex(ZEND_AST_TYPE, IS_CALLABLE); }
 	|	name		{ $$ = $1; }
 	|	collection_type { $$ = $1; }
+	|	T_COLLECTION_HEAD { $$ = $1; $$->attr = ZEND_NAME_NOT_FQ; }
 ;
 
 /* A collection type. The head token determines the kind; the AST records the
@@ -1442,6 +1454,8 @@ collection_literal:
 			{ $$ = zend_ast_create_ex(ZEND_AST_COLLECTION, ZEND_COLLECTION_TYPE_TUPLE, $2, $5); }
 	|	T_SHAPE_LBRACKET collection_type_args ']' '{' collection_literal_elements '}'
 			{ $$ = zend_ast_create_ex(ZEND_AST_COLLECTION, ZEND_COLLECTION_TYPE_SHAPE, $2, $5); }
+	|	T_COLLECTION_HEAD '{' collection_literal_elements '}'
+			{ $$ = zend_ast_create_collection_literal($1, $3); }
 ;
 
 /* Elements are plain expressions: no keys, no by-reference elements and no
@@ -1537,6 +1551,7 @@ class_name:
 			{ zval zv; ZVAL_INTERNED_STR(&zv, ZSTR_KNOWN(ZEND_STR_STATIC));
 			  $$ = zend_ast_create_zval_ex(&zv, ZEND_NAME_NOT_FQ); }
 	|	name { $$ = $1; }
+	|	T_COLLECTION_HEAD { $$ = $1; $$->attr = ZEND_NAME_NOT_FQ; }
 ;
 
 class_name_reference:

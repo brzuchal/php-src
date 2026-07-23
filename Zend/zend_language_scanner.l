@@ -1632,6 +1632,17 @@ OPTIONAL_WHITESPACE_OR_COMMENTS ({WHITESPACE}|{MULTI_LINE_COMMENT}|{SINGLE_LINE_
 <ST_IN_SCRIPTING>"tuple[" { enter_nesting('['); RETURN_TOKEN(T_TUPLE_LBRACKET); }
 <ST_IN_SCRIPTING>"shape[" { enter_nesting('['); RETURN_TOKEN(T_SHAPE_LBRACKET); }
 
+/* Contextual collection literal head. Trailing context: match the head name only
+ * when '{' is immediately adjacent, and do NOT consume the '{' -- it stays a
+ * separate token so the parser, not the scanner, decides between a collection
+ * literal and a body brace. The head is admitted into class_name/type but not
+ * the constant-producing `name`, so `class Set{`, `extends Map{` etc. still parse
+ * and there is no grammar conflict. Adjacency matches the `vec[` rule; a space
+ * (`vec {`) or comment keeps the plain T_STRING. */
+<ST_IN_SCRIPTING>("vec"|"map"|"set"|"tuple"|"shape") / "{" {
+	RETURN_TOKEN_WITH_STR(T_COLLECTION_HEAD, 0);
+}
+
 /* A collection head can never follow '::' -- the grammar admits only
  * identifier / member_name / simple_variable / '{' there. Intercept exactly the
  * head-plus-bracket sequence, hand the '[' back, and emit the T_STRING that
@@ -1644,7 +1655,7 @@ OPTIONAL_WHITESPACE_OR_COMMENTS ({WHITESPACE}|{MULTI_LINE_COMMENT}|{SINGLE_LINE_
  * the whitespace and comment rules list it alongside ST_IN_SCRIPTING -- or the
  * catch-all below would pop on the space and let `Foo:: vec[0]` match the
  * compound rule after all. */
-<ST_AFTER_DOUBLE_COLON>("vec"|"map"|"set"|"tuple"|"shape")"[" {
+<ST_AFTER_DOUBLE_COLON>("vec"|"map"|"set"|"tuple"|"shape")("["|"{") {
 	yyless(yyleng - 1);
 	yy_pop_state();
 	RETURN_TOKEN_WITH_STR(T_STRING, 0);

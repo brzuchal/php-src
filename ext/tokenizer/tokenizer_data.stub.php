@@ -44,6 +44,11 @@ const T_TUPLE_LBRACKET = UNKNOWN;
 const T_SHAPE_LBRACKET = UNKNOWN;
 /**
  * @var int
+ * @cvalue T_COLLECTION_HEAD
+ */
+const T_COLLECTION_HEAD = UNKNOWN;
+/**
+ * @var int
  * @cvalue T_NAME_FULLY_QUALIFIED
  */
 const T_NAME_FULLY_QUALIFIED = UNKNOWN;

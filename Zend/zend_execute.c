@@ -891,6 +891,74 @@ static zend_never_inline ZEND_COLD void zend_collection_element_type_error(
 	zend_string_release(type_str);
 }
 
+/* A tuple literal's element count does not match the arity of the expected
+ * type. For explicit tuples the compiler enforces arity, but a contextual
+ * tuple learns its arity only at runtime, so a mismatch is reported here (with
+ * the same wording the compiler uses). zend_tuple_create signals this by a
+ * failed_index equal to the arity, which no per-element failure can reach. */
+static zend_never_inline ZEND_COLD void zend_collection_tuple_arity_error(
+		const zend_collection_info *info, uint32_t given)
+{
+	zend_type_error("Collection type tuple expects %u element%s, %u given",
+		info->num_types, info->num_types == 1 ? "" : "s", given);
+}
+
+/* Contextual literal (`vec{...}`): resolve the element-type descriptor from the
+ * declared type at the use site, which is only reachable now. For RETURN it is
+ * the enclosing function's return type; for ARG it is parameter `arg_num` of the
+ * pending call, located exactly as argument type checking locates it -- the
+ * variadic parameter answers positions past the fixed ones. Returns the
+ * constructible node, or NULL after throwing the precise error: no usable
+ * collection type at the position (fail-closed, naming the explicit fix), a
+ * written head whose kind disagrees with the expected type, or an
+ * unconstructible expected type. */
+static zend_never_inline const zend_collection_info *zend_collection_resolve_contextual(
+		zend_execute_data *execute_data, uint32_t source, uint32_t arg_num, uint32_t lit_kind)
+{
+	zend_type descriptor = ZEND_TYPE_INIT_NONE(0);
+
+	if (source == ZEND_COLLECTION_SOURCE_RETURN) {
+		/* The return type is validated at compile time, so it is a collection of
+		 * the head's kind; only its constructibility is decided here. */
+		descriptor = EX(func)->common.arg_info[-1].type;
+	} else {
+		ZEND_ASSERT(source == ZEND_COLLECTION_SOURCE_ARG);
+		const zend_function *cf = EX(call)->func;
+		uint32_t idx = arg_num - 1;
+		if (idx < cf->common.num_args) {
+			descriptor = cf->common.arg_info[idx].type;
+		} else if (cf->common.fn_flags & ZEND_ACC_VARIADIC) {
+			descriptor = cf->common.arg_info[cf->common.num_args].type;
+		}
+		/* else: too many arguments for a non-variadic callee -- no type, fails below. */
+	}
+
+	const zend_collection_info *info = zend_collection_info_resolve(descriptor);
+	if (UNEXPECTED(info == NULL)) {
+		const char *kind = zend_collection_type_kind_name(lit_kind);
+		zend_type_error(
+			"Cannot infer the element type of %s{}: the %s is not a constructible %s type. "
+			"Write %s[...]{...} to state the element type",
+			kind,
+			source == ZEND_COLLECTION_SOURCE_RETURN ? "declared return type" : "target parameter",
+			kind, kind);
+		return NULL;
+	}
+	if (UNEXPECTED(info->kind != lit_kind)) {
+		/* The head names a kind that disagrees with the expected type. */
+		zend_string *want = zend_collection_info_to_string(info);
+		zend_type_error("Cannot use %s{} where %s is expected",
+			zend_collection_type_kind_name(lit_kind), ZSTR_VAL(want));
+		zend_string_release(want);
+		return NULL;
+	}
+	if (UNEXPECTED(!ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(info))) {
+		zend_collection_not_constructible_error(descriptor);
+		return NULL;
+	}
+	return info;
+}
+
 static zend_never_inline ZEND_COLD void zend_verify_class_constant_type_error(const zend_class_constant *c, const zend_string *name, const zval *constant)
 {
 	zend_string *type_str = zend_type_to_string(c->type);

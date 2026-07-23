@@ -137,6 +137,19 @@ typedef enum {
 	ZEND_COLLECTION_TYPE_SHAPE = 4,
 } zend_collection_type_kind;
 
+/* Where a ZEND_CONSTRUCT_COLLECTION opcode finds its element type descriptor.
+ * Encoded in opline->op2.num as (source | kind << SHIFT); EXPLICIT is 0 so an
+ * ordinary explicit literal (op2 unused) reads back as EXPLICIT unchanged, and
+ * opline->extended_value stays the descriptor-table index. For the contextual
+ * sources the head names the kind (carried here to validate against the
+ * expected type) and extended_value carries the 1-based argument number (ARG)
+ * or is unused (RETURN). See implementation-notes/contextual-typing-implementation.md. */
+#define ZEND_COLLECTION_SOURCE_EXPLICIT   0  /* extended_value = collection_types[] index */
+#define ZEND_COLLECTION_SOURCE_RETURN     1  /* descriptor = enclosing function's return type */
+#define ZEND_COLLECTION_SOURCE_ARG        2  /* descriptor = pending call's parameter arg_num */
+#define ZEND_COLLECTION_SOURCE_MASK       0x3u
+#define ZEND_COLLECTION_SOURCE_KIND_SHIFT 2u
+
 /* Reified parameter of a collection type declaration such as vec[int]. Stored
  * behind a zend_type whose _ZEND_TYPE_LIST_BIT is set but which is neither a
  * union nor an intersection (see ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR). The

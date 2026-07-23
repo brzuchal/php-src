@@ -6549,34 +6549,54 @@ ZEND_VM_HANDLER(212, ZEND_CONSTRUCT_COLLECTION, CONST|TMP, UNUSED, NUM)
 {
 	USE_OPLINE
 	zval *elements;
-	zend_type descriptor;
 	const zend_collection_info *info;
 	zend_vec *vec;
 	uint32_t failed_index = 0;
+	uint32_t source = opline->op2.num & ZEND_COLLECTION_SOURCE_MASK;
 
 	SAVE_OPLINE();
 	elements = GET_OP1_ZVAL_PTR(BP_VAR_R);
 	ZEND_ASSERT(Z_TYPE_P(elements) == IS_ARRAY);
 
-	/* Promotion happens at most once per request per literal site; every later
-	 * execution is a hash probe returning a borrowed node (INV-11). */
-	descriptor = EX(func)->op_array.collection_types[opline->extended_value];
-	info = zend_collection_info_resolve(descriptor);
-
-	if (UNEXPECTED(info == NULL)
-	 || UNEXPECTED(!ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(info))) {
-		zend_collection_not_constructible_error(descriptor);
-		FREE_OP1();
-		UNDEF_RESULT();
-		HANDLE_EXCEPTION();
+	if (EXPECTED(source == ZEND_COLLECTION_SOURCE_EXPLICIT)) {
+		/* vec[int]{...}: the descriptor is in the op_array side table. Promotion
+		 * happens at most once per request per literal site; every later
+		 * execution is a hash probe returning a borrowed node (INV-11). */
+		zend_type descriptor = EX(func)->op_array.collection_types[opline->extended_value];
+		info = zend_collection_info_resolve(descriptor);
+		if (UNEXPECTED(info == NULL)
+		 || UNEXPECTED(!ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(info))) {
+			zend_collection_not_constructible_error(descriptor);
+			FREE_OP1();
+			UNDEF_RESULT();
+			HANDLE_EXCEPTION();
+		}
+	} else {
+		/* vec{...}: the element type comes from the declared type at the use site
+		 * (enclosing return type, or the pending call's parameter), reachable
+		 * only now. The resolver throws the precise error and returns NULL on a
+		 * missing, kind-mismatched or unconstructible expected type. */
+		info = zend_collection_resolve_contextual(execute_data, source,
+			opline->extended_value,
+			opline->op2.num >> ZEND_COLLECTION_SOURCE_KIND_SHIFT);
+		if (UNEXPECTED(info == NULL)) {
+			FREE_OP1();
+			UNDEF_RESULT();
+			HANDLE_EXCEPTION();
+		}
 	}
 
 	vec = zend_collection_construct(Z_ARRVAL_P(elements), info, &failed_index);
 	if (UNEXPECTED(vec == NULL)) {
 		/* Nothing partial escaped: construction destroyed what it had built,
 		 * and the elements are still owned by the array OP1, which is released
-		 * here (L2). */
-		zend_collection_element_type_error(info, Z_ARRVAL_P(elements), failed_index);
+		 * here (L2). A contextual tuple's arity is only known now; a mismatch is
+		 * signalled by failed_index == arity, which no per-element failure reaches. */
+		if (info->kind == ZEND_COLLECTION_TYPE_TUPLE && failed_index >= info->num_types) {
+			zend_collection_tuple_arity_error(info, zend_hash_num_elements(Z_ARRVAL_P(elements)));
+		} else {
+			zend_collection_element_type_error(info, Z_ARRVAL_P(elements), failed_index);
+		}
 		FREE_OP1();
 		UNDEF_RESULT();
 		HANDLE_EXCEPTION();

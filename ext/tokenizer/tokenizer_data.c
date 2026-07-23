@@ -31,6 +31,7 @@ char *get_token_type_name(int token_type)
 		case T_SET_LBRACKET: return "T_SET_LBRACKET";
 		case T_TUPLE_LBRACKET: return "T_TUPLE_LBRACKET";
 		case T_SHAPE_LBRACKET: return "T_SHAPE_LBRACKET";
+		case T_COLLECTION_HEAD: return "T_COLLECTION_HEAD";
 		case T_NAME_FULLY_QUALIFIED: return "T_NAME_FULLY_QUALIFIED";
 		case T_NAME_RELATIVE: return "T_NAME_RELATIVE";
 		case T_NAME_QUALIFIED: return "T_NAME_QUALIFIED";
