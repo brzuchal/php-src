@@ -48,7 +48,7 @@ var_dump(zend_test_vec_count($s));            // $a and $b are distinct
 var_dump(zend_test_vec_get($s, 0) === $a, zend_test_vec_get($s, 1) === $b);
 
 echo "-- a dropped duplicate is not copied: refcount rises by one, not two --\n";
-$str = str_repeat('unique', 3);   // runtime-built, not interned
+$str = uniqid();   // runtime-built, never interned (str_repeat of literals may be folded by opcache)
 $before = zend_test_refcount($str);
 $s = set[string]{$str, $str, $str};
 var_dump(zend_test_vec_count($s), zend_test_refcount($str) - $before === 1);

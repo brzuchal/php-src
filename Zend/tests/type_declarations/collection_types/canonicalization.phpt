@@ -50,8 +50,12 @@ var_dump($nested['name']);
 
 echo "-- compiler arena descriptors do not escape --\n";
 $probe = $intern('a_nested');
-/* The declaration really is arena-backed... */
-var_dump($probe['declared_type_uses_arena']);
+/* Without opcache the declared type lives in the compiler's request arena; with
+ * opcache the op_array (and its arg_info) is persisted into shared memory, so the
+ * arena bit is stripped. Either provenance is fine here -- what this section
+ * proves is that the canonical node below did not escape from the declaration. */
+$declared_in_arena = !(extension_loaded('Zend OPcache') && (bool) ini_get('opcache.enable_cli'));
+var_dump($probe['declared_type_uses_arena'] === $declared_in_arena);
 /* ...yet the node is a distinct allocation, and no member kept provenance. */
 var_dump($probe['aliases_descriptor']);
 var_dump($probe['members_arena_free']);

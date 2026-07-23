@@ -53,7 +53,9 @@ unset($n);
 var_dump(gc_collect_cycles() > 0);
 
 echo "-- string members released exactly once --\n";
-$s = str_repeat('member', 3);   /* runtime-built, not interned */
+/* A genuinely refcounted string (see literal_lifecycle.phpt): opcache may fold a
+ * str_repeat() of literals into an interned constant, making the checks vacuous. */
+$s = uniqid();
 $before = zend_test_refcount($s);
 $t = tuple[string, string]{$s, $s};
 var_dump(zend_test_refcount($s) - $before === 2);

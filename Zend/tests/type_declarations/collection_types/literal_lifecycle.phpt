@@ -32,7 +32,10 @@ for ($i = 0; $i < 500; $i++) {
 echo "ok\n";
 
 echo "-- elements are released exactly once --\n";
-$s = str_repeat('shared', 3);   /* built at runtime, so not interned */
+/* A genuinely refcounted string. uniqid() is built at runtime and is never
+ * interned; a str_repeat() of literals may be folded into an interned constant
+ * under opcache, which would make the refcount checks below vacuous. */
+$s = uniqid();
 $before = zend_test_refcount($s);
 $v = vec[string]{$s, $s};
 var_dump(zend_test_refcount($s) - $before === 2);
