@@ -358,6 +358,14 @@ static zend_always_inline uint32_t zend_jit_trace_type_to_info_ex(uint8_t type, 
 	if (type == IS_UNKNOWN) {
 		return info;
 	}
+	if (type == IS_COLLECTION) {
+		/* IS_COLLECTION (zval type 21) positionally aliases MAY_BE_ARRAY_PACKED and
+		 * has no representable bit in a MAY_BE_ANY mask (see zend_type_info.h), so it
+		 * cannot be narrowed to a concrete type. The tracing JIT never specialises on
+		 * collection values -- ZEND_CONSTRUCT_COLLECTION falls back to the VM -- so
+		 * keep the conservative inferred info instead of synthesising a bogus type. */
+		return info;
+	}
 	ZEND_ASSERT(info & (1 << type));
 	if (type < IS_STRING) {
 		return (1 << type);
