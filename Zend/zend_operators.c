@@ -370,6 +370,10 @@ static zend_never_inline zend_result ZEND_FASTCALL _zendi_try_convert_scalar_to_
 			return SUCCESS;
 		case IS_RESOURCE:
 		case IS_ARRAY:
+		case IS_COLLECTION:
+			/* No numeric value; like an array, this makes the arithmetic
+			 * operator report "Unsupported operand types" rather than reach the
+			 * ZEND_UNREACHABLE below (UB in release, an abort in debug). */
 			return FAILURE;
 		default: ZEND_UNREACHABLE();
 	}
@@ -1027,6 +1031,13 @@ try_again:
 		case IS_REFERENCE:
 			op = Z_REFVAL_P(op);
 			goto try_again;
+		case IS_COLLECTION:
+			/* A collection has no integer value. Without this arm the value
+			 * falls into ZEND_UNREACHABLE() -- undefined in release (observed
+			 * as a crash for the double path), an abort in debug -- so fail
+			 * explicitly, like the string conversion above. */
+			zend_type_error("Cannot convert a collection to int");
+			return 0;
 		default: ZEND_UNREACHABLE();
 	}
 	return 0;
@@ -1066,6 +1077,11 @@ try_again:
 		case IS_REFERENCE:
 			op = Z_REFVAL_P(op);
 			goto try_again;
+		case IS_COLLECTION:
+			/* No float value; see zval_get_long_func. This path in particular
+			 * crashed a release build via ZEND_UNREACHABLE. */
+			zend_type_error("Cannot convert a collection to float");
+			return 0.0;
 		default: ZEND_UNREACHABLE();
 	}
 	return 0.0;
