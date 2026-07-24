@@ -57,7 +57,11 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
  * generator emit a GLR parser and does php-src still build/behave identically.
  * %expect counts shift/reduce, %expect-rr reduce/reduce (both 0 at baseline). */
 %glr-parser
-%expect 0
+/* glr-exp(simplified): one shift/reduce conflict is expected and intended — the
+ * `clone ( expr )` ambiguity (reduce `argument: expr` for the call form vs shift
+ * `)` for the parenthesized-expr form). GLR explores both and %dprec on the two
+ * T_CLONE rules selects the expr form; both yield identical AST. */
+%expect 1
 %expect-rr 0
 
 %destructor { zend_ast_destroy($$); } <ast>
@@ -299,7 +303,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %type <ast> enum_declaration_statement enum_backing_type enum_case enum_case_expr
 %type <ast> function_name non_empty_member_modifiers
 %type <ast> property_hook property_hook_list optional_property_hook_list hooked_property property_hook_body
-%type <ast> optional_parameter_list clone_argument_list non_empty_clone_argument_list
+%type <ast> optional_parameter_list
 
 %type <num> returns_ref function fn is_reference is_variadic property_modifiers property_hook_modifiers
 %type <num> method_modifiers class_const_modifiers member_modifier optional_cpp_modifiers
@@ -924,29 +928,16 @@ non_empty_argument_list:
 			{ $$ = zend_ast_arg_list_add($1, $3); }
 ;
 
-/* `clone_argument_list` is necessary to resolve a parser ambiguity (shift-reduce conflict)
- * of `clone($expr)`, which could either be parsed as a function call with `$expr` as the first
- * argument or as a use of the `clone` language construct with an expression with useless
- * parenthesis. Both would be valid and result in the same AST / the same semantics.
- * `clone_argument_list` is defined in a way that an `expr` in the first position needs to
- * be followed by a `,` which is not valid syntax for a parenthesized `expr`, ensuring
- * that calling `clone()` with a single unnamed parameter is handled by the language construct
- * syntax.
+/* glr-exp(simplified): the `clone($expr)` ambiguity that previously required
+ * the bespoke `clone_argument_list` / `non_empty_clone_argument_list`
+ * productions is now handled directly by the generalized-LR parser. `clone`
+ * reuses the ordinary `argument_list`; when `clone ( expr )` parses both as a
+ * call with one positional argument and as `clone` of a parenthesized
+ * expression, GLR keeps both derivations and the %dprec annotations on the two
+ * `T_CLONE` rules in `expr` select the parenthesized-expr reading — the AST is
+ * identical either way. This removes two nonterminals and six productions with
+ * no change to the accepted language (see the T_CLONE rules under `expr`).
  */
-clone_argument_list:
-		'(' ')'	{ $$ = zend_ast_create_arg_list(0, ZEND_AST_ARG_LIST); }
-	|	'(' non_empty_clone_argument_list possible_comma ')' { $$ = $2; }
-	|	'(' expr ',' ')' { $$ = zend_ast_create_arg_list(1, ZEND_AST_ARG_LIST, $2); }
-;
-
-non_empty_clone_argument_list:
-		expr ',' argument
-			{ $$ = zend_ast_create_arg_list(2, ZEND_AST_ARG_LIST, $1, $3); }
-	|	argument_no_expr
-			{ $$ = zend_ast_create_arg_list(1, ZEND_AST_ARG_LIST, $1); }
-	|	non_empty_clone_argument_list ',' argument
-			{ $$ = zend_ast_arg_list_add($1, $3); }
-;
 
 argument_no_expr:
 		identifier ':' expr
@@ -1273,12 +1264,12 @@ expr:
 			{ $$ = zend_ast_create(ZEND_AST_ASSIGN, $1, $3); }
 	|	variable '=' ampersand variable
 			{ $$ = zend_ast_create(ZEND_AST_ASSIGN_REF, $1, $4); }
-	|	T_CLONE clone_argument_list {
+	|	T_CLONE argument_list %dprec 1 {
 			zend_ast *name = zend_ast_create_zval_from_str(ZSTR_KNOWN(ZEND_STR_CLONE));
 			name->attr = ZEND_NAME_FQ;
 			$$ = zend_ast_create(ZEND_AST_CALL, name, $2);
 		}
-	|	T_CLONE expr {
+	|	T_CLONE expr %dprec 2 {
 			zend_ast *name = zend_ast_create_zval_from_str(ZSTR_KNOWN(ZEND_STR_CLONE));
 			name->attr = ZEND_NAME_FQ;
 			$$ = zend_ast_create(ZEND_AST_CALL, name, zend_ast_create_list(1, ZEND_AST_ARG_LIST, $2));
