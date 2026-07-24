@@ -5791,6 +5791,16 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_
 				ZEND_VM_NEXT_OPCODE();
 			}
 		}
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Collections are immutable: there is no element slot to alias, so
+		 * by-reference iteration is rejected with a hard Error rather than
+		 * silently iterating references to a detached copy. */
+		zend_throw_error(NULL, "Cannot iterate over %s by reference",
+			zend_collection_type_kind_name(Z_VEC_P(array_ptr)->type->kind));
+		UNDEF_RESULT();
+
+
+		HANDLE_EXCEPTION();
 	} else {
 		zend_error(E_WARNING, "foreach() argument must be of type array|object, %s given", zend_zval_value_name(array_ptr));
 		ZVAL_UNDEF(EX_VAR(opline->result.var));
@@ -17941,6 +17951,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_FE_RESET_RW_S
 				ZEND_VM_NEXT_OPCODE();
 			}
 		}
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Collections are immutable: there is no element slot to alias, so
+		 * by-reference iteration is rejected with a hard Error rather than
+		 * silently iterating references to a detached copy. */
+		zend_throw_error(NULL, "Cannot iterate over %s by reference",
+			zend_collection_type_kind_name(Z_VEC_P(array_ptr)->type->kind));
+		UNDEF_RESULT();
+		zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+		HANDLE_EXCEPTION();
 	} else {
 		zend_error(E_WARNING, "foreach() argument must be of type array|object, %s given", zend_zval_value_name(array_ptr));
 		ZVAL_UNDEF(EX_VAR(opline->result.var));
@@ -23920,6 +23939,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_FE_RESET_RW_S
 				ZEND_VM_NEXT_OPCODE();
 			}
 		}
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Collections are immutable: there is no element slot to alias, so
+		 * by-reference iteration is rejected with a hard Error rather than
+		 * silently iterating references to a detached copy. */
+		zend_throw_error(NULL, "Cannot iterate over %s by reference",
+			zend_collection_type_kind_name(Z_VEC_P(array_ptr)->type->kind));
+		UNDEF_RESULT();
+		zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+		HANDLE_EXCEPTION();
 	} else {
 		zend_error(E_WARNING, "foreach() argument must be of type array|object, %s given", zend_zval_value_name(array_ptr));
 		ZVAL_UNDEF(EX_VAR(opline->result.var));
@@ -40845,6 +40873,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_FE_RESET_RW_S
 				ZEND_VM_NEXT_OPCODE();
 			}
 		}
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Collections are immutable: there is no element slot to alias, so
+		 * by-reference iteration is rejected with a hard Error rather than
+		 * silently iterating references to a detached copy. */
+		zend_throw_error(NULL, "Cannot iterate over %s by reference",
+			zend_collection_type_kind_name(Z_VEC_P(array_ptr)->type->kind));
+		UNDEF_RESULT();
+
+
+		HANDLE_EXCEPTION();
 	} else {
 		zend_error(E_WARNING, "foreach() argument must be of type array|object, %s given", zend_zval_value_name(array_ptr));
 		ZVAL_UNDEF(EX_VAR(opline->result.var));
@@ -58930,6 +58968,16 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_FE_RE
 				ZEND_VM_NEXT_OPCODE();
 			}
 		}
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Collections are immutable: there is no element slot to alias, so
+		 * by-reference iteration is rejected with a hard Error rather than
+		 * silently iterating references to a detached copy. */
+		zend_throw_error(NULL, "Cannot iterate over %s by reference",
+			zend_collection_type_kind_name(Z_VEC_P(array_ptr)->type->kind));
+		UNDEF_RESULT();
+
+
+		HANDLE_EXCEPTION();
 	} else {
 		zend_error(E_WARNING, "foreach() argument must be of type array|object, %s given", zend_zval_value_name(array_ptr));
 		ZVAL_UNDEF(EX_VAR(opline->result.var));
@@ -70978,6 +71026,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_FE_RESET_RW_SPEC_T
 				ZEND_VM_NEXT_OPCODE();
 			}
 		}
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Collections are immutable: there is no element slot to alias, so
+		 * by-reference iteration is rejected with a hard Error rather than
+		 * silently iterating references to a detached copy. */
+		zend_throw_error(NULL, "Cannot iterate over %s by reference",
+			zend_collection_type_kind_name(Z_VEC_P(array_ptr)->type->kind));
+		UNDEF_RESULT();
+		zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+		HANDLE_EXCEPTION();
 	} else {
 		zend_error(E_WARNING, "foreach() argument must be of type array|object, %s given", zend_zval_value_name(array_ptr));
 		ZVAL_UNDEF(EX_VAR(opline->result.var));
@@ -76857,6 +76914,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_FE_RESET_RW_SPEC_V
 				ZEND_VM_NEXT_OPCODE();
 			}
 		}
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Collections are immutable: there is no element slot to alias, so
+		 * by-reference iteration is rejected with a hard Error rather than
+		 * silently iterating references to a detached copy. */
+		zend_throw_error(NULL, "Cannot iterate over %s by reference",
+			zend_collection_type_kind_name(Z_VEC_P(array_ptr)->type->kind));
+		UNDEF_RESULT();
+		zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+		HANDLE_EXCEPTION();
 	} else {
 		zend_error(E_WARNING, "foreach() argument must be of type array|object, %s given", zend_zval_value_name(array_ptr));
 		ZVAL_UNDEF(EX_VAR(opline->result.var));
@@ -93782,6 +93848,16 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_FE_RESET_RW_SPEC_C
 				ZEND_VM_NEXT_OPCODE();
 			}
 		}
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Collections are immutable: there is no element slot to alias, so
+		 * by-reference iteration is rejected with a hard Error rather than
+		 * silently iterating references to a detached copy. */
+		zend_throw_error(NULL, "Cannot iterate over %s by reference",
+			zend_collection_type_kind_name(Z_VEC_P(array_ptr)->type->kind));
+		UNDEF_RESULT();
+
+
+		HANDLE_EXCEPTION();
 	} else {
 		zend_error(E_WARNING, "foreach() argument must be of type array|object, %s given", zend_zval_value_name(array_ptr));
 		ZVAL_UNDEF(EX_VAR(opline->result.var));

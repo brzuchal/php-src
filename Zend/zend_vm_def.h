@@ -7159,6 +7159,15 @@ ZEND_VM_COLD_CONST_HANDLER(125, ZEND_FE_RESET_RW, CONST|TMP|VAR|CV, JMP_ADDR)
 				ZEND_VM_NEXT_OPCODE();
 			}
 		}
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Collections are immutable: there is no element slot to alias, so
+		 * by-reference iteration is rejected with a hard Error rather than
+		 * silently iterating references to a detached copy. */
+		zend_throw_error(NULL, "Cannot iterate over %s by reference",
+			zend_collection_type_kind_name(Z_VEC_P(array_ptr)->type->kind));
+		UNDEF_RESULT();
+		FREE_OP1();
+		HANDLE_EXCEPTION();
 	} else {
 		zend_error(E_WARNING, "foreach() argument must be of type array|object, %s given", zend_zval_value_name(array_ptr));
 		ZVAL_UNDEF(EX_VAR(opline->result.var));
