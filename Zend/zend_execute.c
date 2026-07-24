@@ -5073,7 +5073,11 @@ static void cleanup_live_vars(zend_execute_data *execute_data, uint32_t op_num, 
 					zend_object_store_ctor_failed(obj);
 					OBJ_RELEASE(obj);
 				} else if (kind == ZEND_LIVE_LOOP) {
-					if (Z_TYPE_P(var) != IS_ARRAY && Z_FE_ITER_P(var) != (uint32_t)-1) {
+					/* A collection foreach keeps its position in fe_pos, which
+					 * aliases fe_iter_idx, and owns no EG(ht_iterators) slot, so
+					 * on exception unwind it must not reach
+					 * zend_hash_iterator_del(); drop the reference only. */
+					if (Z_TYPE_P(var) != IS_ARRAY && Z_TYPE_P(var) != IS_COLLECTION && Z_FE_ITER_P(var) != (uint32_t)-1) {
 						zend_hash_iterator_del(Z_FE_ITER_P(var));
 					}
 					zval_ptr_dtor_nogc(var);
