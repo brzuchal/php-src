@@ -11576,7 +11576,7 @@ static int zend_jit_free(zend_jit_ctx *jit, const zend_op *opline, uint32_t op1_
 			jit_SET_EX_OPLINE(jit, opline);
 		}
 		if (opline->opcode == ZEND_FE_FREE && (op1_info & (MAY_BE_OBJECT|MAY_BE_REF))) {
-			ir_ref ref, if_array, if_exists, end_inputs = IR_UNUSED;
+			ir_ref ref, if_array, if_collection, if_exists, end_inputs = IR_UNUSED;
 
 			if (op1_info & MAY_BE_ARRAY) {
 				if_array = jit_if_Z_TYPE(jit, op1_addr, IS_ARRAY);
@@ -11584,6 +11584,14 @@ static int zend_jit_free(zend_jit_ctx *jit, const zend_op *opline, uint32_t op1_
 				ir_END_list(end_inputs);
 				ir_IF_FALSE(if_array);
 			}
+			/* A collection keeps its foreach position in u2.fe_pos, which aliases
+			 * fe_iter_idx, and owns no EG(ht_iterators) slot; like an array it must
+			 * not reach zend_hash_iterator_del(). Mirror the VM FE_FREE handler,
+			 * keyed on the runtime zval type. */
+			if_collection = jit_if_Z_TYPE(jit, op1_addr, IS_COLLECTION);
+			ir_IF_TRUE(if_collection);
+			ir_END_list(end_inputs);
+			ir_IF_FALSE(if_collection);
 			ref = ir_LOAD_U32(ir_ADD_OFFSET(jit_FP(jit), opline->op1.var + offsetof(zval, u2.fe_iter_idx)));
 			if_exists = ir_IF(ir_EQ(ref, ir_CONST_U32(-1)));
 			ir_IF_TRUE(if_exists);
