@@ -42,10 +42,23 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 }
 
 %define api.prefix {zend}
-%define api.pure full
+/* glr-exp(glr): the glr.c skeleton accepts only a Boolean api.pure; `full` is
+ * a yacc.c-only value and bison rejects it under %glr-parser. `true` is safe
+ * here because the grammar declares no %locations, so zendlex() and zenderror()
+ * keep their existing signatures (Zend/zend.h, Zend/zend_compile.h) — the C
+ * glue in the scanner needs no change for generation. */
+%define api.pure true
 %define api.value.type {zend_parser_stack_elem}
 %define parse.error verbose
+/* glr-exp variant: generalized LR. Behaves deterministically wherever the
+ * grammar has no unresolved conflict, splitting the parse stack only in
+ * ambiguous states and merging/pruning once a branch wins. Baseline grammar
+ * is unchanged, so this is the drop-in (Level 1) integration test: does the
+ * generator emit a GLR parser and does php-src still build/behave identically.
+ * %expect counts shift/reduce, %expect-rr reduce/reduce (both 0 at baseline). */
+%glr-parser
 %expect 0
+%expect-rr 0
 
 %destructor { zend_ast_destroy($$); } <ast>
 %destructor { if ($$) zend_string_release_ex($$, 0); } <str>
