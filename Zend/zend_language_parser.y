@@ -45,6 +45,11 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %define api.pure full
 %define api.value.type {zend_parser_stack_elem}
 %define parse.error verbose
+/* glr-exp variant: IELR(1) parser tables instead of the default LALR(1).
+ * IELR has canonical-LR(1) recognition power while keeping a state count
+ * close to LALR; used here to test whether LALR state-merging artifacts
+ * (not genuine grammar ambiguities) account for any conflicts. */
+%define lr.type ielr
 %expect 0
 
 %destructor { zend_ast_destroy($$); } <ast>
