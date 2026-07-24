@@ -3161,6 +3161,55 @@ fe_fetch_r_exit:
 	ZEND_VM_NEXT_OPCODE_CHECK_EXCEPTION();
 }
 
+static zend_never_inline ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV  zend_fe_fetch_collection_helper_SPEC(ZEND_OPCODE_HANDLER_ARGS)
+{
+	USE_OPLINE
+	zval *array;
+	zval *value;
+	uint32_t value_type;
+	zend_vec *vec;
+	uint32_t pos;
+
+	array = EX_VAR(opline->op1.var);
+	SAVE_OPLINE();
+
+	ZEND_ASSERT(Z_TYPE_P(array) == IS_COLLECTION);
+	vec = Z_VEC_P(array);
+	pos = Z_FE_POS_P(array);
+	if (UNEXPECTED(pos >= ZEND_VEC_COUNT(vec))) {
+		/* reached end of iteration */
+		ZEND_VM_SET_RELATIVE_OPCODE(opline, opline->extended_value);
+		ZEND_VM_CONTINUE();
+	}
+	/* Packed storage has no holes in [0, count): index directly, no skip loop.
+	 * The position advances in the result temp only; the shared vec is never
+	 * written, so a second loop over the same value is independent. */
+	value = ZEND_VEC_ELEMENTS(vec) + pos;
+	value_type = Z_TYPE_INFO_P(value);
+	Z_FE_POS_P(array) = pos + 1;
+	if (RETURN_VALUE_USED(opline)) {
+		ZVAL_LONG(EX_VAR(opline->result.var), pos);
+	}
+
+	if (EXPECTED(opline->op2_type == IS_CV)) {
+		zval *variable_ptr = EX_VAR(opline->op2.var);
+		zend_assign_to_variable(variable_ptr, value, IS_CV, EX_USES_STRICT_TYPES());
+	} else {
+		if (UNEXPECTED(Z_ISREF_P(value))) {
+			value = Z_REFVAL_P(value);
+			value_type = Z_TYPE_INFO_P(value);
+		}
+		zval *res = EX_VAR(opline->op2.var);
+		zend_refcounted *gc = Z_COUNTED_P(value);
+
+		ZVAL_COPY_VALUE_EX(res, value, gc, value_type);
+		if (Z_TYPE_INFO_REFCOUNTED(value_type)) {
+			GC_ADDREF(gc);
+		}
+	}
+	ZEND_VM_NEXT_OPCODE_CHECK_EXCEPTION();
+}
+
 static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_ISSET_ISEMPTY_STATIC_PROP_SPEC_HANDLER(ZEND_OPCODE_HANDLER_ARGS)
 {
 	USE_OPLINE
@@ -5564,6 +5613,21 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_FE_RESET_R_SP
 		result = EX_VAR(opline->result.var);
 		ZVAL_COPY_VALUE(result, array_ptr);
 		if (IS_CONST != IS_TMP_VAR && Z_OPT_REFCOUNTED_P(result)) {
+			Z_ADDREF_P(array_ptr);
+		}
+		Z_FE_POS_P(result) = 0;
+
+
+		ZEND_VM_NEXT_OPCODE();
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Immutable collection: iterate the packed elements by an integer
+		 * position held in the result temp (u2.fe_pos), exactly as a packed
+		 * array does. Iteration never mutates the shared value, so nested and
+		 * concurrent loops keep independent positions. A collection is always
+		 * refcounted and is never a CONST operand. */
+		result = EX_VAR(opline->result.var);
+		ZVAL_COPY_VALUE(result, array_ptr);
+		if (IS_CONST != IS_TMP_VAR) {
 			Z_ADDREF_P(array_ptr);
 		}
 		Z_FE_POS_P(result) = 0;
@@ -15724,7 +15788,10 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_F
 	var = EX_VAR(opline->op1.var);
 	if (Z_TYPE_P(var) != IS_ARRAY) {
 		SAVE_OPLINE();
-		if (Z_FE_ITER_P(var) != (uint32_t)-1) {
+		/* A collection holds its foreach position in u2.fe_pos, which aliases
+		 * fe_iter_idx; it owns no EG(ht_iterators) slot, so it must not reach
+		 * zend_hash_iterator_del(). Drop the reference only. */
+		if (Z_TYPE_P(var) != IS_COLLECTION && Z_FE_ITER_P(var) != (uint32_t)-1) {
 			zend_hash_iterator_del(Z_FE_ITER_P(var));
 		}
 		zval_ptr_dtor_nogc(var);
@@ -17704,6 +17771,21 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_FE_RESET_R_SP
 
 
 		ZEND_VM_NEXT_OPCODE();
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Immutable collection: iterate the packed elements by an integer
+		 * position held in the result temp (u2.fe_pos), exactly as a packed
+		 * array does. Iteration never mutates the shared value, so nested and
+		 * concurrent loops keep independent positions. A collection is always
+		 * refcounted and is never a CONST operand. */
+		result = EX_VAR(opline->result.var);
+		ZVAL_COPY_VALUE(result, array_ptr);
+		if (IS_TMP_VAR != IS_TMP_VAR) {
+			Z_ADDREF_P(array_ptr);
+		}
+		Z_FE_POS_P(result) = 0;
+
+
+		ZEND_VM_NEXT_OPCODE();
 	} else if (IS_TMP_VAR != IS_CONST && EXPECTED(Z_TYPE_P(array_ptr) == IS_OBJECT)) {
 		zend_object *zobj = Z_OBJ_P(array_ptr);
 		if (!zobj->ce->get_iterator) {
@@ -17879,6 +17961,9 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_F
 
 	array = EX_VAR(opline->op1.var);
 	if (UNEXPECTED(Z_TYPE_P(array) != IS_ARRAY)) {
+		if (EXPECTED(Z_TYPE_P(array) == IS_COLLECTION)) {
+			ZEND_VM_TAIL_CALL(zend_fe_fetch_collection_helper_SPEC(ZEND_OPCODE_HANDLER_ARGS_PASSTHRU));
+		}
 		ZEND_VM_TAIL_CALL(zend_fe_fetch_object_helper_SPEC(ZEND_OPCODE_HANDLER_ARGS_PASSTHRU));
 	}
 	fe_ht = Z_ARRVAL_P(array);
@@ -40588,6 +40673,21 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_FE_RESET_R_SP
 
 
 		ZEND_VM_NEXT_OPCODE();
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Immutable collection: iterate the packed elements by an integer
+		 * position held in the result temp (u2.fe_pos), exactly as a packed
+		 * array does. Iteration never mutates the shared value, so nested and
+		 * concurrent loops keep independent positions. A collection is always
+		 * refcounted and is never a CONST operand. */
+		result = EX_VAR(opline->result.var);
+		ZVAL_COPY_VALUE(result, array_ptr);
+		if (IS_CV != IS_TMP_VAR) {
+			Z_ADDREF_P(array_ptr);
+		}
+		Z_FE_POS_P(result) = 0;
+
+
+		ZEND_VM_NEXT_OPCODE();
 	} else if (IS_CV != IS_CONST && EXPECTED(Z_TYPE_P(array_ptr) == IS_OBJECT)) {
 		zend_object *zobj = Z_OBJ_P(array_ptr);
 		if (!zobj->ce->get_iterator) {
@@ -56276,6 +56376,55 @@ fe_fetch_r_exit:
 	ZEND_VM_NEXT_OPCODE_CHECK_EXCEPTION();
 }
 
+static zend_never_inline ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV  zend_fe_fetch_collection_helper_SPEC_TAILCALL(ZEND_OPCODE_HANDLER_ARGS)
+{
+	USE_OPLINE
+	zval *array;
+	zval *value;
+	uint32_t value_type;
+	zend_vec *vec;
+	uint32_t pos;
+
+	array = EX_VAR(opline->op1.var);
+	SAVE_OPLINE();
+
+	ZEND_ASSERT(Z_TYPE_P(array) == IS_COLLECTION);
+	vec = Z_VEC_P(array);
+	pos = Z_FE_POS_P(array);
+	if (UNEXPECTED(pos >= ZEND_VEC_COUNT(vec))) {
+		/* reached end of iteration */
+		ZEND_VM_SET_RELATIVE_OPCODE(opline, opline->extended_value);
+		ZEND_VM_CONTINUE();
+	}
+	/* Packed storage has no holes in [0, count): index directly, no skip loop.
+	 * The position advances in the result temp only; the shared vec is never
+	 * written, so a second loop over the same value is independent. */
+	value = ZEND_VEC_ELEMENTS(vec) + pos;
+	value_type = Z_TYPE_INFO_P(value);
+	Z_FE_POS_P(array) = pos + 1;
+	if (RETURN_VALUE_USED(opline)) {
+		ZVAL_LONG(EX_VAR(opline->result.var), pos);
+	}
+
+	if (EXPECTED(opline->op2_type == IS_CV)) {
+		zval *variable_ptr = EX_VAR(opline->op2.var);
+		zend_assign_to_variable(variable_ptr, value, IS_CV, EX_USES_STRICT_TYPES());
+	} else {
+		if (UNEXPECTED(Z_ISREF_P(value))) {
+			value = Z_REFVAL_P(value);
+			value_type = Z_TYPE_INFO_P(value);
+		}
+		zval *res = EX_VAR(opline->op2.var);
+		zend_refcounted *gc = Z_COUNTED_P(value);
+
+		ZVAL_COPY_VALUE_EX(res, value, gc, value_type);
+		if (Z_TYPE_INFO_REFCOUNTED(value_type)) {
+			GC_ADDREF(gc);
+		}
+	}
+	ZEND_VM_NEXT_OPCODE_CHECK_EXCEPTION();
+}
+
 static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_ISSET_ISEMPTY_STATIC_PROP_SPEC_TAILCALL_HANDLER(ZEND_OPCODE_HANDLER_ARGS)
 {
 	USE_OPLINE
@@ -58603,6 +58752,21 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_FE_RESET_R_SPEC_CO
 		result = EX_VAR(opline->result.var);
 		ZVAL_COPY_VALUE(result, array_ptr);
 		if (IS_CONST != IS_TMP_VAR && Z_OPT_REFCOUNTED_P(result)) {
+			Z_ADDREF_P(array_ptr);
+		}
+		Z_FE_POS_P(result) = 0;
+
+
+		ZEND_VM_NEXT_OPCODE();
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Immutable collection: iterate the packed elements by an integer
+		 * position held in the result temp (u2.fe_pos), exactly as a packed
+		 * array does. Iteration never mutates the shared value, so nested and
+		 * concurrent loops keep independent positions. A collection is always
+		 * refcounted and is never a CONST operand. */
+		result = EX_VAR(opline->result.var);
+		ZVAL_COPY_VALUE(result, array_ptr);
+		if (IS_CONST != IS_TMP_VAR) {
 			Z_ADDREF_P(array_ptr);
 		}
 		Z_FE_POS_P(result) = 0;
@@ -68661,7 +68825,10 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_FE_FRE
 	var = EX_VAR(opline->op1.var);
 	if (Z_TYPE_P(var) != IS_ARRAY) {
 		SAVE_OPLINE();
-		if (Z_FE_ITER_P(var) != (uint32_t)-1) {
+		/* A collection holds its foreach position in u2.fe_pos, which aliases
+		 * fe_iter_idx; it owns no EG(ht_iterators) slot, so it must not reach
+		 * zend_hash_iterator_del(). Drop the reference only. */
+		if (Z_TYPE_P(var) != IS_COLLECTION && Z_FE_ITER_P(var) != (uint32_t)-1) {
 			zend_hash_iterator_del(Z_FE_ITER_P(var));
 		}
 		zval_ptr_dtor_nogc(var);
@@ -70641,6 +70808,21 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_FE_RESET_R_SPEC_TM
 
 
 		ZEND_VM_NEXT_OPCODE();
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Immutable collection: iterate the packed elements by an integer
+		 * position held in the result temp (u2.fe_pos), exactly as a packed
+		 * array does. Iteration never mutates the shared value, so nested and
+		 * concurrent loops keep independent positions. A collection is always
+		 * refcounted and is never a CONST operand. */
+		result = EX_VAR(opline->result.var);
+		ZVAL_COPY_VALUE(result, array_ptr);
+		if (IS_TMP_VAR != IS_TMP_VAR) {
+			Z_ADDREF_P(array_ptr);
+		}
+		Z_FE_POS_P(result) = 0;
+
+
+		ZEND_VM_NEXT_OPCODE();
 	} else if (IS_TMP_VAR != IS_CONST && EXPECTED(Z_TYPE_P(array_ptr) == IS_OBJECT)) {
 		zend_object *zobj = Z_OBJ_P(array_ptr);
 		if (!zobj->ce->get_iterator) {
@@ -70816,6 +70998,9 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_FE_FET
 
 	array = EX_VAR(opline->op1.var);
 	if (UNEXPECTED(Z_TYPE_P(array) != IS_ARRAY)) {
+		if (EXPECTED(Z_TYPE_P(array) == IS_COLLECTION)) {
+			ZEND_VM_TAIL_CALL(zend_fe_fetch_collection_helper_SPEC_TAILCALL(ZEND_OPCODE_HANDLER_ARGS_PASSTHRU));
+		}
 		ZEND_VM_TAIL_CALL(zend_fe_fetch_object_helper_SPEC_TAILCALL(ZEND_OPCODE_HANDLER_ARGS_PASSTHRU));
 	}
 	fe_ht = Z_ARRVAL_P(array);
@@ -93419,6 +93604,21 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_FE_RESET_R_SPEC_CV
 		result = EX_VAR(opline->result.var);
 		ZVAL_COPY_VALUE(result, array_ptr);
 		if (IS_CV != IS_TMP_VAR && Z_OPT_REFCOUNTED_P(result)) {
+			Z_ADDREF_P(array_ptr);
+		}
+		Z_FE_POS_P(result) = 0;
+
+
+		ZEND_VM_NEXT_OPCODE();
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Immutable collection: iterate the packed elements by an integer
+		 * position held in the result temp (u2.fe_pos), exactly as a packed
+		 * array does. Iteration never mutates the shared value, so nested and
+		 * concurrent loops keep independent positions. A collection is always
+		 * refcounted and is never a CONST operand. */
+		result = EX_VAR(opline->result.var);
+		ZVAL_COPY_VALUE(result, array_ptr);
+		if (IS_CV != IS_TMP_VAR) {
 			Z_ADDREF_P(array_ptr);
 		}
 		Z_FE_POS_P(result) = 0;
