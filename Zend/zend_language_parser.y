@@ -61,7 +61,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
  * `clone ( expr )` ambiguity (reduce `argument: expr` for the call form vs shift
  * `)` for the parenthesized-expr form). GLR explores both and %dprec on the two
  * T_CLONE rules selects the expr form; both yield identical AST. */
-%expect 1
+%expect 10
 %expect-rr 0
 
 %destructor { zend_ast_destroy($$); } <ast>
@@ -844,7 +844,7 @@ parameter:
 
 optional_type_without_static:
 		%empty	{ $$ = NULL; }
-	|	type_expr_without_static	{ $$ = $1; }
+	|	type_expr	{ $$ = $1; }   /* glr-exp(try-type-merge): was type_expr_without_static */
 ;
 
 type_expr:
