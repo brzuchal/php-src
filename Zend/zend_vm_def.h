@@ -2102,6 +2102,29 @@ ZEND_VM_HOT_OBJ_HANDLER(82, ZEND_FETCH_OBJ_R, CONST|TMPVAR|UNUSED|THIS|CV, CONST
 			if (OP1_TYPE == IS_CV && UNEXPECTED(Z_TYPE_P(container) == IS_UNDEF)) {
 				ZVAL_UNDEFINED_OP1();
 			}
+			if (EXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+				/* Intrinsic readonly collection properties ($c->count, $c->isEmpty),
+				 * dispatched by runtime type before any object deref. The intrinsic
+				 * set is closed, so an unknown name is an Error, not a warn+null. */
+				zend_string *name, *tmp_name;
+				if (OP2_TYPE == IS_CONST) {
+					name = Z_STR_P(GET_OP2_ZVAL_PTR(BP_VAR_R));
+				} else {
+					name = zval_try_get_tmp_string(GET_OP2_ZVAL_PTR(BP_VAR_R), &tmp_name);
+					if (UNEXPECTED(!name)) {
+						ZVAL_UNDEF(EX_VAR(opline->result.var));
+						ZEND_VM_C_GOTO(fetch_obj_r_finish);
+					}
+				}
+				if (zend_collection_read_intrinsic_property(container, name, EX_VAR(opline->result.var)) == FAILURE) {
+					zend_throw_error(NULL, "Undefined intrinsic property \"%s\" on collection", ZSTR_VAL(name));
+					ZVAL_UNDEF(EX_VAR(opline->result.var));
+				}
+				if (OP2_TYPE != IS_CONST) {
+					zend_tmp_string_release(tmp_name);
+				}
+				ZEND_VM_C_GOTO(fetch_obj_r_finish);
+			}
 			zend_wrong_property_read(container, GET_OP2_ZVAL_PTR(BP_VAR_R));
 			ZVAL_NULL(EX_VAR(opline->result.var));
 			ZEND_VM_C_GOTO(fetch_obj_r_finish);
@@ -2310,6 +2333,27 @@ ZEND_VM_COLD_CONST_HANDLER(91, ZEND_FETCH_OBJ_IS, CONST|TMPVAR|UNUSED|THIS|CV, C
 			}
 			if (OP2_TYPE == IS_CV && Z_TYPE_P(EX_VAR(opline->op2.var)) == IS_UNDEF) {
 				ZVAL_UNDEFINED_OP2();
+			}
+			if (EXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+				/* Intrinsic collection property in isset()/?? context: a known name
+				 * yields its value; an unknown name yields null without an error. */
+				zend_string *name, *tmp_name;
+				if (OP2_TYPE == IS_CONST) {
+					name = Z_STR_P(GET_OP2_ZVAL_PTR(BP_VAR_R));
+				} else {
+					name = zval_try_get_tmp_string(GET_OP2_ZVAL_PTR(BP_VAR_R), &tmp_name);
+					if (UNEXPECTED(!name)) {
+						ZVAL_NULL(EX_VAR(opline->result.var));
+						ZEND_VM_C_GOTO(fetch_obj_is_finish);
+					}
+				}
+				if (zend_collection_read_intrinsic_property(container, name, EX_VAR(opline->result.var)) == FAILURE) {
+					ZVAL_NULL(EX_VAR(opline->result.var));
+				}
+				if (OP2_TYPE != IS_CONST) {
+					zend_tmp_string_release(tmp_name);
+				}
+				ZEND_VM_C_GOTO(fetch_obj_is_finish);
 			}
 			ZVAL_NULL(EX_VAR(opline->result.var));
 			ZEND_VM_C_GOTO(fetch_obj_is_finish);
@@ -6952,9 +6996,13 @@ ZEND_VM_HANDLER(76, ZEND_UNSET_OBJ, VAR|UNUSED|THIS|CV, CONST|TMP|CV, CACHE_SLOT
 					 && UNEXPECTED(Z_TYPE_P(container) == IS_UNDEF)) {
 						ZVAL_UNDEFINED_OP1();
 					}
-					break;
+					/* A collection falls through to the intrinsic-property
+					 * diagnostic below, which needs the resolved name. */
+					if (EXPECTED(Z_TYPE_P(container) != IS_COLLECTION)) {
+						break;
+					}
 				}
-			} else {
+			} else if (EXPECTED(Z_TYPE_P(container) != IS_COLLECTION)) {
 				break;
 			}
 		}
@@ -6965,6 +7013,13 @@ ZEND_VM_HANDLER(76, ZEND_UNSET_OBJ, VAR|UNUSED|THIS|CV, CONST|TMP|CV, CACHE_SLOT
 			if (UNEXPECTED(!name)) {
 				break;
 			}
+		}
+		if (UNEXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+			zend_throw_error(NULL, "Cannot unset intrinsic property \"%s\" on collection", ZSTR_VAL(name));
+			if (OP2_TYPE != IS_CONST) {
+				zend_tmp_string_release(tmp_name);
+			}
+			break;
 		}
 		Z_OBJ_HT_P(container)->unset_property(Z_OBJ_P(container), name, ((OP2_TYPE == IS_CONST) ? CACHE_ADDR(opline->extended_value) : NULL));
 		if (OP2_TYPE != IS_CONST) {
@@ -7821,10 +7876,13 @@ ZEND_VM_COLD_CONST_HANDLER(148, ZEND_ISSET_ISEMPTY_PROP_OBJ, CONST|TMP|UNUSED|TH
 		if ((OP1_TYPE & (IS_VAR|IS_CV)) && Z_ISREF_P(container)) {
 			container = Z_REFVAL_P(container);
 			if (UNEXPECTED(Z_TYPE_P(container) != IS_OBJECT)) {
-				result = (opline->extended_value & ZEND_ISEMPTY);
-				ZEND_VM_C_GOTO(isset_object_finish);
+				/* A collection falls through to the intrinsic-property branch below. */
+				if (EXPECTED(Z_TYPE_P(container) != IS_COLLECTION)) {
+					result = (opline->extended_value & ZEND_ISEMPTY);
+					ZEND_VM_C_GOTO(isset_object_finish);
+				}
 			}
-		} else {
+		} else if (EXPECTED(Z_TYPE_P(container) != IS_COLLECTION)) {
 			result = (opline->extended_value & ZEND_ISEMPTY);
 			ZEND_VM_C_GOTO(isset_object_finish);
 		}
@@ -7838,6 +7896,22 @@ ZEND_VM_COLD_CONST_HANDLER(148, ZEND_ISSET_ISEMPTY_PROP_OBJ, CONST|TMP|UNUSED|TH
 			result = 0;
 			ZEND_VM_C_GOTO(isset_object_finish);
 		}
+	}
+
+	if (OP1_TYPE != IS_UNUSED && UNEXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+		/* Intrinsic collection properties: a known name is always set, so isset()
+		 * is true and empty() reflects the value's truthiness; an unknown name is
+		 * absent, so isset() is false and empty() is true. Never throws. */
+		zval tmp;
+		if (zend_collection_read_intrinsic_property(container, name, &tmp) == SUCCESS) {
+			result = (opline->extended_value & ZEND_ISEMPTY) ? !i_zend_is_true(&tmp) : 1;
+		} else {
+			result = (opline->extended_value & ZEND_ISEMPTY) ? 1 : 0;
+		}
+		if (OP2_TYPE != IS_CONST) {
+			zend_tmp_string_release(tmp_name);
+		}
+		ZEND_VM_C_GOTO(isset_object_finish);
 	}
 
 	result =

@@ -131,6 +131,7 @@ ZEND_API bool zend_verify_internal_return_type(const zend_function *zf, zval *re
 ZEND_API void ZEND_FASTCALL zend_ref_add_type_source(zend_property_info_source_list *source_list, zend_property_info *prop);
 ZEND_API void ZEND_FASTCALL zend_ref_del_type_source(zend_property_info_source_list *source_list, const zend_property_info *prop);
 
+ZEND_API zend_result ZEND_FASTCALL zend_collection_read_intrinsic_property(const zval *collection, zend_string *name, zval *result);
 ZEND_API zval* zend_assign_to_typed_ref(zval *variable_ptr, zval *value, uint8_t value_type, bool strict);
 ZEND_API zval* zend_assign_to_typed_ref_ex(zval *variable_ptr, zval *value, uint8_t value_type, bool strict, zend_refcounted **garbage_ptr);
 

@@ -3625,6 +3625,35 @@ static zend_never_inline bool zend_handle_fetch_obj_flags(
 	return 1;
 }
 
+/* Intrinsic readonly properties on native collection values: $collection->count
+ * and $collection->isEmpty. Computed, never stored as separate zvals; O(1) -- a
+ * single ZEND_VEC_COUNT field read, with no element access, no allocation and no
+ * element-descriptor resolution. Dispatched purely by runtime type
+ * (Z_TYPE == IS_COLLECTION) so the behaviour is identical whether the value came
+ * from a full descriptor, a future bare kind, mixed, a property, an array element
+ * or a return value -- it never inspects the declared type. Returns SUCCESS and
+ * writes *result (an int or bool, never refcounted) for a known name; returns
+ * FAILURE and leaves *result untouched for any other name, so each caller applies
+ * its own unknown-name policy: a plain read throws, while isset()/?? treat an
+ * unknown intrinsic as absent. */
+ZEND_API zend_result ZEND_FASTCALL zend_collection_read_intrinsic_property(
+		const zval *collection, zend_string *name, zval *result)
+{
+	ZEND_ASSERT(Z_TYPE_P(collection) == IS_COLLECTION);
+
+	uint32_t count = ZEND_VEC_COUNT(Z_VEC_P((zval *) collection));
+
+	if (zend_string_equals_literal(name, "count")) {
+		ZVAL_LONG(result, (zend_long) count);
+		return SUCCESS;
+	}
+	if (zend_string_equals_literal(name, "isEmpty")) {
+		ZVAL_BOOL(result, count == 0);
+		return SUCCESS;
+	}
+	return FAILURE;
+}
+
 static zend_always_inline void zend_fetch_property_address(
 	zval *result,
 	const zval *container,
@@ -3662,6 +3691,13 @@ static zend_always_inline void zend_fetch_property_address(
 
 			/* this should modify object only if it's empty */
 			if (type == BP_VAR_UNSET) {
+				if (UNEXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+					name = zval_get_tmp_string((zval *) prop_ptr, &tmp_name);
+					zend_throw_error(NULL, "Cannot unset intrinsic property \"%s\" on collection", ZSTR_VAL(name));
+					zend_tmp_string_release(tmp_name);
+					ZVAL_ERROR(result);
+					return;
+				}
 				ZVAL_NULL(result);
 				return;
 			}
