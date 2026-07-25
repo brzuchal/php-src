@@ -14358,11 +14358,33 @@ static int zend_jit_fetch_obj(zend_jit_ctx         *jit,
 							op1_ref, ir_CONST_ADDR(Z_STRVAL_P(member)));
 						jit_set_Z_TYPE_INFO(jit, res_addr, _IS_ERROR);
 					} else {
+						/* A collection's intrinsic read is served here on the cold
+						 * (non-object) path, mirroring the VM FETCH_OBJ_R handler so
+						 * function-JIT does not shadow it; the object fast path above
+						 * is untouched. Reached only when op1 is not an object. */
+						ir_ref if_coll = jit_if_Z_TYPE(jit, op1_addr, IS_COLLECTION);
+						ir_IF_TRUE(if_coll);
+						/* Use the (already dereferenced) op1_addr, not op1_ref: for a
+						 * MAY_BE_UNDEF operand op1_ref is the original, non-deref'd
+						 * address (a reference wrapper), which the helper would misread
+						 * as a zend_vec. The guard above proved op1_addr is a collection. */
+						ir_CALL_3(IR_VOID, ir_CONST_FC_FUNC(zend_jit_collection_read_intrinsic),
+							jit_ZVAL_ADDR(jit, op1_addr), ir_CONST_ADDR(Z_STR_P(member)), jit_ZVAL_ADDR(jit, res_addr));
+						ir_END_list(end_inputs);
+						ir_IF_FALSE(if_coll);
 						ir_CALL_2(IR_VOID, ir_CONST_FC_FUNC(zend_jit_invalid_property_read),
 							op1_ref, ir_CONST_ADDR(Z_STRVAL_P(member)));
 						jit_set_Z_TYPE_INFO(jit, res_addr, IS_NULL);
 					}
 				} else {
+					/* FETCH_OBJ_IS (?? / null-coalesce read): a collection yields
+					 * its intrinsic value; an unknown name yields null, no throw. */
+					ir_ref if_coll = jit_if_Z_TYPE(jit, op1_addr, IS_COLLECTION);
+					ir_IF_TRUE(if_coll);
+					ir_CALL_3(IR_VOID, ir_CONST_FC_FUNC(zend_jit_collection_read_intrinsic_is),
+						jit_ZVAL_ADDR(jit, op1_addr), ir_CONST_ADDR(Z_STR_P(member)), jit_ZVAL_ADDR(jit, res_addr));
+					ir_END_list(end_inputs);
+					ir_IF_FALSE(if_coll);
 					jit_set_Z_TYPE_INFO(jit, res_addr, IS_NULL);
 				}
 				ir_END_list(end_inputs);

@@ -2662,6 +2662,27 @@ static void ZEND_FASTCALL zend_jit_invalid_property_read(zval *container, const 
 	zend_error(E_WARNING, "Attempt to read property \"%s\" on %s", property_name, zend_zval_value_name(container));
 }
 
+/* Cold-path intrinsic collection read for function-JIT, kept in lockstep with the
+ * VM FETCH_OBJ_R handler: a known name ($c->count / $c->isEmpty) yields its value,
+ * an unknown name is an Error (the intrinsic set is closed). Without this, the
+ * function-JIT non-object cold path would shadow the VM branch and return null. */
+static void ZEND_FASTCALL zend_jit_collection_read_intrinsic(zval *container, zend_string *name, zval *result)
+{
+	if (zend_collection_read_intrinsic_property(container, name, result) == FAILURE) {
+		zend_throw_error(NULL, "Undefined intrinsic property \"%s\" on collection", ZSTR_VAL(name));
+		ZVAL_UNDEF(result);
+	}
+}
+
+/* Cold-path intrinsic collection read in isset()/?? context: a known name yields
+ * its value, an unknown name yields null without throwing. */
+static void ZEND_FASTCALL zend_jit_collection_read_intrinsic_is(zval *container, zend_string *name, zval *result)
+{
+	if (zend_collection_read_intrinsic_property(container, name, result) == FAILURE) {
+		ZVAL_NULL(result);
+	}
+}
+
 static void ZEND_FASTCALL zend_jit_invalid_property_write(zval *container, const char *property_name)
 {
 	zend_throw_error(NULL,
