@@ -145,7 +145,7 @@ typedef enum {
  * Header-plus-flexible-array, like zend_type_list and zend_attribute. */
 typedef struct _zend_collection_type {
 	uint32_t  kind;        /* zend_collection_type_kind */
-	uint32_t  num_types;   /* always > 0; vec has exactly one */
+	uint32_t  num_types;   /* >= 1 for a concrete descriptor; 0 for a bare kind */
 	zend_type types[1];
 } zend_collection_type;
 
@@ -302,10 +302,13 @@ typedef struct _zend_collection_type {
 	ZEND_TYPE_SET_PTR_AND_KIND(t, desc, _ZEND_TYPE_LIST_BIT)
 
 /* Byte size of a collection descriptor holding num_types element types. Mirrors
- * ZEND_TYPE_LIST_SIZE / ZEND_ATTRIBUTE_SIZE. num_types must be > 0 (asserted at
- * the construction helpers), so the (num_types - 1) term never underflows. */
+ * ZEND_TYPE_LIST_SIZE / ZEND_ATTRIBUTE_SIZE. num_types is >= 0: a concrete
+ * descriptor has >= 1 member, a bare collection kind (declaration-side only) has
+ * exactly 0. The `== 0 ? 0` guard is mandatory -- num_types is uint32_t, so an
+ * unguarded `(0u - 1)` would not underflow to a small value but to 0xFFFFFFFF,
+ * a ~64 GiB over-allocation. For 0 the size is the header (types[1] slot spare). */
 #define ZEND_TYPE_COLLECTION_SIZE(num_types) \
-	(sizeof(zend_collection_type) + ((num_types) - 1) * sizeof(zend_type))
+	(sizeof(zend_collection_type) + ((num_types) == 0 ? 0 : ((num_types) - 1)) * sizeof(zend_type))
 
 /* FULL_MASK() includes the MAY_BE_* type mask, as well as additional metadata bits.
  * The PURE_MASK() only includes the MAY_BE_* type mask. */

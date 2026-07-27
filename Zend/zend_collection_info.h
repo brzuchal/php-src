@@ -118,8 +118,11 @@ typedef struct _zend_collection_info {
 #define ZEND_COLLECTION_INFO_CHILD(member) \
 	((const zend_collection_info *) ZEND_TYPE_COLLECTION(member))
 
+/* Guarded like ZEND_TYPE_COLLECTION_SIZE: num_types is uint32_t, so 0 must not
+ * reach the `(num_types - 1)` subtraction (bare kinds never intern, but keep the
+ * arithmetic safe regardless). */
 #define ZEND_COLLECTION_INFO_SIZE(num_types) \
-	(sizeof(zend_collection_info) + ((num_types) - 1) * sizeof(zend_type))
+	(sizeof(zend_collection_info) + ((num_types) == 0 ? 0 : ((num_types) - 1)) * sizeof(zend_type))
 
 #define ZEND_COLLECTION_INFO_IS_PERMANENT(info) \
 	(((info)->flags & ZEND_COLLECTION_INFO_PERMANENT) != 0)
