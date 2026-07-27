@@ -889,12 +889,18 @@ type_without_static:
 collection_type:
 		T_VEC_LBRACKET collection_type_args ']'
 			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_VEC, $2); }
+	|	T_VEC_LBRACKET ']'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_VEC, zend_ast_create_list(0, ZEND_AST_TYPE_COLLECTION_ARGS)); }
 	|	T_MAP_LBRACKET collection_type_args ']'
 			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_MAP, $2); }
 	|	T_SET_LBRACKET collection_type_args ']'
 			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_SET, $2); }
+	|	T_SET_LBRACKET ']'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_SET, zend_ast_create_list(0, ZEND_AST_TYPE_COLLECTION_ARGS)); }
 	|	T_TUPLE_LBRACKET collection_type_args ']'
 			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_TUPLE, $2); }
+	|	T_TUPLE_LBRACKET ']'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_TUPLE, zend_ast_create_list(0, ZEND_AST_TYPE_COLLECTION_ARGS)); }
 	|	T_SHAPE_LBRACKET collection_type_args ']'
 			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_SHAPE, $2); }
 ;

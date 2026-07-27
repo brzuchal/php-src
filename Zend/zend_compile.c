@@ -1509,8 +1509,17 @@ zend_string *zend_type_to_string_resolved(const zend_type type, const zend_class
 		const zend_collection_type *desc = ZEND_TYPE_COLLECTION(type);
 		const char *kind_name = zend_collection_type_kind_name(desc->kind);
 
-		if (kind_name == NULL || desc->num_types == 0) {
+		if (kind_name == NULL) {
 			return ZSTR_INIT_LITERAL("collection[?]", 0);
+		}
+
+		/* Descriptor-erased kind (num_types == 0): render the Candidate B spelling
+		 * `vec[]` / `?vec[]`, matching the source syntax and distinguishing it from
+		 * a concrete `vec[int]`. */
+		if (desc->num_types == 0) {
+			return ZEND_TYPE_ALLOW_NULL(type)
+				? zend_strpprintf(0, "?%s[]", kind_name)
+				: zend_strpprintf(0, "%s[]", kind_name);
 		}
 
 		zend_string *inner = NULL;
@@ -7639,6 +7648,27 @@ static zend_type zend_compile_collection_descriptor(uint32_t kind, zend_ast *arg
 	const zend_collection_type_info *info = zend_collection_type_by_kind(kind);
 
 	ZEND_ASSERT(info != NULL && "collection AST carries an unknown kind");
+
+	/* Empty descriptor list -- vec[], set[], tuple[] -- is a bare (existential,
+	 * descriptor-erased) collection-kind type: num_types == 0, matched by kind
+	 * alone, accepting any concrete descriptor of that kind (any arity for a
+	 * tuple). The grammar admits the empty list only for the runtime-ready kinds,
+	 * so map[]/shape[] are parse errors and never reach here. Distinct from
+	 * vec[mixed] and from an empty collection value; declaration-side only, and
+	 * never interned (bare descriptors do not canonicalise). */
+	if (args->children == 0) {
+		ZEND_ASSERT(info->runtime_ready
+			&& "empty descriptor reached a non-runtime-ready kind");
+		zend_collection_type *desc = zend_arena_alloc(&CG(arena),
+			ZEND_TYPE_COLLECTION_SIZE(0));
+		desc->kind = info->kind;
+		desc->num_types = 0;
+
+		zend_type type = ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_COLLECTION(type, desc);
+		ZEND_TYPE_FULL_MASK(type) |= _ZEND_TYPE_ARENA_BIT;
+		return type;
+	}
 
 	if (info->num_types != 0 && args->children != info->num_types) {
 		zend_error_noreturn(E_COMPILE_ERROR,
