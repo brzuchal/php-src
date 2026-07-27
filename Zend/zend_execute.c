@@ -1117,6 +1117,16 @@ static bool zend_check_collection_type(const zend_type *type, const zval *arg)
 	if (Z_TYPE_P(arg) != IS_COLLECTION) {
 		return false;
 	}
+	const zend_collection_type *desc = ZEND_TYPE_COLLECTION(*type);
+
+	/* Bare kind (num_types == 0): an existential declaration -- accept any concrete
+	 * value of the same kind, matched on the kind alone. No resolve, no node, no
+	 * member walk; cheaper than the full descriptor check. The value keeps its own
+	 * concrete descriptor untouched. */
+	if (desc->num_types == 0) {
+		return Z_VEC_P(arg)->type->kind == desc->kind;
+	}
+
 	/* Both sides are canonical after the declaration is resolved, so the check
 	 * is a pointer comparison. The descriptor is walked at most once per
 	 * request, on the first execution that reaches this declaration; every

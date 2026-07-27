@@ -713,12 +713,29 @@ static inheritance_status zend_perform_covariant_type_check(
 		return INHERITANCE_SUCCESS;
 	}
 
-	/* Collection types are otherwise invariant: a descriptor is compatible only
-	 * with a structurally identical descriptor, and never with any other type
-	 * shape. Checked before the class loop, which treats an unrecognised shape
-	 * as trivially compatible. */
+	/* Collection types are otherwise invariant: a concrete descriptor is
+	 * compatible only with a structurally identical descriptor, and never with
+	 * any other type shape. The single exception is a *bare* (member-less)
+	 * prototype: it is the top of its kind, so any collection of the same kind --
+	 * bare or concrete -- narrows it (fe <: proto). This yields covariant return
+	 * narrowing (bare -> concrete) and, via the swapped call for parameters,
+	 * contravariant parameter widening (concrete -> bare); the reverse
+	 * (concrete proto, bare fe) stays an error. Checked before the class loop,
+	 * which treats an unrecognised shape as trivially compatible. */
 	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(fe_type)
 	 || ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(proto_type)) {
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(fe_type)
+		 && ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(proto_type)) {
+			const zend_collection_type *proto_desc = ZEND_TYPE_COLLECTION(proto_type);
+			if (proto_desc->num_types == 0) {
+				const zend_collection_type *fe_desc = ZEND_TYPE_COLLECTION(fe_type);
+				/* fe must not widen nullability relative to the bare prototype. */
+				bool null_ok = !ZEND_TYPE_ALLOW_NULL(fe_type)
+					|| ZEND_TYPE_ALLOW_NULL(proto_type);
+				return (fe_desc->kind == proto_desc->kind && null_ok)
+					? INHERITANCE_SUCCESS : INHERITANCE_ERROR;
+			}
+		}
 		return zend_type_structurally_equals(fe_type, proto_type)
 			? INHERITANCE_SUCCESS : INHERITANCE_ERROR;
 	}
