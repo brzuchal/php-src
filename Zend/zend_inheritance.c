@@ -715,13 +715,14 @@ static inheritance_status zend_perform_covariant_type_check(
 
 	/* Collection types are otherwise invariant: a concrete descriptor is
 	 * compatible only with a structurally identical descriptor, and never with
-	 * any other type shape. The single exception is a *bare* (member-less)
-	 * prototype: it is the top of its kind, so any collection of the same kind --
-	 * bare or concrete -- narrows it (fe <: proto). This yields covariant return
-	 * narrowing (bare -> concrete) and, via the swapped call for parameters,
-	 * contravariant parameter widening (concrete -> bare); the reverse
-	 * (concrete proto, bare fe) stays an error. Checked before the class loop,
-	 * which treats an unrecognised shape as trivially compatible. */
+	 * any other type shape. Two exceptions: (1) a *bare* (member-less) prototype
+	 * is the top of its kind, so any collection of the same kind -- bare or
+	 * concrete -- narrows it (fe <: proto); (2) every collection descriptor
+	 * (concrete or erased) is a subtype of the standalone `iterable` type,
+	 * matching the F2 runtime acceptance. Both yield covariant return narrowing
+	 * and, via the swapped call for parameters, contravariant parameter widening;
+	 * the reverse directions stay errors. Checked before the class loop, which
+	 * treats an unrecognised shape as trivially compatible. */
 	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(fe_type)
 	 || ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(proto_type)) {
 		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(fe_type)
@@ -735,6 +736,19 @@ static inheritance_status zend_perform_covariant_type_check(
 				return (fe_desc->kind == proto_desc->kind && null_ok)
 					? INHERITANCE_SUCCESS : INHERITANCE_ERROR;
 			}
+		}
+		/* OQ-1: fe is a collection descriptor and proto is the standalone
+		 * `iterable` type -> fe <: iterable, keyed on the same iterable-fallback
+		 * bit the runtime value check uses, so acceptance and inheritance describe
+		 * the same subtype relation. The reverse (fe iterable, proto collection)
+		 * is not a collection descriptor on the fe side and falls through to the
+		 * structural-equality error below. */
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(fe_type)
+		 && ZEND_TYPE_IS_ITERABLE_FALLBACK(proto_type)) {
+			/* fe must not widen nullability relative to the iterable prototype. */
+			bool null_ok = !ZEND_TYPE_ALLOW_NULL(fe_type)
+				|| ZEND_TYPE_ALLOW_NULL(proto_type);
+			return null_ok ? INHERITANCE_SUCCESS : INHERITANCE_ERROR;
 		}
 		return zend_type_structurally_equals(fe_type, proto_type)
 			? INHERITANCE_SUCCESS : INHERITANCE_ERROR;
