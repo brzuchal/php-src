@@ -1151,7 +1151,11 @@ static zend_always_inline bool i_zend_check_property_type(const zend_property_in
 	}
 
 	if (UNEXPECTED(Z_TYPE_P(property) == IS_COLLECTION)) {
-		return ZEND_TYPE_IS_MIXED(info->type);
+		/* A collection has no may-be bit, so no mask can accept it. It satisfies
+		 * `mixed` and, since F2, the standalone `iterable` type (fallback bit);
+		 * object, array and an explicit array|Traversable union keep rejecting it. */
+		return ZEND_TYPE_IS_MIXED(info->type)
+			|| ZEND_TYPE_IS_ITERABLE_FALLBACK(info->type);
 	}
 
 	if (ZEND_TYPE_IS_COMPLEX(info->type) && Z_TYPE_P(property) == IS_OBJECT
@@ -1268,10 +1272,12 @@ static zend_always_inline bool zend_check_type_slow(
 	}
 
 	if (UNEXPECTED(Z_TYPE_P(arg) == IS_COLLECTION)) {
-		/* A collection has no may-be bit, so no mask can accept it. Only mixed
-		 * does; object, iterable and array must keep rejecting it, and it must
-		 * never reach the scalar coercion helpers below. */
-		return ZEND_TYPE_IS_MIXED(*type);
+		/* A collection has no may-be bit, so no mask can accept it. It satisfies
+		 * `mixed` and, since F2, the standalone `iterable` type (fallback bit);
+		 * object, array and an explicit array|Traversable union keep rejecting it.
+		 * It must never reach the scalar coercion helpers below. */
+		return ZEND_TYPE_IS_MIXED(*type)
+			|| ZEND_TYPE_IS_ITERABLE_FALLBACK(*type);
 	}
 
 	if (ZEND_TYPE_IS_COMPLEX(*type) && EXPECTED(Z_TYPE_P(arg) == IS_OBJECT)) {
@@ -4120,9 +4126,11 @@ static zend_always_inline int i_zend_verify_type_assignable_zval(
 	}
 
 	if (UNEXPECTED(zv_type == IS_COLLECTION)) {
-		/* A collection has no may-be bit, so no mask can accept it. Only mixed
-		 * does, and it must never reach the scalar coercion below. */
-		return ZEND_TYPE_IS_MIXED(type) ? 1 : 0;
+		/* A collection has no may-be bit, so no mask can accept it. It satisfies
+		 * `mixed` and, since F2, the standalone `iterable` type (fallback bit);
+		 * it must never reach the scalar coercion below. */
+		return (ZEND_TYPE_IS_MIXED(type)
+			|| ZEND_TYPE_IS_ITERABLE_FALLBACK(type)) ? 1 : 0;
 	}
 
 	if (ZEND_TYPE_IS_COMPLEX(type) && zv_type == IS_OBJECT

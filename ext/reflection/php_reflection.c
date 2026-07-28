@@ -2847,8 +2847,11 @@ ZEND_METHOD(ReflectionParameter, isArray)
 	ZEND_PARSE_PARAMETERS_NONE();
 	GET_REFLECTION_OBJECT_PTR(param);
 
-	/* BC For iterable */
-	if (ZEND_TYPE_IS_ITERABLE_FALLBACK(param->arg_info->type)) {
+	/* BC For iterable (the standalone named type only; a union carrying the
+	 * iterable provenance bit, e.g. iterable|null, falls through to the mask test
+	 * exactly as a decomposed Traversable|array|null union would). */
+	if (ZEND_TYPE_IS_ITERABLE_FALLBACK(param->arg_info->type)
+			&& !ZEND_TYPE_IS_TYPE_LIST(param->arg_info->type)) {
 		RETURN_FALSE;
 	}
 
@@ -3107,7 +3110,11 @@ ZEND_METHOD(ReflectionType, allowsNull)
 
 /* For BC with iterable for named types */
 static zend_string *zend_named_reflection_type_to_string(zend_type type) {
-	if (ZEND_TYPE_IS_ITERABLE_FALLBACK(type)) {
+	/* The `iterable` BC name applies only to the standalone (named) iterable type.
+	 * A genuine union that carries the iterable provenance bit -- e.g. iterable|null
+	 * -- has the list shape and renders as a normal union ("Traversable|array|null")
+	 * instead. */
+	if (ZEND_TYPE_IS_ITERABLE_FALLBACK(type) && !ZEND_TYPE_IS_TYPE_LIST(type)) {
 		if (ZEND_TYPE_FULL_MASK(type) & MAY_BE_NULL) {
 			return ZSTR_INIT_LITERAL("?iterable", false);
 		}

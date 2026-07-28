@@ -3079,15 +3079,24 @@ static void zend_convert_internal_arg_info_type(zend_type *type, bool persistent
 		}
 	}
 	if (ZEND_TYPE_IS_ITERABLE_FALLBACK(*type)) {
-		/* Warning generated an extension load warning which is emitted for every test
-		   zend_error(E_CORE_WARNING, "iterable type is now a compile time alias for array|Traversable,"
-		   " regenerate the argument info via the php-src gen_stub build script");
-		   */
-		zend_type legacy_iterable = ZEND_TYPE_INIT_CLASS_MASK(
-			ZSTR_KNOWN(ZEND_STR_TRAVERSABLE),
-			(type->type_mask | MAY_BE_ARRAY)
-		);
-		*type = legacy_iterable;
+		/* `iterable` is a compile-time alias for Traversable|array. Materialise
+		 * it as a genuine union: a one-member type list holding Traversable,
+		 * with MAY_BE_ARRAY expressing the array member on the container mask.
+		 * The list shape makes Reflection report ReflectionUnionType(
+		 * "Traversable|array") — matching the historical projection — while
+		 * _ZEND_TYPE_ITERABLE_BIT stays on the container so the runtime type
+		 * check keeps accepting native collections. This mirrors the userland
+		 * `iterable|...` representation produced by the compiler.
+		 *
+		 * Old extensions compiled before `iterable` became an alias reach this
+		 * path with no regenerated arginfo; they are converted the same way. */
+		uint32_t null_bit = ZEND_TYPE_FULL_MASK(*type) & MAY_BE_NULL;
+		zend_type_list *list = pemalloc(ZEND_TYPE_LIST_SIZE(1), persistent);
+		list->num_types = 1;
+		list->types[0] = (zend_type) ZEND_TYPE_INIT_CLASS(
+			ZSTR_KNOWN(ZEND_STR_TRAVERSABLE), 0, 0);
+		*type = (zend_type) ZEND_TYPE_INIT_UNION(list,
+			MAY_BE_ARRAY | null_bit | _ZEND_TYPE_ITERABLE_BIT);
 	}
 }
 
@@ -5348,6 +5357,11 @@ ZEND_API bool zend_is_iterable(const zval *iterable) /* {{{ */
 			return 1;
 		case IS_OBJECT:
 			return zend_class_implements_interface(Z_OBJCE_P(iterable), zend_ce_traversable);
+		case IS_COLLECTION:
+			/* F2: native collections satisfy the language-level iterable contract
+			 * (is_iterable() and the `iterable` type) while remaining non-objects
+			 * that do not implement Traversable. */
+			return 1;
 		default:
 			return 0;
 	}

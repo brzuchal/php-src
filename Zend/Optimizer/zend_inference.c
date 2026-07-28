@@ -2411,6 +2411,13 @@ static uint32_t zend_convert_type(const zend_script *script, zend_type type, zen
 	if (tmp & (MAY_BE_STRING|MAY_BE_ARRAY|MAY_BE_OBJECT|MAY_BE_RESOURCE)) {
 		tmp |= MAY_BE_RC1 | MAY_BE_RCN;
 	}
+	if (ZEND_TYPE_IS_ITERABLE_FALLBACK(type)) {
+		/* F2: a standalone `iterable` value may now be a native collection. Admit
+		 * MAY_BE_COLLECTION (the open-world escape flag, bit 26) so no pass narrows
+		 * the value to array|object and specializes on it. Tested on the full type
+		 * before ZEND_TYPE_PURE_MASK strips the fallback bit above. */
+		tmp |= MAY_BE_COLLECTION;
+	}
 	return tmp;
 }
 

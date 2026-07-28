@@ -501,26 +501,35 @@ class Type {
      */
     private function __construct(
         public readonly array $types,
-        public readonly bool $isIntersection
+        public readonly bool $isIntersection,
+        /* Provenance of the `iterable` keyword. A source type that used the
+         * keyword keeps it so its generated arginfo carries
+         * _ZEND_TYPE_ITERABLE_BIT (see ArgInfo::toZendInfo()); an explicitly
+         * written Traversable|array union does not. */
+        public readonly bool $isIterable = false
     ) {}
 
     public static function fromNode(Node $node): Type {
         if ($node instanceof Node\UnionType || $node instanceof Node\IntersectionType) {
             $nestedTypeObjects = array_map(Type::fromNode(...), $node->types);
             $types = [];
+            $isIterable = false;
             foreach ($nestedTypeObjects as $typeObject) {
                 array_push($types, ...$typeObject->types);
+                $isIterable = $isIterable || $typeObject->isIterable;
             }
-            return new Type($types, ($node instanceof Node\IntersectionType));
+            return new Type($types, ($node instanceof Node\IntersectionType), $isIterable);
         }
 
         if ($node instanceof Node\NullableType) {
+            $inner = Type::fromNode($node->type);
             return new Type(
                 [
-                    ...Type::fromNode($node->type)->types,
+                    ...$inner->types,
                     SimpleType::null(),
                 ],
-                false
+                false,
+                $inner->isIterable
             );
         }
 
@@ -530,7 +539,8 @@ class Type {
                     SimpleType::fromString("Traversable"),
                     ArrayType::createGenericArray(),
                 ],
-                false
+                false,
+                true /* isIterable: preserve the keyword's provenance */
             );
         }
 
@@ -801,10 +811,20 @@ class ArgInfo {
             }
             $arginfoType = $argType->toArginfoType();
             if ($arginfoType->hasClassType()) {
+                $typeMask = $arginfoType->toTypeMask();
+                if ($argType->isIterable) {
+                    /* Preserve the `iterable` keyword's provenance: keep
+                     * _ZEND_TYPE_ITERABLE_BIT on the type so the runtime check
+                     * accepts native collections. At registration
+                     * zend_convert_internal_arg_info_type() re-expands it to a
+                     * genuine Traversable|array union list carrying the bit, so
+                     * Reflection is unchanged. */
+                    $typeMask .= "|_ZEND_TYPE_ITERABLE_BIT";
+                }
                 return sprintf(
                     "\tZEND_%s_OBJ_TYPE_MASK(%s, %s, %s, %s%s)\n",
                     $argKind, $this->sendBy, $this->name,
-                    $arginfoType->toClassTypeString(), $arginfoType->toTypeMask(),
+                    $arginfoType->toClassTypeString(), $typeMask,
                     !$this->isVariadic ? ", " . $this->getDefaultValueAsArginfoString() : ""
                 );
             }

@@ -1,5 +1,5 @@
 --TEST--
-collection types: mixed accepts collections; object and iterable still reject them
+collection types: mixed and iterable accept collections; object and array reject them
 --EXTENSIONS--
 zend_test
 --FILE--
@@ -45,7 +45,7 @@ mixed param    : accepted
 mixed return   : accepted
 vec[int] param : accepted
 object param   : rejected
-iterable param : rejected
+iterable param : accepted
 array param    : rejected
 int param      : rejected
 vec[str] param : rejected

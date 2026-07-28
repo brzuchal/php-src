@@ -26,6 +26,7 @@
 #include "spl_array.h" /* For spl_ce_ArrayIterator */
 #include "spl_exceptions.h"
 #include "zend_smart_str.h"
+#include "zend_vec.h" /* For IS_COLLECTION handling in iterator_to_array/count (F2) */
 
 #ifdef accept
 #undef accept
@@ -3048,6 +3049,23 @@ PHP_FUNCTION(iterator_to_array)
 		}
 	}
 
+	if (Z_TYPE_P(obj) == IS_COLLECTION) {
+		/* F2: native collections are iterable but are neither arrays nor objects
+		 * with a get_iterator; copy their packed elements directly, keyed by the
+		 * integer position 0..n-1. use_keys is irrelevant here -- positional keys
+		 * are already 0..n-1, so both modes yield the same list. */
+		zend_vec *vec = Z_VEC_P(obj);
+		uint32_t count = ZEND_VEC_COUNT(vec);
+		zval *elements = ZEND_VEC_ELEMENTS(vec);
+		array_init_size(return_value, count);
+		for (uint32_t i = 0; i < count; i++) {
+			zval tmp;
+			ZVAL_COPY(&tmp, &elements[i]);
+			zend_hash_next_index_insert(Z_ARRVAL_P(return_value), &tmp);
+		}
+		return;
+	}
+
 	array_init(return_value);
 	spl_iterator_apply(obj, use_keys ? spl_iterator_to_array_apply : spl_iterator_to_values_apply, (void*)return_value);
 } /* }}} */
@@ -3074,6 +3092,9 @@ PHP_FUNCTION(iterator_count)
 
 	if (Z_TYPE_P(obj) == IS_ARRAY) {
 		count =  zend_hash_num_elements(Z_ARRVAL_P(obj));
+	} else if (Z_TYPE_P(obj) == IS_COLLECTION) {
+		/* F2: cardinality is a single field read, no traversal. */
+		count = ZEND_VEC_COUNT(Z_VEC_P(obj));
 	} else {
 		if (spl_iterator_apply(obj, spl_iterator_count_apply, (void*)&count) == FAILURE) {
 			RETURN_THROWS();
