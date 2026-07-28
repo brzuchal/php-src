@@ -7718,6 +7718,7 @@ static zend_type zend_compile_typename_ex(
 		zend_type_list *type_list;
 		bool is_composite = false;
 		bool has_only_iterable_class = true;
+		bool has_iterable_keyword = false;
 		ALLOCA_FLAG(use_heap)
 
 		type_list = do_alloca(ZEND_TYPE_LIST_SIZE(list->children), use_heap);
@@ -7774,6 +7775,11 @@ static zend_type zend_compile_typename_ex(
 			if (ZEND_TYPE_IS_COMPLEX(single_type) && !ZEND_TYPE_IS_ITERABLE_FALLBACK(single_type)) {
 				has_only_iterable_class = false;
 			}
+			if (ZEND_TYPE_IS_ITERABLE_FALLBACK(single_type)) {
+				/* Provenance of the `iterable` keyword; preserved onto the union
+				 * below so `iterable|null` stays the same type as `?iterable`. */
+				has_iterable_keyword = true;
+			}
 
 			uint32_t type_mask_overlap = ZEND_TYPE_PURE_MASK(type) & single_type_mask;
 			if (type_mask_overlap) {
@@ -7815,6 +7821,27 @@ static zend_type zend_compile_typename_ex(
 			}
 		}
 
+		/* Provenance of the `iterable` keyword: a source union that contains
+		 * `iterable` keeps _ZEND_TYPE_ITERABLE_BIT on its container (set after the
+		 * arena copy below), so runtime checks, inheritance and the optimizer accept
+		 * native collections for *every* such union -- iterable|null, iterable|int,
+		 * iterable|Foo, ... -- not just the nullable one. An explicit
+		 * array|Traversable[...] union carries no keyword provenance and never sets
+		 * the bit. The bit is provenance, not a property of an equivalent union.
+		 *
+		 * Where the union collapsed to a single Traversable name (iterable|null,
+		 * iterable|int, iterable|false, ...), re-expand it to a one-element type
+		 * list so it stays a *genuine union*: get_type_kind() and Reflection see the
+		 * list shape (which takes precedence over the fallback bit), so it remains a
+		 * ReflectionUnionType rendering "Traversable|array|...". Unions that already
+		 * have a second class member (iterable|Foo) are lists already. */
+		if (has_iterable_keyword
+				&& type_list->num_types == 0 && ZEND_TYPE_HAS_NAME(type)) {
+			type_list->num_types = 1;
+			type_list->types[0] = type;
+			ZEND_TYPE_FULL_MASK(type_list->types[0]) &= ~_ZEND_TYPE_MAY_BE_MASK;
+		}
+
 		if (type_list->num_types) {
 			zend_type_list *list = zend_arena_alloc(
 				&CG(arena), ZEND_TYPE_LIST_SIZE(type_list->num_types));
@@ -7826,6 +7853,10 @@ static zend_type zend_compile_typename_ex(
 		}
 
 		free_alloca(type_list, use_heap);
+
+		if (has_iterable_keyword) {
+			ZEND_TYPE_FULL_MASK(type) |= _ZEND_TYPE_ITERABLE_BIT;
+		}
 
 		uint32_t type_mask = ZEND_TYPE_FULL_MASK(type);
 		if ((type_mask & MAY_BE_OBJECT) &&
