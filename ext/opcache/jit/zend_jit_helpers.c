@@ -122,6 +122,17 @@ static ZEND_COLD void ZEND_FASTCALL zend_jit_invalid_method_call_tmp(zval *objec
 	zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
 }
 
+/* DO_FCALL teardown for a directly-owned native-collection intrinsic receiver.
+ * The interpreter releases it in its DO_FCALL handler; the JIT must mirror that
+ * so a JIT-compiled DO_FCALL over a (deoptimised) collection call does not leak
+ * the header receiver. Self-gating: a no-op for every ordinary internal call. */
+static void ZEND_FASTCALL zend_jit_release_collection_receiver(zend_execute_data *call)
+{
+	if (UNEXPECTED(zend_call_owns_collection_receiver(call))) {
+		zend_collection_call_release_receiver(call);
+	}
+}
+
 static void ZEND_FASTCALL zend_jit_unref_helper(zval *zv)
 {
 	zend_reference *ref;

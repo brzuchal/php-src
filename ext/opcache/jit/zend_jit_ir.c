@@ -10653,6 +10653,11 @@ static int zend_jit_do_fcall(zend_jit_ctx *jit, const zend_op *opline, const zen
 			jit_OBJ_RELEASE(jit, ir_LOAD_A(jit_CALL(rx, This.value.obj)));
 
 			ir_MERGE_WITH_EMPTY_FALSE(if_release_this);
+
+			// JIT: release a directly-owned native-collection intrinsic receiver
+			// from the frame header (mirrors the interpreter DO_FCALL teardown so
+			// a deoptimised collection call under JIT does not leak it).
+			ir_CALL_1(IR_VOID, ir_CONST_FC_FUNC(zend_jit_release_collection_receiver), rx);
 		}
 
 
