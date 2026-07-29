@@ -36,7 +36,7 @@ typedef struct _zend_closure {
 	zend_class_entry *called_scope;
 	zif_handler       orig_internal_handler;
 	/* A first-class callable created from a native-collection intrinsic
-	 * ($v->__receiverProbe(...)) retains its value receiver here; IS_UNDEF for
+	 * ($v->append(...)) retains its value receiver here; IS_UNDEF for
 	 * every ordinary closure. this_ptr stays IS_UNDEF so $this, binding,
 	 * Reflection and stack traces remain unaware of it. */
 	zval              value_receiver;

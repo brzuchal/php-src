@@ -181,6 +181,40 @@ ZEND_API zend_vec *zend_vec_create(
 	return vec;
 }
 
+/* Build a new vec that is `base` with `value` appended (prepend == false) or
+ * prepended (prepend == true). The result carries base's EXACT descriptor
+ * (base->type, borrowed), so append/prepend on a vec[int] yields a vec[int] with
+ * the same canonical node -- never a re-derived one. base's own elements are
+ * already valid for that type, so they are copied without re-checking; only
+ * `value` is validated against the element type. base is never mutated. Returns
+ * a fresh vec (refcount 1) on success, or NULL (nothing is allocated on the
+ * failure path) when `value` does not satisfy the element type, so the caller
+ * raises a TypeError. */
+ZEND_API zend_vec *zend_vec_create_with(const zend_vec *base, zval *value, bool prepend)
+{
+	ZVAL_DEREF(value);
+	if (!collection_member_matches(base->type, 0, value)) {
+		return NULL;
+	}
+
+	zend_vec *out = zend_vec_alloc(base->count + 1, base->type);
+	uint32_t at = 0;
+
+	if (prepend) {
+		ZVAL_COPY(&out->elements[at++], value);
+	}
+	for (uint32_t i = 0; i < base->count; i++) {
+		ZVAL_COPY(&out->elements[at++], &base->elements[i]);
+	}
+	if (!prepend) {
+		ZVAL_COPY(&out->elements[at++], value);
+	}
+	/* Publish all slots at once: every slot above is now initialised, so a later
+	 * destroy() reads only live zvals. */
+	out->count = at;
+	return out;
+}
+
 /* Build a tuple: a fixed-arity, positional collection. Storage is the same
  * packed layout as a vec -- header plus contiguous zvals -- so destruction and
  * GC traversal are shared; only the element check differs. Element i is checked
