@@ -26,6 +26,8 @@
 #include "zend_objects_API.h"
 #include "zend_globals.h"
 #include "zend_closures_arginfo.h"
+#include "zend_execute.h" /* collection intrinsic receiver predicate + transfer helper */
+#include "zend_vec.h"     /* ZVAL_VEC / Z_COUNTED for the value receiver */
 
 typedef struct _zend_closure {
 	zend_object       std;
@@ -33,6 +35,11 @@ typedef struct _zend_closure {
 	zval              this_ptr;
 	zend_class_entry *called_scope;
 	zif_handler       orig_internal_handler;
+	/* A first-class callable created from a native-collection intrinsic
+	 * ($v->__receiverProbe(...)) retains its value receiver here; IS_UNDEF for
+	 * every ordinary closure. this_ptr stays IS_UNDEF so $this, binding,
+	 * Reflection and stack traces remain unaware of it. */
+	zval              value_receiver;
 } zend_closure;
 
 /* non-static since it needs to be referenced */
@@ -567,6 +574,11 @@ static void zend_closure_free_storage(zend_object *object) /* {{{ */
 	if (Z_TYPE(closure->this_ptr) != IS_UNDEF) {
 		zval_ptr_dtor(&closure->this_ptr);
 	}
+
+	/* Release a retained collection value receiver, if any. */
+	if (UNEXPECTED(Z_TYPE(closure->value_receiver) != IS_UNDEF)) {
+		zval_ptr_dtor(&closure->value_receiver);
+	}
 }
 /* }}} */
 
@@ -590,6 +602,12 @@ static zend_object *zend_closure_clone(zend_object *zobject) /* {{{ */
 
 	zend_create_closure(&result, &closure->func,
 		closure->func.common.scope, closure->called_scope, &closure->this_ptr);
+
+	/* A clone carries its own reference to any retained collection receiver. */
+	if (UNEXPECTED(Z_TYPE(closure->value_receiver) != IS_UNDEF)) {
+		zend_closure *clone = (zend_closure *) Z_OBJ(result);
+		ZVAL_COPY(&clone->value_receiver, &closure->value_receiver);
+	}
 	return Z_OBJ(result);
 }
 /* }}} */
@@ -712,6 +730,19 @@ static HashTable *zend_closure_get_gc(zend_object *obj, zval **table, int *n) /*
 {
 	zend_closure *closure = (zend_closure *)obj;
 
+	/* A retained collection value receiver must be exposed to the cycle
+	 * collector too. Collections are immutable and acyclic, but keeping GC
+	 * correct here avoids depending on that invariant. */
+	if (UNEXPECTED(Z_TYPE(closure->value_receiver) != IS_UNDEF)) {
+		zend_get_gc_buffer *buf = zend_get_gc_buffer_create();
+		if (Z_TYPE(closure->this_ptr) != IS_NULL && Z_TYPE(closure->this_ptr) != IS_UNDEF) {
+			zend_get_gc_buffer_add_zval(buf, &closure->this_ptr);
+		}
+		zend_get_gc_buffer_add_zval(buf, &closure->value_receiver);
+		zend_get_gc_buffer_use(buf, table, n);
+		return NULL; /* an internal fake closure owns no static variables */
+	}
+
 	*table = Z_TYPE(closure->this_ptr) != IS_NULL ? &closure->this_ptr : NULL;
 	*n = Z_TYPE(closure->this_ptr) != IS_NULL ? 1 : 0;
 	/* Fake closures don't own the static variables they reference. */
@@ -749,6 +780,13 @@ void zend_register_closure_ce(void) /* {{{ */
 static ZEND_NAMED_FUNCTION(zend_closure_internal_handler) /* {{{ */
 {
 	zend_closure *closure = (zend_closure*)ZEND_CLOSURE_OBJECT(EX(func));
+	if (UNEXPECTED(Z_TYPE(closure->value_receiver) != IS_UNDEF)) {
+		/* Reinject the retained collection receiver into the hidden frame slot so
+		 * the intrinsic handler reads it exactly as in a direct call -- same slot,
+		 * same handler. Borrowed, not owned: the Closure keeps the reference, and
+		 * this slot is overwritten with the Closure object below. */
+		Z_PTR(EX(This)) = Z_COUNTED(closure->value_receiver);
+	}
 	closure->orig_internal_handler(INTERNAL_FUNCTION_PARAM_PASSTHRU);
 	ZEND_ASSERT(!(closure->func.common.fn_flags2 & ZEND_ACC2_FORBID_DYN_CALLS) || EG(exception));
 	// Assign to EX(this) so that it is released after observer checks etc.
@@ -886,6 +924,17 @@ void zend_closure_from_frame(zval *return_value, const zend_execute_data *call) 
 
 	if (ZEND_CALL_INFO(call) & ZEND_CALL_CLOSURE) {
 		RETURN_OBJ(ZEND_CLOSURE_OBJECT(mptr));
+	}
+
+	if (UNEXPECTED(zend_call_is_collection_intrinsic(mptr))) {
+		/* First-class callable over a collection intrinsic: create a fake closure
+		 * with no bound $this, then MOVE the frame's owned receiver into the
+		 * Closure's value_receiver (no refcount change). The frame slot is cleared
+		 * so the direct-call teardown will not also release it. */
+		zend_create_fake_closure(return_value, mptr, NULL, NULL, NULL);
+		zend_closure *cl = (zend_closure *) Z_OBJ_P(return_value);
+		zend_collection_call_transfer_receiver((zend_execute_data *) call, &cl->value_receiver);
+		return;
 	}
 
 	if (mptr->common.fn_flags & ZEND_ACC_CALL_VIA_TRAMPOLINE) {

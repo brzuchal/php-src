@@ -132,6 +132,35 @@ ZEND_API void ZEND_FASTCALL zend_ref_add_type_source(zend_property_info_source_l
 ZEND_API void ZEND_FASTCALL zend_ref_del_type_source(zend_property_info_source_list *source_list, const zend_property_info *prop);
 
 ZEND_API zend_result ZEND_FASTCALL zend_collection_read_intrinsic_property(const zval *collection, zend_string *name, zval *result);
+
+/* Native-collection intrinsic methods (infrastructure). The receiver travels in
+ * the call frame header, Z_PTR(This), with clean no-This call_info; see
+ * zend_execute.c. Raw payload access is confined to these helpers. */
+ZEND_API void zend_collection_intrinsics_startup(void);
+ZEND_API zend_function *ZEND_FASTCALL zend_collection_resolve_intrinsic_method(const zval *receiver, zend_string *name);
+ZEND_API void ZEND_FASTCALL zend_collection_call_set_receiver(zend_execute_data *call, const zval *receiver);
+ZEND_API void ZEND_FASTCALL zend_collection_call_transfer_receiver(zend_execute_data *call, zval *dest);
+ZEND_API void ZEND_FASTCALL zend_collection_call_release_receiver(zend_execute_data *call);
+
+/* True iff an internal function is a collection intrinsic (its receiver is in the
+ * frame header). A cheap flag test, safe to run on every internal call. */
+static zend_always_inline bool zend_call_is_collection_intrinsic(const zend_function *func)
+{
+	return (func->common.fn_flags2 & ZEND_ACC2_COLLECTION_RECEIVER) != 0;
+}
+
+/* True iff this frame directly OWNS a header receiver that teardown must release.
+ * A first-class-callable invocation frame is a collection intrinsic too, but it
+ * BORROWS the receiver from the Closure (ZEND_CALL_CLOSURE set), so it is
+ * excluded here and never releases the closure-owned receiver. */
+static zend_always_inline bool zend_call_owns_collection_receiver(const zend_execute_data *call)
+{
+	/* call->func may be NULL at teardown: Closure::__invoke frees and nulls its
+	 * own frame func before returning. Guard the dereference. */
+	return call->func
+		&& zend_call_is_collection_intrinsic(call->func)
+		&& !(ZEND_CALL_INFO(call) & ZEND_CALL_CLOSURE);
+}
 ZEND_API zval* zend_assign_to_typed_ref(zval *variable_ptr, zval *value, uint8_t value_type, bool strict);
 ZEND_API zval* zend_assign_to_typed_ref_ex(zval *variable_ptr, zval *value, uint8_t value_type, bool strict, zend_refcounted **garbage_ptr);
 

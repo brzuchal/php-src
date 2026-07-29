@@ -3670,6 +3670,165 @@ ZEND_API zend_result ZEND_FASTCALL zend_collection_read_intrinsic_property(
 	return FAILURE;
 }
 
+/* ==========================================================================
+ * Native-collection intrinsic methods -- infrastructure.
+ *
+ * A collection value is not an object and gains no second object model: it has
+ * no zend_class_entry, no zend_object, no $this, no visibility, and no user-
+ * extensible registration. Its intrinsic methods are a CLOSED set of synthetic
+ * scope-less zend_internal_functions dispatched from the IS_COLLECTION branch of
+ * ZEND_INIT_METHOD_CALL.
+ *
+ * The receiver travels by value in the call frame HEADER: its collectable
+ * pointer lives in Z_PTR(call->This) while call_info stays a plain no-This
+ * function call (ZEND_CALL_NESTED_FUNCTION == 0, so Z_TYPE(This) == IS_UNDEF and
+ * nothing advertises IS_OBJECT / IS_COLLECTION / ZEND_CALL_HAS_THIS). This is the
+ * proven Model D transport -- it survives argument unpacking and stack-segment
+ * reallocation, unlike any argument/temp slot. Raw payload access is confined to
+ * the ownership helpers below; method handlers never touch Z_PTR(call->This).
+ *
+ * This milestone registers ONLY a private test intrinsic, __receiverProbe, which
+ * returns its receiver unchanged. No public API methods are implemented here.
+ * ========================================================================== */
+
+/* Set the owned receiver on a freshly pushed direct-call frame. The frame owns
+ * one reference until teardown (or until it is transferred to a Closure). */
+ZEND_API void ZEND_FASTCALL zend_collection_call_set_receiver(zend_execute_data *call, const zval *receiver)
+{
+	zend_refcounted *rc = Z_COUNTED_P(receiver);
+	GC_ADDREF(rc);
+	Z_PTR(call->This) = rc;
+}
+
+/* Borrow the receiver of a collection intrinsic frame (no refcount change). */
+ZEND_API zend_vec * ZEND_FASTCALL zend_collection_call_get_receiver(const zend_execute_data *call)
+{
+	return (zend_vec *) Z_PTR(call->This);
+}
+
+/* Move the owned receiver out of the frame into a destination zval (e.g. a
+ * Closure field). Ownership transfers with no refcount change; the frame slot is
+ * cleared so teardown will not release it. */
+ZEND_API void ZEND_FASTCALL zend_collection_call_transfer_receiver(zend_execute_data *call, zval *dest)
+{
+	ZVAL_VEC(dest, (zend_vec *) Z_PTR(call->This));
+	Z_PTR(call->This) = NULL;
+}
+
+/* Release the frame-owned receiver. Safe to call on any exit path; a NULL slot
+ * (already transferred, or never set) is a no-op. */
+ZEND_API void ZEND_FASTCALL zend_collection_call_release_receiver(zend_execute_data *call)
+{
+	zend_vec *rc = (zend_vec *) Z_PTR(call->This);
+	if (EXPECTED(rc != NULL)) {
+		zval tmp;
+		ZVAL_VEC(&tmp, rc);
+		Z_PTR(call->This) = NULL;
+		zval_ptr_dtor(&tmp);
+	}
+}
+
+/* The __receiverProbe test intrinsic: return the concrete receiver unchanged.
+ * Public parameter #1 ($value) is accepted but ignored; it exists to exercise
+ * public arity, named binding, and diagnostics in isolation from the receiver.
+ * For a first-class-callable invocation the wrapper reinjects the receiver into
+ * Z_PTR(This) before this handler runs, so the same code path serves both. */
+static ZEND_NAMED_FUNCTION(zend_collection_receiver_probe)
+{
+	zend_vec *receiver = zend_collection_call_get_receiver(execute_data);
+	zend_long value = 0;
+
+	ZEND_ASSERT(receiver != NULL);
+
+	ZEND_PARSE_PARAMETERS_START(0, 1)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_LONG(value)
+	ZEND_PARSE_PARAMETERS_END();
+
+	ZVAL_VEC(return_value, receiver);
+	Z_ADDREF_P(return_value);
+	(void) value;
+}
+
+/* Public signature: __receiverProbe(int $value = 0). Index 0 is the return slot
+ * (required_num_args, no declared return type); index 1 is $value. */
+ZEND_BEGIN_ARG_INFO_EX(zend_collection_probe_arginfo, 0, 0, 0)
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, value, IS_LONG, 0, "0")
+ZEND_END_ARG_INFO()
+
+/* One synthetic function per intrinsic. Scope-less (no class), marked with
+ * ZEND_ACC2_COLLECTION_RECEIVER so teardown and FCC capture recognise the header
+ * receiver without a per-function pointer comparison. arg_info holds the runtime
+ * (converted, interned) argument info at index +1, exactly as registered
+ * functions do. */
+static zend_internal_function zend_collection_probe_fn;
+static zend_arg_info zend_collection_probe_rt_arg_info[2];
+
+/* Closed per-kind method tables (name -> synthetic function). No method-name
+ * switches live in the generated VM handlers; the resolver walks these tables.
+ * MAP and SHAPE are unimplemented, so their (absent) tables resolve to nothing.
+ * Names are interned at startup for case-insensitive lookup. */
+typedef struct {
+	zend_string              *name;
+	const zend_internal_function *fn;
+} zend_collection_intrinsic_entry;
+
+static zend_collection_intrinsic_entry zend_collection_vec_methods[2];
+static zend_collection_intrinsic_entry zend_collection_set_methods[2];
+static zend_collection_intrinsic_entry zend_collection_tuple_methods[2];
+
+/* Register the closed intrinsic-method set once, at engine startup. Engine-
+ * internal only: there is deliberately no public API to add entries. */
+ZEND_API void zend_collection_intrinsics_startup(void)
+{
+	memset(&zend_collection_probe_fn, 0, sizeof(zend_collection_probe_fn));
+	zend_collection_probe_fn.type = ZEND_INTERNAL_FUNCTION;
+	zend_collection_probe_fn.fn_flags = ZEND_ACC_PUBLIC;
+	zend_collection_probe_fn.fn_flags2 = ZEND_ACC2_COLLECTION_RECEIVER;
+	zend_collection_probe_fn.function_name =
+		zend_string_init_interned("__receiverProbe", sizeof("__receiverProbe") - 1, 1);
+	zend_collection_probe_fn.scope = NULL;
+	zend_collection_probe_fn.num_args = 1;
+	zend_collection_probe_fn.required_num_args = 0;
+	zend_convert_internal_arg_info(&zend_collection_probe_rt_arg_info[0], &zend_collection_probe_arginfo[0], true, true);
+	zend_convert_internal_arg_info(&zend_collection_probe_rt_arg_info[1], &zend_collection_probe_arginfo[1], false, true);
+	zend_collection_probe_fn.arg_info = zend_collection_probe_rt_arg_info + 1;
+	zend_collection_probe_fn.handler = zend_collection_receiver_probe;
+
+	zend_string *probe_name = zend_string_copy(zend_collection_probe_fn.function_name);
+	zend_collection_vec_methods[0].name = probe_name;
+	zend_collection_vec_methods[0].fn = &zend_collection_probe_fn;
+	zend_collection_set_methods[0].name = probe_name;
+	zend_collection_set_methods[0].fn = &zend_collection_probe_fn;
+	zend_collection_tuple_methods[0].name = probe_name;
+	zend_collection_tuple_methods[0].fn = &zend_collection_probe_fn;
+	/* index [1] stays zero-initialised => NULL sentinel terminates each table */
+}
+
+/* Centralised intrinsic-method resolver invoked from the IS_COLLECTION branch of
+ * ZEND_INIT_METHOD_CALL. Generic zval receiver; the kind is read from the value
+ * and selects a closed table; the name is matched case-insensitively (property-
+ * hook precedent). Returns the synthetic function or NULL for an unknown name. */
+ZEND_API zend_function *ZEND_FASTCALL zend_collection_resolve_intrinsic_method(
+		const zval *receiver, zend_string *name)
+{
+	ZEND_ASSERT(Z_TYPE_P(receiver) == IS_COLLECTION);
+
+	const zend_collection_intrinsic_entry *table;
+	switch (Z_VEC_P(receiver)->type->kind) {
+		case ZEND_COLLECTION_TYPE_VEC:   table = zend_collection_vec_methods;   break;
+		case ZEND_COLLECTION_TYPE_SET:   table = zend_collection_set_methods;   break;
+		case ZEND_COLLECTION_TYPE_TUPLE: table = zend_collection_tuple_methods; break;
+		default:                         return NULL; /* MAP/SHAPE: unimplemented */
+	}
+	for (; table->name != NULL; table++) {
+		if (zend_string_equals_ci(name, table->name)) {
+			return (zend_function *) table->fn;
+		}
+	}
+	return NULL;
+}
+
 static zend_always_inline void zend_fetch_property_address(
 	zval *result,
 	const zval *container,
@@ -5074,6 +5233,12 @@ static void cleanup_unfinished_calls(zend_execute_data *execute_data, uint32_t o
 
 			zend_vm_stack_free_args(EX(call));
 
+			if (UNEXPECTED(zend_call_owns_collection_receiver(call))) {
+				/* A direct collection intrinsic call abandoned by an exception
+				 * before its handler ran (e.g. an unknown-named-parameter or
+				 * argument-type error): release the header-stored receiver. */
+				zend_collection_call_release_receiver(call);
+			}
 			if (ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS) {
 				OBJ_RELEASE(Z_OBJ(call->This));
 			}

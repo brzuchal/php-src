@@ -2644,6 +2644,17 @@ static int zend_jit(const zend_op_array *op_array, zend_ssa *ssa, const zend_op 
 							if (!(op1_info & MAY_BE_OBJECT)) {
 								break;
 							}
+							/* A native collection can occupy any slot a non-object value
+							 * can. The object fast path cannot dispatch its intrinsic
+							 * methods and would raise "method call on non-object", so when
+							 * the receiver is not restricted to object|null, defer this
+							 * call to the interpreter, which handles the IS_COLLECTION
+							 * branch of ZEND_INIT_METHOD_CALL. Object and ?object receivers
+							 * keep the JIT fast path; collection intrinsic calls are slower
+							 * under function JIT, which is acceptable. */
+							if (op1_info & (MAY_BE_COLLECTION | (MAY_BE_ANY & ~(MAY_BE_OBJECT | MAY_BE_NULL)))) {
+								break;
+							}
 							op1_addr = OP1_REG_ADDR();
 							if (ssa->var_info && ssa->ops) {
 								zend_ssa_op *ssa_op = &ssa->ops[opline - op_array->opcodes];

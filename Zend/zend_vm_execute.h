@@ -2057,7 +2057,12 @@ fcall_end:
 		}
 	}
 
-	if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
+	if (UNEXPECTED(zend_call_owns_collection_receiver(call))) {
+		/* Release the header-stored receiver of a direct collection intrinsic
+		 * call (normal return and arity-error return alike). FCC frames borrow
+		 * from the Closure and are excluded by the ownership predicate. */
+		zend_collection_call_release_receiver(call);
+	} else if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
 		OBJ_RELEASE(Z_OBJ(call->This));
 	}
 
@@ -2192,7 +2197,12 @@ fcall_end:
 		}
 	}
 
-	if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
+	if (UNEXPECTED(zend_call_owns_collection_receiver(call))) {
+		/* Release the header-stored receiver of a direct collection intrinsic
+		 * call (normal return and arity-error return alike). FCC frames borrow
+		 * from the Closure and are excluded by the ownership predicate. */
+		zend_collection_call_release_receiver(call);
+	} else if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
 		OBJ_RELEASE(Z_OBJ(call->This));
 	}
 
@@ -2323,7 +2333,12 @@ fcall_end:
 		}
 	}
 
-	if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
+	if (UNEXPECTED(zend_call_owns_collection_receiver(call))) {
+		/* Release the header-stored receiver of a direct collection intrinsic
+		 * call (normal return and arity-error return alike). FCC frames borrow
+		 * from the Closure and are excluded by the ownership predicate. */
+		zend_collection_call_release_receiver(call);
+	} else if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
 		OBJ_RELEASE(Z_OBJ(call->This));
 	}
 
@@ -7537,6 +7552,37 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_
 		} while (0);
 	}
 
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_CONST != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CONST == IS_CONST) {
+			function_name = RT_CONSTANT(opline, opline->op2);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CONST != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
+	}
+
 	if (IS_CONST == IS_UNUSED) {
 		obj = Z_OBJ_P(object);
 	} else {
@@ -10351,6 +10397,35 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_
 		} while (0);
 	}
 
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_CONST != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_TMP_VAR == IS_CONST) {
+			function_name = _get_zval_ptr_tmp(opline->op2.var EXECUTE_DATA_CC);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_TMP_VAR != IS_CONST) {
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
+	}
+
 	if (IS_CONST == IS_UNUSED) {
 		obj = Z_OBJ_P(object);
 	} else {
@@ -13090,6 +13165,37 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_
 
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_CONST != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CV == IS_CONST) {
+			function_name = EX_VAR(opline->op2.var);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CV != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_CONST == IS_UNUSED) {
@@ -19666,6 +19772,35 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_INIT_METHOD_C
 		} while (0);
 	}
 
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_TMP_VAR != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CONST == IS_CONST) {
+			function_name = RT_CONSTANT(opline, opline->op2);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+			zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CONST != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+		zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
+	}
+
 	if (IS_TMP_VAR == IS_UNUSED) {
 		obj = Z_OBJ_P(object);
 	} else {
@@ -21274,6 +21409,33 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_INIT_METHOD_C
 			zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_TMP_VAR != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_TMP_VAR == IS_CONST) {
+			function_name = _get_zval_ptr_tmp(opline->op2.var EXECUTE_DATA_CC);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+			zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+			HANDLE_EXCEPTION();
+		}
+		if (IS_TMP_VAR != IS_CONST) {
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+		zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_TMP_VAR == IS_UNUSED) {
@@ -23220,6 +23382,35 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_INIT_METHOD_C
 			zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_TMP_VAR != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CV == IS_CONST) {
+			function_name = EX_VAR(opline->op2.var);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+			zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CV != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+		zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_TMP_VAR == IS_UNUSED) {
@@ -34996,6 +35187,37 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_I
 		} while (0);
 	}
 
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_UNUSED != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CONST == IS_CONST) {
+			function_name = RT_CONSTANT(opline, opline->op2);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CONST != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
+	}
+
 	if (IS_UNUSED == IS_UNUSED) {
 		obj = Z_OBJ_P(object);
 	} else {
@@ -37172,6 +37394,35 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_INIT_METHOD_C
 
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_UNUSED != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_TMP_VAR == IS_CONST) {
+			function_name = _get_zval_ptr_tmp(opline->op2.var EXECUTE_DATA_CC);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_TMP_VAR != IS_CONST) {
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_UNUSED == IS_UNUSED) {
@@ -39851,6 +40102,37 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_INIT_METHOD_C
 
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_UNUSED != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CV == IS_CONST) {
+			function_name = EX_VAR(opline->op2.var);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CV != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_UNUSED == IS_UNUSED) {
@@ -44915,6 +45197,37 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_I
 		} while (0);
 	}
 
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_CV != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CONST == IS_CONST) {
+			function_name = RT_CONSTANT(opline, opline->op2);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CONST != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
+	}
+
 	if (IS_CV == IS_UNUSED) {
 		obj = Z_OBJ_P(object);
 	} else {
@@ -48813,6 +49126,35 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_INIT_METHOD_C
 
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_CV != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_TMP_VAR == IS_CONST) {
+			function_name = _get_zval_ptr_tmp(opline->op2.var EXECUTE_DATA_CC);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_TMP_VAR != IS_CONST) {
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_CV == IS_UNUSED) {
@@ -54084,6 +54426,37 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_INIT_METHOD_C
 		} while (0);
 	}
 
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_CV != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CV == IS_CONST) {
+			function_name = EX_VAR(opline->op2.var);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CV != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
+	}
+
 	if (IS_CV == IS_UNUSED) {
 		obj = Z_OBJ_P(object);
 	} else {
@@ -56205,7 +56578,12 @@ fcall_end:
 		}
 	}
 
-	if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
+	if (UNEXPECTED(zend_call_owns_collection_receiver(call))) {
+		/* Release the header-stored receiver of a direct collection intrinsic
+		 * call (normal return and arity-error return alike). FCC frames borrow
+		 * from the Closure and are excluded by the ownership predicate. */
+		zend_collection_call_release_receiver(call);
+	} else if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
 		OBJ_RELEASE(Z_OBJ(call->This));
 	}
 
@@ -56340,7 +56718,12 @@ fcall_end:
 		}
 	}
 
-	if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
+	if (UNEXPECTED(zend_call_owns_collection_receiver(call))) {
+		/* Release the header-stored receiver of a direct collection intrinsic
+		 * call (normal return and arity-error return alike). FCC frames borrow
+		 * from the Closure and are excluded by the ownership predicate. */
+		zend_collection_call_release_receiver(call);
+	} else if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
 		OBJ_RELEASE(Z_OBJ(call->This));
 	}
 
@@ -56471,7 +56854,12 @@ fcall_end:
 		}
 	}
 
-	if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
+	if (UNEXPECTED(zend_call_owns_collection_receiver(call))) {
+		/* Release the header-stored receiver of a direct collection intrinsic
+		 * call (normal return and arity-error return alike). FCC frames borrow
+		 * from the Closure and are excluded by the ownership predicate. */
+		zend_collection_call_release_receiver(call);
+	} else if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
 		OBJ_RELEASE(Z_OBJ(call->This));
 	}
 
@@ -61569,6 +61957,37 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_INIT_
 		} while (0);
 	}
 
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_CONST != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CONST == IS_CONST) {
+			function_name = RT_CONSTANT(opline, opline->op2);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CONST != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
+	}
+
 	if (IS_CONST == IS_UNUSED) {
 		obj = Z_OBJ_P(object);
 	} else {
@@ -64383,6 +64802,35 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_INIT_
 		} while (0);
 	}
 
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_CONST != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_TMP_VAR == IS_CONST) {
+			function_name = _get_zval_ptr_tmp(opline->op2.var EXECUTE_DATA_CC);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_TMP_VAR != IS_CONST) {
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
+	}
+
 	if (IS_CONST == IS_UNUSED) {
 		obj = Z_OBJ_P(object);
 	} else {
@@ -67020,6 +67468,37 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_INIT_
 
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_CONST != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CV == IS_CONST) {
+			function_name = EX_VAR(opline->op2.var);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CV != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_CONST == IS_UNUSED) {
@@ -73596,6 +74075,35 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_INIT_METHOD_CALL_S
 		} while (0);
 	}
 
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_TMP_VAR != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CONST == IS_CONST) {
+			function_name = RT_CONSTANT(opline, opline->op2);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+			zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CONST != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+		zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
+	}
+
 	if (IS_TMP_VAR == IS_UNUSED) {
 		obj = Z_OBJ_P(object);
 	} else {
@@ -75204,6 +75712,33 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_INIT_METHOD_CALL_S
 			zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_TMP_VAR != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_TMP_VAR == IS_CONST) {
+			function_name = _get_zval_ptr_tmp(opline->op2.var EXECUTE_DATA_CC);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+			zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+			HANDLE_EXCEPTION();
+		}
+		if (IS_TMP_VAR != IS_CONST) {
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+		zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_TMP_VAR == IS_UNUSED) {
@@ -77050,6 +77585,35 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_INIT_METHOD_CALL_S
 			zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_TMP_VAR != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CV == IS_CONST) {
+			function_name = EX_VAR(opline->op2.var);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+			zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CV != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+		zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_TMP_VAR == IS_UNUSED) {
@@ -88826,6 +89390,37 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_INIT_M
 		} while (0);
 	}
 
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_UNUSED != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CONST == IS_CONST) {
+			function_name = RT_CONSTANT(opline, opline->op2);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CONST != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
+	}
+
 	if (IS_UNUSED == IS_UNUSED) {
 		obj = Z_OBJ_P(object);
 	} else {
@@ -91002,6 +91597,35 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_INIT_METHOD_CALL_S
 
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_UNUSED != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_TMP_VAR == IS_CONST) {
+			function_name = _get_zval_ptr_tmp(opline->op2.var EXECUTE_DATA_CC);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_TMP_VAR != IS_CONST) {
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_UNUSED == IS_UNUSED) {
@@ -93681,6 +94305,37 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_INIT_METHOD_CALL_S
 
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_UNUSED != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CV == IS_CONST) {
+			function_name = EX_VAR(opline->op2.var);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CV != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_UNUSED == IS_UNUSED) {
@@ -98745,6 +99400,37 @@ static ZEND_VM_HOT ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_INIT_M
 		} while (0);
 	}
 
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_CV != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CONST == IS_CONST) {
+			function_name = RT_CONSTANT(opline, opline->op2);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CONST != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
+	}
+
 	if (IS_CV == IS_UNUSED) {
 		obj = Z_OBJ_P(object);
 	} else {
@@ -102643,6 +103329,35 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_INIT_METHOD_CALL_S
 
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_CV != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_TMP_VAR == IS_CONST) {
+			function_name = _get_zval_ptr_tmp(opline->op2.var EXECUTE_DATA_CC);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_TMP_VAR != IS_CONST) {
+			zval_ptr_dtor_nogc(EX_VAR(opline->op2.var));
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_CV == IS_UNUSED) {
@@ -107810,6 +108525,37 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_INIT_METHOD_CALL_S
 
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. */
+	if (IS_CV != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
+		if (IS_CV == IS_CONST) {
+			function_name = EX_VAR(opline->op2.var);
+		}
+		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
+		if (UNEXPECTED(fbc == NULL)) {
+			zend_throw_error(NULL, "Call to undefined method %s() on collection",
+				ZSTR_VAL(Z_STR_P(function_name)));
+
+
+
+
+			HANDLE_EXCEPTION();
+		}
+		if (IS_CV != IS_CONST) {
+
+
+		}
+		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+			fbc, opline->extended_value, NULL);
+		zend_collection_call_set_receiver(call, object);
+
+
+		call->prev_execute_data = EX(call);
+		EX(call) = call;
+		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (IS_CV == IS_UNUSED) {
