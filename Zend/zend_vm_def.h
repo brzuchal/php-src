@@ -3693,29 +3693,38 @@ ZEND_VM_HOT_OBJ_HANDLER(112, ZEND_INIT_METHOD_CALL, CONST|TMP|UNUSED|THIS|CV, CO
 
 	/* Native-collection intrinsic method dispatch. A collection is not an object
 	 * and has no $this: the receiver travels in the call frame header
-	 * (Z_PTR(This)) with clean no-This call_info. */
-	if (OP1_TYPE != IS_UNUSED && UNEXPECTED(Z_TYPE_P(object) == IS_COLLECTION)) {
-		if (OP2_TYPE == IS_CONST) {
-			function_name = GET_OP2_ZVAL_PTR_UNDEF(BP_VAR_R);
+	 * (Z_PTR(This)) with clean no-This call_info. The detection follows a possible
+	 * reference dereference so $ref->m() on a reference-to-collection dispatches
+	 * exactly like a direct receiver; the dereference here is a read only, so the
+	 * regular object path below (unchanged) still handles non-collection refs. */
+	if (OP1_TYPE != IS_UNUSED) {
+		zval *collection = object;
+		if ((OP1_TYPE & (IS_VAR|IS_CV)) && UNEXPECTED(Z_ISREF_P(collection))) {
+			collection = Z_REFVAL_P(collection);
 		}
-		fbc = zend_collection_resolve_intrinsic_method(object, Z_STR_P(function_name));
-		if (UNEXPECTED(fbc == NULL)) {
-			zend_throw_error(NULL, "Call to undefined method %s() on collection",
-				ZSTR_VAL(Z_STR_P(function_name)));
-			FREE_OP2();
+		if (UNEXPECTED(Z_TYPE_P(collection) == IS_COLLECTION)) {
+			if (OP2_TYPE == IS_CONST) {
+				function_name = GET_OP2_ZVAL_PTR_UNDEF(BP_VAR_R);
+			}
+			fbc = zend_collection_resolve_intrinsic_method(collection, Z_STR_P(function_name));
+			if (UNEXPECTED(fbc == NULL)) {
+				zend_throw_error(NULL, "Call to undefined method %s() on collection",
+					ZSTR_VAL(Z_STR_P(function_name)));
+				FREE_OP2();
+				FREE_OP1();
+				HANDLE_EXCEPTION();
+			}
+			if (OP2_TYPE != IS_CONST) {
+				FREE_OP2();
+			}
+			call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+				fbc, opline->extended_value, NULL);
+			zend_collection_call_set_receiver(call, collection);
 			FREE_OP1();
-			HANDLE_EXCEPTION();
+			call->prev_execute_data = EX(call);
+			EX(call) = call;
+			ZEND_VM_NEXT_OPCODE();
 		}
-		if (OP2_TYPE != IS_CONST) {
-			FREE_OP2();
-		}
-		call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
-			fbc, opline->extended_value, NULL);
-		zend_collection_call_set_receiver(call, object);
-		FREE_OP1();
-		call->prev_execute_data = EX(call);
-		EX(call) = call;
-		ZEND_VM_NEXT_OPCODE();
 	}
 
 	if (OP1_TYPE == IS_UNUSED) {
