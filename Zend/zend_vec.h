@@ -91,6 +91,14 @@ ZEND_API bool zend_vec_type_is_supported(zend_type type);
 ZEND_API zend_vec *zend_vec_create(
 	const HashTable *values, const zend_collection_info *type, uint32_t *failed_index);
 
+/* Build a new vec from an existing one plus one more value, appended (prepend ==
+ * false) or prepended (prepend == true). The result carries `base`'s exact
+ * borrowed descriptor; `base` is never mutated. Only the new value is validated
+ * against the element type (base's elements are already valid). Returns a fresh
+ * vec (refcount 1), or NULL when the value does not satisfy the element type
+ * (caller raises a TypeError). This is the primitive behind vec::append/prepend. */
+ZEND_API zend_vec *zend_vec_create_with(const zend_vec *base, zval *value, bool prepend);
+
 /* Construct a value of any packed collection kind (vec, tuple) from a list of
  * already-evaluated elements, dispatching on the resolved node's kind. This is
  * the entry point the construction opcode uses; direct per-kind creators stay
