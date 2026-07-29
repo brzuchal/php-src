@@ -3692,16 +3692,18 @@ ZEND_API zend_result ZEND_FASTCALL zend_collection_read_intrinsic_property(
  * ========================================================================== */
 
 /* Set the owned receiver on a freshly pushed direct-call frame. The frame owns
- * one reference until teardown (or until it is transferred to a Closure). */
-ZEND_API void ZEND_FASTCALL zend_collection_call_set_receiver(zend_execute_data *call, const zval *receiver)
+ * one reference until teardown (or until it is transferred to a Closure).
+ * File-static: the only writer is the INIT_METHOD_CALL branch in this TU. */
+static void ZEND_FASTCALL zend_collection_call_set_receiver(zend_execute_data *call, const zval *receiver)
 {
 	zend_refcounted *rc = Z_COUNTED_P(receiver);
 	GC_ADDREF(rc);
 	Z_PTR(call->This) = rc;
 }
 
-/* Borrow the receiver of a collection intrinsic frame (no refcount change). */
-ZEND_API zend_vec * ZEND_FASTCALL zend_collection_call_get_receiver(const zend_execute_data *call)
+/* Borrow the receiver of a collection intrinsic frame (no refcount change).
+ * File-static: the only reader is the intrinsic handler in this TU. */
+static zend_vec * ZEND_FASTCALL zend_collection_call_get_receiver(const zend_execute_data *call)
 {
 	return (zend_vec *) Z_PTR(call->This);
 }

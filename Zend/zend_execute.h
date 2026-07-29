@@ -138,7 +138,8 @@ ZEND_API zend_result ZEND_FASTCALL zend_collection_read_intrinsic_property(const
  * zend_execute.c. Raw payload access is confined to these helpers. */
 ZEND_API void zend_collection_intrinsics_startup(void);
 ZEND_API zend_function *ZEND_FASTCALL zend_collection_resolve_intrinsic_method(const zval *receiver, zend_string *name);
-ZEND_API void ZEND_FASTCALL zend_collection_call_set_receiver(zend_execute_data *call, const zval *receiver);
+/* set/get receiver are file-static in zend_execute.c (single-TU payload access).
+ * Only transfer (closures.c) and release (opcache JIT) are needed across TUs. */
 ZEND_API void ZEND_FASTCALL zend_collection_call_transfer_receiver(zend_execute_data *call, zval *dest);
 ZEND_API void ZEND_FASTCALL zend_collection_call_release_receiver(zend_execute_data *call);
 

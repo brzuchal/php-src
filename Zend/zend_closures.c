@@ -85,6 +85,13 @@ static bool zend_valid_closure_binding(
 {
 	zend_function *func = &closure->func;
 	bool is_fake_closure = (func->common.fn_flags & ZEND_ACC_FAKE_CLOSURE) != 0;
+	if (UNEXPECTED(zend_call_is_collection_intrinsic(func))) {
+		/* A native-collection intrinsic method has no $this: its receiver lives in
+		 * the Closure's value_receiver, and rebinding would produce a closure with
+		 * neither a receiver nor a valid This. Reject binding outright. */
+		zend_throw_error(NULL, "Cannot bind a native-collection intrinsic method");
+		return false;
+	}
 	if (newthis) {
 		if (func->common.fn_flags & ZEND_ACC_STATIC) {
 			zend_error(E_WARNING, "Cannot bind an instance to a static closure, this will be an error in PHP 9");
@@ -186,6 +193,10 @@ ZEND_METHOD(Closure, call)
 		fake_closure->std.gc.u.type_info = GC_NULL;
 		ZVAL_UNDEF(&fake_closure->this_ptr);
 		fake_closure->called_scope = NULL;
+		/* Only fake_closure->std is memset above; initialise the value receiver
+		 * explicitly so nothing later reads an uninitialised field. This temporary
+		 * never owns an intrinsic receiver (collection intrinsics reject binding). */
+		ZVAL_UNDEF(&fake_closure->value_receiver);
 		my_function = &fake_closure->func;
 		if (ZEND_USER_CODE(closure->func.type)) {
 			memcpy(my_function, &closure->func, sizeof(zend_op_array));
