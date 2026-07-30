@@ -215,6 +215,73 @@ ZEND_API zend_vec *zend_vec_create_with(const zend_vec *base, zval *value, bool 
 	return out;
 }
 
+/* Build a new vec equal to `base` with the element at `index` replaced by
+ * `value`. base's descriptor is preserved exactly (borrowed), base is never
+ * mutated, and only `value` is validated -- base's other elements are already
+ * valid for the type and are copied without re-checking. Both failure modes are
+ * detected before anything is allocated: an out-of-range index (BAD_INDEX) and a
+ * value that fails the element type (BAD_VALUE). */
+ZEND_API zend_vec *zend_vec_with_at(
+		const zend_vec *base, zend_long index, zval *value, zend_vec_with_status *status)
+{
+	/* Wide compare: index is 64-bit and count is 32-bit, so an index at or above
+	 * count -- including one beyond UINT32_MAX -- is rejected here rather than
+	 * being truncated into range by the later cast. */
+	if (index < 0 || index >= (zend_long) base->count) {
+		*status = ZEND_VEC_WITH_BAD_INDEX;
+		return NULL;
+	}
+
+	ZVAL_DEREF(value);
+	if (!collection_member_matches(base->type, 0, value)) {
+		*status = ZEND_VEC_WITH_BAD_VALUE;
+		return NULL;
+	}
+
+	uint32_t at = (uint32_t) index;   /* in range: the narrowing is exact */
+	zend_vec *out = zend_vec_alloc(base->count, base->type);
+	for (uint32_t i = 0; i < base->count; i++) {
+		if (i == at) {
+			ZVAL_COPY(&out->elements[i], value);
+		} else {
+			ZVAL_COPY(&out->elements[i], &base->elements[i]);
+		}
+	}
+	out->count = base->count;
+	*status = ZEND_VEC_WITH_OK;
+	return out;
+}
+
+/* Build a new vec equal to `base` with the element at `index` removed and the
+ * following elements compacted down by one. base's descriptor is preserved
+ * exactly and base is never mutated. Removing the only element yields an empty
+ * vec (count 0) that still carries the descriptor; zend_vec_alloc(0, ...) is a
+ * header-only allocation, so the empty result has no element storage to read.
+ * The only failure is an out-of-range index (BAD_INDEX); there is no value to
+ * type-check. */
+ZEND_API zend_vec *zend_vec_without_at(
+		const zend_vec *base, zend_long index, zend_vec_with_status *status)
+{
+	if (index < 0 || index >= (zend_long) base->count) {
+		*status = ZEND_VEC_WITH_BAD_INDEX;
+		return NULL;
+	}
+
+	uint32_t skip = (uint32_t) index;
+	zend_vec *out = zend_vec_alloc(base->count - 1, base->type);
+	uint32_t at = 0;
+	for (uint32_t i = 0; i < base->count; i++) {
+		if (i == skip) {
+			continue;
+		}
+		ZVAL_COPY(&out->elements[at++], &base->elements[i]);
+	}
+	/* Publish all installed slots at once; at == base->count - 1. */
+	out->count = at;
+	*status = ZEND_VEC_WITH_OK;
+	return out;
+}
+
 /* Build a tuple: a fixed-arity, positional collection. Storage is the same
  * packed layout as a vec -- header plus contiguous zvals -- so destruction and
  * GC traversal are shared; only the element check differs. Element i is checked

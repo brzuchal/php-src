@@ -99,6 +99,34 @@ ZEND_API zend_vec *zend_vec_create(
  * (caller raises a TypeError). This is the primitive behind vec::append/prepend. */
 ZEND_API zend_vec *zend_vec_create_with(const zend_vec *base, zval *value, bool prepend);
 
+/* Outcome of an index-addressed builder (with_at / without_at). Only OK yields a
+ * result; the two failure codes tell the caller which diagnostic to raise, so the
+ * distinct index-vs-value error surfaces stay in the handler, not the primitive. */
+typedef enum _zend_vec_with_status {
+	ZEND_VEC_WITH_OK = 0,
+	ZEND_VEC_WITH_BAD_INDEX,   /* index outside 0..count-1 -> ValueError */
+	ZEND_VEC_WITH_BAD_VALUE,   /* value fails the element type -> TypeError */
+} zend_vec_with_status;
+
+/* Build a new vec that is `base` with the element at `index` replaced by `value`.
+ * `index` is a wide value compared against count without truncation, so an index
+ * beyond UINT32_MAX is rejected, not wrapped. On success returns a fresh vec
+ * (refcount 1) carrying base's exact descriptor with *status == OK; `base` is
+ * never mutated. On failure returns NULL (nothing allocated) with *status set to
+ * BAD_INDEX (out of range) or BAD_VALUE (value fails the element type). The
+ * primitive behind vec::withAt. */
+ZEND_API zend_vec *zend_vec_with_at(
+	const zend_vec *base, zend_long index, zval *value, zend_vec_with_status *status);
+
+/* Build a new vec that is `base` with the element at `index` removed and the
+ * following elements compacted down. Removing the only element yields an empty
+ * vec that still carries base's descriptor. On success returns a fresh vec
+ * (refcount 1) with *status == OK; `base` is never mutated. On failure returns
+ * NULL with *status == BAD_INDEX (the only possible failure: there is no value to
+ * type-check). The primitive behind vec::withoutAt. */
+ZEND_API zend_vec *zend_vec_without_at(
+	const zend_vec *base, zend_long index, zend_vec_with_status *status);
+
 /* Construct a value of any packed collection kind (vec, tuple) from a list of
  * already-evaluated elements, dispatching on the resolved node's kind. This is
  * the entry point the construction opcode uses; direct per-kind creators stay
