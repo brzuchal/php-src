@@ -520,6 +520,113 @@ ZEND_API zend_vec *zend_set_without(
 	return out;
 }
 
+/* The receiver returned unchanged as an owned reference: the empty-effect no-op path
+ * shared by union/intersect/diff (INV-34). Raises the refcount and reports "not
+ * changed"; allocates nothing. */
+static zend_vec *zend_set_binary_noop(const zend_vec *base, bool *changed)
+{
+	GC_ADDREF((zend_vec *) base);
+	*changed = false;
+	return (zend_vec *) base;
+}
+
+/* base ∪ other: base's members in base order, then other's members that are not already
+ * in base, in other order. Both are sets (unique), so the appended members are pairwise
+ * distinct and distinct from base -- no dedup pass is needed beyond the membership test.
+ * No-op (reuse) when every member of other is already in base. */
+ZEND_API zend_vec *zend_set_union(
+		const zend_vec *base, const zend_vec *other, bool *changed)
+{
+	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_SET);
+	ZEND_ASSERT(base->type == other->type);
+
+	uint32_t added = 0;
+	for (uint32_t j = 0; j < other->count; j++) {
+		if (!zend_set_contains(base, &other->elements[j])) {
+			added++;
+		}
+	}
+	if (added == 0) {
+		return zend_set_binary_noop(base, changed);
+	}
+
+	zend_vec *out = zend_vec_alloc(base->count + added, base->type);
+	uint32_t w = 0;
+	for (uint32_t i = 0; i < base->count; i++) {
+		ZVAL_COPY(&out->elements[w++], &base->elements[i]);
+	}
+	for (uint32_t j = 0; j < other->count; j++) {
+		if (!zend_set_contains(base, &other->elements[j])) {
+			ZVAL_COPY(&out->elements[w++], &other->elements[j]);
+		}
+	}
+	out->count = w;   /* == base->count + added */
+	*changed = true;
+	return out;
+}
+
+/* base ∩ other: base's members that are also in other, kept in base order. No-op
+ * (reuse) when every base member is in other. An empty intersection is a fresh empty
+ * set of the same descriptor. */
+ZEND_API zend_vec *zend_set_intersect(
+		const zend_vec *base, const zend_vec *other, bool *changed)
+{
+	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_SET);
+	ZEND_ASSERT(base->type == other->type);
+
+	uint32_t kept = 0;
+	for (uint32_t i = 0; i < base->count; i++) {
+		if (zend_set_contains(other, &base->elements[i])) {
+			kept++;
+		}
+	}
+	if (kept == base->count) {
+		return zend_set_binary_noop(base, changed);
+	}
+
+	zend_vec *out = zend_vec_alloc(kept, base->type);   /* kept may be 0 */
+	uint32_t w = 0;
+	for (uint32_t i = 0; i < base->count; i++) {
+		if (zend_set_contains(other, &base->elements[i])) {
+			ZVAL_COPY(&out->elements[w++], &base->elements[i]);
+		}
+	}
+	out->count = w;   /* == kept */
+	*changed = true;
+	return out;
+}
+
+/* base − other: base's members that are not in other, kept in base order. No-op (reuse)
+ * when base and other are disjoint. Removing everything yields a fresh empty set of the
+ * same descriptor. */
+ZEND_API zend_vec *zend_set_diff(
+		const zend_vec *base, const zend_vec *other, bool *changed)
+{
+	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_SET);
+	ZEND_ASSERT(base->type == other->type);
+
+	uint32_t kept = 0;
+	for (uint32_t i = 0; i < base->count; i++) {
+		if (!zend_set_contains(other, &base->elements[i])) {
+			kept++;
+		}
+	}
+	if (kept == base->count) {
+		return zend_set_binary_noop(base, changed);
+	}
+
+	zend_vec *out = zend_vec_alloc(kept, base->type);   /* kept may be 0 */
+	uint32_t w = 0;
+	for (uint32_t i = 0; i < base->count; i++) {
+		if (!zend_set_contains(other, &base->elements[i])) {
+			ZVAL_COPY(&out->elements[w++], &base->elements[i]);
+		}
+	}
+	out->count = w;   /* == kept */
+	*changed = true;
+	return out;
+}
+
 /* The single construction entry point for the VM: dispatch on the resolved
  * node's kind. Every kind that reaches here is value-constructible -- the
  * handler checks that first -- so a kind with no case is a contradiction, not a
