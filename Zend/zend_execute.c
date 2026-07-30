@@ -3986,7 +3986,7 @@ static ZEND_COLD void zend_collection_set_arg_type_error(
  * owned reference for an empty-effect no-op (INV-34); the same ZVAL_VEC installs both. */
 static zend_always_inline void zend_collection_set_binary(
 		zend_execute_data *execute_data, zval *return_value, const char *method,
-		zend_vec *(*op)(const zend_vec *, const zend_vec *, bool *))
+		zend_vec *(*op)(const zend_vec *, const zend_vec *))
 {
 	zend_vec *receiver = zend_collection_call_get_receiver(execute_data);
 	zval *other;
@@ -4003,10 +4003,9 @@ static zend_always_inline void zend_collection_set_binary(
 		RETURN_THROWS();
 	}
 
-	bool changed;
-	zend_vec *out = op(receiver, Z_VEC_P(other), &changed);
 	/* out is a fresh set (refcount 1) or the receiver as an owned reference (no-op,
 	 * refcount already raised); either way it transfers. */
+	zend_vec *out = op(receiver, Z_VEC_P(other));
 	ZVAL_VEC(return_value, out);
 }
 
@@ -4081,8 +4080,28 @@ ZEND_END_ARG_INFO()
 /* The erased return types `vec[]`, `tuple[]` and `set[]`: bare-kind collection
  * descriptors (num_types == 0) that the type checker treats as existential --
  * satisfied by any concrete value of the same kind -- and that Reflection renders
- * as "vec[]" / "tuple[]" / "set[]". Filled once at startup and read-only thereafter;
- * statics live for the process, matching the synthetic functions that borrow them. */
+ * as "vec[]" / "tuple[]" / "set[]".
+ *
+ * LIFETIME (process-static, non-owning). These three descriptors and the synthetic
+ * functions' runtime arg_info arrays below are process-lifetime static metadata:
+ * filled once at startup, read-only thereafter, and never freed. Each descriptor is
+ * SHARED -- every method of a kind points its return slot (and, for the set-binary
+ * ops, its `$other` parameter slot) at the one static via ZEND_TYPE_SET_COLLECTION,
+ * which stores a borrowed pointer and copies nothing.
+ *
+ * The synthetic functions therefore MUST NEVER reach zend_free_internal_arg_info().
+ * They don't: they are never inserted into any function or class table (the resolver
+ * returns a raw pointer and ZEND_INIT_METHOD_CALL builds a frame from it directly),
+ * an FCC closure's free_storage releases only function_name + value_receiver, and
+ * Reflection frees nothing (that path is gated on ZEND_ACC_CALL_VIA_TRAMPOLINE, which
+ * these never carry). If one of these arg_info ever DID reach it,
+ * zend_free_internal_arg_info() -> zend_type_release() would pefree() the shared
+ * static descriptor and pefree() the static arg_info array -- a free of static
+ * memory, multiplied across every shared user, i.e. heap corruption. Note the free
+ * would fire precisely because ZEND_TYPE_SET_COLLECTION does not set the arena bit;
+ * that bit is a provenance marker ("this descriptor lives in an arena") and MUST NOT
+ * be set here to fake-suppress the free -- a file-static descriptor is not arena-
+ * owned. The invariant is non-reachability, asserted at registration below. */
 static zend_collection_type zend_collection_vec_erased_desc;
 static zend_collection_type zend_collection_tuple_erased_desc;
 static zend_collection_type zend_collection_set_erased_desc;
@@ -4163,10 +4182,19 @@ static void zend_collection_register_method(
 		zend_convert_internal_arg_info(&rt[i], &src[i], false, true);
 	}
 	memset(&rt[0].type, 0, sizeof(zend_type));
+	/* The erased return descriptor is process-static and shared; it must be the bare
+	 * (existential) form. See the descriptor-lifetime note above. */
+	ZEND_ASSERT(erased_return->num_types == 0);
 	ZEND_TYPE_SET_COLLECTION(rt[0].type, (zend_collection_type *) erased_return);
 
 	fn->arg_info = rt + 1;
 	fn->handler = handler;
+
+	/* These functions must stay off every path that frees arg_info: scope-less (never
+	 * in a class function table) and never trampolined. Both keep their shared static
+	 * descriptor and arg_info array out of zend_free_internal_arg_info(). */
+	ZEND_ASSERT(fn->scope == NULL);
+	ZEND_ASSERT(!(fn->fn_flags & ZEND_ACC_CALL_VIA_TRAMPOLINE));
 
 	slot->name = zend_string_copy(fn->function_name);
 	slot->fn = fn;
