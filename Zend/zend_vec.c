@@ -282,6 +282,50 @@ ZEND_API zend_vec *zend_vec_without_at(
 	return out;
 }
 
+/* Build a new tuple equal to `base` with the element at `index` replaced by
+ * `value`. Unlike a vec, a tuple is positional and fixed-arity: the arity is
+ * unchanged and the replacement is validated against the descriptor member for
+ * `index` (member `index`, not member 0), so each slot keeps its own declared
+ * type. base's descriptor is preserved exactly (borrowed) and base is never
+ * mutated; the unchanged elements are copied without re-checking. Both failures
+ * are detected before anything is allocated. The range check runs first so that
+ * `index` is a valid member index before it selects the position's type. */
+ZEND_API zend_vec *zend_tuple_with_at(
+		const zend_vec *base, zend_long index, zval *value, zend_tuple_with_status *status)
+{
+	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_TUPLE);
+
+	/* Wide compare against the arity (== count == num_types), so an index at or
+	 * above it -- including one beyond UINT32_MAX -- is rejected here rather than
+	 * truncated into range by the later cast. */
+	if (index < 0 || index >= (zend_long) base->count) {
+		*status = ZEND_TUPLE_WITH_BAD_INDEX;
+		return NULL;
+	}
+
+	uint32_t at = (uint32_t) index;   /* in range: the narrowing is exact */
+
+	ZVAL_DEREF(value);
+	/* Positional: check the replacement against member `at`, the type declared
+	 * for exactly this slot -- not member 0. */
+	if (!collection_member_matches(base->type, at, value)) {
+		*status = ZEND_TUPLE_WITH_BAD_VALUE;
+		return NULL;
+	}
+
+	zend_vec *out = zend_vec_alloc(base->count, base->type);
+	for (uint32_t i = 0; i < base->count; i++) {
+		if (i == at) {
+			ZVAL_COPY(&out->elements[i], value);
+		} else {
+			ZVAL_COPY(&out->elements[i], &base->elements[i]);
+		}
+	}
+	out->count = base->count;   /* arity is invariant */
+	*status = ZEND_TUPLE_WITH_OK;
+	return out;
+}
+
 /* Build a tuple: a fixed-arity, positional collection. Storage is the same
  * packed layout as a vec -- header plus contiguous zvals -- so destruction and
  * GC traversal are shared; only the element check differs. Element i is checked

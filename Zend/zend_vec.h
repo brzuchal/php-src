@@ -127,6 +127,27 @@ ZEND_API zend_vec *zend_vec_with_at(
 ZEND_API zend_vec *zend_vec_without_at(
 	const zend_vec *base, zend_long index, zend_vec_with_status *status);
 
+/* Outcome of the tuple index-addressed builder (with_at). Mirrors the vec status,
+ * but a tuple is positional: BAD_VALUE means the replacement fails the type of the
+ * *selected position*, not a single uniform element type. */
+typedef enum _zend_tuple_with_status {
+	ZEND_TUPLE_WITH_OK = 0,
+	ZEND_TUPLE_WITH_BAD_INDEX,   /* index outside 0..arity-1 -> ValueError */
+	ZEND_TUPLE_WITH_BAD_VALUE,   /* value fails the selected position's type -> TypeError */
+} zend_tuple_with_status;
+
+/* Build a new tuple equal to `base` with the element at `index` replaced by
+ * `value`. A tuple is fixed-arity and positional: the arity never changes, and
+ * `value` is validated against the descriptor member for `index` (member `index`,
+ * not member 0 as for a vec), so each position keeps its own declared type. base's
+ * exact descriptor is preserved (borrowed) and base is never mutated; the other
+ * elements are already valid and are copied without re-checking. On success returns
+ * a fresh tuple (refcount 1) with *status == OK; on failure returns NULL (nothing
+ * allocated) with *status BAD_INDEX (out of range) or BAD_VALUE (wrong type for that
+ * position). The primitive behind tuple::withAt. */
+ZEND_API zend_vec *zend_tuple_with_at(
+	const zend_vec *base, zend_long index, zval *value, zend_tuple_with_status *status);
+
 /* Construct a value of any packed collection kind (vec, tuple) from a list of
  * already-evaluated elements, dispatching on the resolved node's kind. This is
  * the entry point the construction opcode uses; direct per-kind creators stay
