@@ -199,6 +199,13 @@ ZEND_API zend_vec *zend_set_union(const zend_vec *base, const zend_vec *other);
 ZEND_API zend_vec *zend_set_intersect(const zend_vec *base, const zend_vec *other);
 ZEND_API zend_vec *zend_set_diff(const zend_vec *base, const zend_vec *other);
 
+/* Recursive strict value identity for two collection values, both already known to be
+ * IS_COLLECTION. Backs the IS_COLLECTION arm of zend_is_identical() (===/!==): same
+ * canonical descriptor (kind + element types, by pointer) and strictly identical
+ * elements -- positional for vec/tuple, order-insensitive for set (via the shared
+ * membership predicate). Allocates nothing, mutates nothing, invokes no userland. */
+ZEND_API bool zend_collection_is_identical(const zval *op1, const zval *op2);
+
 /* Construct a value of any packed collection kind (vec, tuple) from a list of
  * already-evaluated elements, dispatching on the resolved node's kind. This is
  * the entry point the construction opcode uses; direct per-kind creators stay

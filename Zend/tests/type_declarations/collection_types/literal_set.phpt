@@ -60,11 +60,13 @@ fail(fn() => set[int]{1, 'x', 2});
 fail(fn() => set[int]{1, 1, 'x'});          // position is 2, before dedup collapses
 fail(fn() => set[Point]{new stdClass()});
 
-echo "-- a set of collections is not constructible: no value equality yet --\n";
-fail(fn() => set[vec[int]]{ vec[int]{1} });
-fail(fn() => set[set[int]]{ set[int]{1} });
+echo "-- a set of collections is constructible and dedups by recursive value identity --\n";
+// vec elements: positional, so {1,2} and {2,1} are distinct; the repeated {1,2} drops.
+var_dump(zend_test_vec_count(set[vec[int]]{ vec[int]{1, 2}, vec[int]{1, 2}, vec[int]{2, 1} }));
+// nested set elements: order-insensitive, so {1,2} and {2,1} are the same value.
+var_dump(zend_test_vec_count(set[set[int]]{ set[int]{1, 2}, set[int]{2, 1} }));
 
-echo "-- unsupported leaf element types --\n";
+echo "-- unsupported leaf element types (non-collection) are still rejected --\n";
 fail(fn() => set[?int]{1});
 fail(fn() => set[int|string]{1});
 fail(fn() => set[mixed]{1});
@@ -117,10 +119,10 @@ bool(true)
 Element 1 of set[int] must be of type int, string given
 Element 2 of set[int] must be of type int, string given
 Element 0 of set[Point] must be of type Point, stdClass given
--- a set of collections is not constructible: no value equality yet --
-Cannot create a value of type set[vec[int]]
-Cannot create a value of type set[set[int]]
--- unsupported leaf element types --
+-- a set of collections is constructible and dedups by recursive value identity --
+int(2)
+int(1)
+-- unsupported leaf element types (non-collection) are still rejected --
 Cannot create a value of type set[?int]
 Cannot create a value of type set[string|int]
 Cannot create a value of type set[mixed]

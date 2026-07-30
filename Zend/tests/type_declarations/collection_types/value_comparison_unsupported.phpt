@@ -55,10 +55,10 @@ must_throw('rsort',        function () { $x = [vec[int]{1}, vec[int]{2}]; rsort(
 must_throw('in_array',     fn() => in_array(vec[int]{1}, [vec[int]{1}]));
 must_throw('array_search', fn() => array_search(vec[int]{1}, [vec[int]{1}]));
 
-echo "-- strict identity is NOT affected: it does not go through comparison --\n";
+echo "-- strict identity does NOT go through comparison (no throw), and is by value --\n";
 $s = set[int]{1};
 var_dump($s === $s, $s !== $s);                   // true, false
-var_dump($s === set[int]{1}, $s !== set[int]{1}); // separate value: false, true
+var_dump($s === set[int]{1}, $s !== set[int]{1}); // separate but value-equal: true, false
 var_dump(in_array($s, [$s], true));               // strict → found, no throw
 var_dump($a === null);                            // strict vs null: false, no throw
 
@@ -89,10 +89,10 @@ sort: Cannot compare collection values
 rsort: Cannot compare collection values
 in_array: Cannot compare collection values
 array_search: Cannot compare collection values
--- strict identity is NOT affected: it does not go through comparison --
+-- strict identity does NOT go through comparison (no throw), and is by value --
 bool(true)
 bool(false)
-bool(false)
 bool(true)
+bool(false)
 bool(true)
 bool(false)
