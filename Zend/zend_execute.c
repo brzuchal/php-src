@@ -3688,9 +3688,10 @@ ZEND_API zend_result ZEND_FASTCALL zend_collection_read_intrinsic_property(
  * the ownership helpers below; method handlers never touch Z_PTR(call->This).
  *
  * The vec table holds append/prepend/withAt/withoutAt, the tuple table holds
- * withAt, and the set table holds with/without. Every method returns a value and
- * never mutates the receiver; a set no-op (adding a present value, removing an
- * absent one) returns the receiver itself as an owned reference.
+ * withAt, and the set table holds with/without/union/intersect/diff. Every method
+ * returns a value and never mutates the receiver; a set no-op (adding a present
+ * value, removing an absent one, or an empty-effect binary op) returns the receiver
+ * itself as an owned reference.
  * ========================================================================== */
 
 /* Set the owned receiver on a freshly pushed direct-call frame. The frame owns
@@ -3957,6 +3958,73 @@ static ZEND_NAMED_FUNCTION(zend_collection_set_without)
 	zend_collection_set_op(execute_data, return_value, /* remove */ true, "without");
 }
 
+/* $other is not a set of the receiver's exact descriptor. INV-17 makes the check a
+ * pointer comparison (`other->type == receiver->type` iff the same concrete set type),
+ * so this one diagnostic covers a non-collection, a wrong kind (vec/tuple), and a set of
+ * a different element type. Expected and given are named as full collection types --
+ * `set[int]` vs `set[string]` / `vec[int]` / `array`. No dedicated CollectionTypeError:
+ * a descriptor mismatch is an ordinary argument TypeError (v1 frozen, §7). */
+static ZEND_COLD void zend_collection_set_arg_type_error(
+		const zend_vec *receiver, const char *method, const zval *other)
+{
+	zend_string *expected = zend_collection_info_to_string(receiver->type);
+	zend_string *given = zend_zval_collection_type_name(other);   /* NULL for a non-collection */
+	zend_type_error("%s::%s(): Argument #1 ($other) must be of type %s, %s given",
+		ZSTR_VAL(expected), method, ZSTR_VAL(expected),
+		given ? ZSTR_VAL(given) : zend_zval_value_name(other));
+	if (given) {
+		zend_string_release(given);
+	}
+	zend_string_release(expected);
+}
+
+/* Shared body for set::union / set::intersect / set::diff. The $other argument must be a
+ * set carrying the receiver's *exact* descriptor -- validated by pointer identity
+ * (INV-17: canonical nodes, so `==` iff the same concrete set type); no widening, merge,
+ * inference or structural recompare. Any other value is a TypeError before any work. On
+ * success the chosen operation runs and returns a new set, or the receiver itself as an
+ * owned reference for an empty-effect no-op (INV-34); the same ZVAL_VEC installs both. */
+static zend_always_inline void zend_collection_set_binary(
+		zend_execute_data *execute_data, zval *return_value, const char *method,
+		zend_vec *(*op)(const zend_vec *, const zend_vec *, bool *))
+{
+	zend_vec *receiver = zend_collection_call_get_receiver(execute_data);
+	zval *other;
+
+	ZEND_ASSERT(receiver != NULL);
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_ZVAL(other)
+	ZEND_PARSE_PARAMETERS_END();
+
+	ZVAL_DEREF(other);
+	if (UNEXPECTED(Z_TYPE_P(other) != IS_COLLECTION || Z_VEC_P(other)->type != receiver->type)) {
+		zend_collection_set_arg_type_error(receiver, method, other);
+		RETURN_THROWS();
+	}
+
+	bool changed;
+	zend_vec *out = op(receiver, Z_VEC_P(other), &changed);
+	/* out is a fresh set (refcount 1) or the receiver as an owned reference (no-op,
+	 * refcount already raised); either way it transfers. */
+	ZVAL_VEC(return_value, out);
+}
+
+static ZEND_NAMED_FUNCTION(zend_collection_set_union)
+{
+	zend_collection_set_binary(execute_data, return_value, "union", zend_set_union);
+}
+
+static ZEND_NAMED_FUNCTION(zend_collection_set_intersect)
+{
+	zend_collection_set_binary(execute_data, return_value, "intersect", zend_set_intersect);
+}
+
+static ZEND_NAMED_FUNCTION(zend_collection_set_diff)
+{
+	zend_collection_set_binary(execute_data, return_value, "diff", zend_set_diff);
+}
+
 /* Public signature: append(mixed $value): vec[] / prepend(mixed $value): vec[].
  * $value is a required, mixed public parameter; the return type IS_MIXED here is
  * a placeholder that startup overwrites with the erased vec[] descriptor below
@@ -4000,6 +4068,16 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(zend_collection_set_insert_arginfo, 0, 1
 	ZEND_ARG_TYPE_INFO(0, value, IS_MIXED, 0)
 ZEND_END_ARG_INFO()
 
+/* Public signature: union/intersect/diff(set[] $other): set[]. Both the return slot and
+ * the $other parameter are IS_MIXED placeholders overwritten at startup with the erased
+ * set[] descriptor (the pipeline has no literal spelling for a collection type), so
+ * Reflection shows `set[] $other` and `: set[]`. The three share it -- identical
+ * signatures. The declared `set[]` accepts any set; the exact-descriptor rule is a
+ * runtime pointer check in the handler. */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(zend_collection_set_binary_arginfo, 0, 1, IS_MIXED, 0)
+	ZEND_ARG_TYPE_INFO(0, other, IS_MIXED, 0)
+ZEND_END_ARG_INFO()
+
 /* The erased return types `vec[]`, `tuple[]` and `set[]`: bare-kind collection
  * descriptors (num_types == 0) that the type checker treats as existential --
  * satisfied by any concrete value of the same kind -- and that Reflection renders
@@ -4021,6 +4099,9 @@ static zend_internal_function zend_collection_vec_without_at_fn;
 static zend_internal_function zend_collection_tuple_with_at_fn;
 static zend_internal_function zend_collection_set_with_fn;
 static zend_internal_function zend_collection_set_without_fn;
+static zend_internal_function zend_collection_set_union_fn;
+static zend_internal_function zend_collection_set_intersect_fn;
+static zend_internal_function zend_collection_set_diff_fn;
 
 /* Runtime (converted, interned) arg_info per function: [0] is the return slot
  * (the erased vec[] / tuple[] / set[]), [1..] the parameters. append, prepend,
@@ -4034,6 +4115,9 @@ static zend_arg_info zend_collection_vec_without_at_rt_arg_info[2];
 static zend_arg_info zend_collection_tuple_with_at_rt_arg_info[3];
 static zend_arg_info zend_collection_set_with_rt_arg_info[2];
 static zend_arg_info zend_collection_set_without_rt_arg_info[2];
+static zend_arg_info zend_collection_set_union_rt_arg_info[2];
+static zend_arg_info zend_collection_set_intersect_rt_arg_info[2];
+static zend_arg_info zend_collection_set_diff_rt_arg_info[2];
 
 /* Closed per-kind method tables (name -> synthetic function). No method-name
  * switches live in the generated VM handlers; the resolver walks these tables.
@@ -4046,7 +4130,8 @@ typedef struct {
 
 /* append, prepend, withAt, withoutAt, NULL sentinel. */
 static zend_collection_intrinsic_entry zend_collection_vec_methods[5];
-static zend_collection_intrinsic_entry zend_collection_set_methods[3];  /* with, without, NULL */
+/* with, without, union, intersect, diff, NULL sentinel. */
+static zend_collection_intrinsic_entry zend_collection_set_methods[6];
 static zend_collection_intrinsic_entry zend_collection_tuple_methods[2]; /* withAt, NULL sentinel */
 
 /* Install one synthetic scope-less collection method into `slot`: convert its
@@ -4141,7 +4226,38 @@ ZEND_API void zend_collection_intrinsics_startup(void)
 		zend_collection_set_without, 1,
 		zend_collection_set_insert_arginfo, zend_collection_set_without_rt_arg_info,
 		&zend_collection_set_erased_desc, &zend_collection_set_methods[1]);
-	/* vec_methods[4], tuple_methods[1] and set_methods[2] stay zero-initialised:
+
+	/* set binary ops: union/intersect/diff share the one-parameter binary arginfo and
+	 * all return set[]. Unlike the unary methods their parameter is a collection type,
+	 * so after registration each $other slot (rt[1], the converted parameter) is retyped
+	 * to the erased set[] descriptor -- so Reflection shows `set[] $other`. rt+1 is what
+	 * fn->arg_info points at, so this mutates exactly the slot the function exposes. */
+	zend_collection_register_method(
+		&zend_collection_set_union_fn, "union", sizeof("union") - 1,
+		zend_collection_set_union, 1,
+		zend_collection_set_binary_arginfo, zend_collection_set_union_rt_arg_info,
+		&zend_collection_set_erased_desc, &zend_collection_set_methods[2]);
+	zend_collection_register_method(
+		&zend_collection_set_intersect_fn, "intersect", sizeof("intersect") - 1,
+		zend_collection_set_intersect, 1,
+		zend_collection_set_binary_arginfo, zend_collection_set_intersect_rt_arg_info,
+		&zend_collection_set_erased_desc, &zend_collection_set_methods[3]);
+	zend_collection_register_method(
+		&zend_collection_set_diff_fn, "diff", sizeof("diff") - 1,
+		zend_collection_set_diff, 1,
+		zend_collection_set_binary_arginfo, zend_collection_set_diff_rt_arg_info,
+		&zend_collection_set_erased_desc, &zend_collection_set_methods[4]);
+
+	zend_arg_info *set_binary_rt[] = {
+		zend_collection_set_union_rt_arg_info,
+		zend_collection_set_intersect_rt_arg_info,
+		zend_collection_set_diff_rt_arg_info,
+	};
+	for (size_t i = 0; i < 3; i++) {
+		memset(&set_binary_rt[i][1].type, 0, sizeof(zend_type));
+		ZEND_TYPE_SET_COLLECTION(set_binary_rt[i][1].type, &zend_collection_set_erased_desc);
+	}
+	/* vec_methods[4], tuple_methods[1] and set_methods[5] stay zero-initialised:
 	 * the NULL name terminates each table. */
 }
 

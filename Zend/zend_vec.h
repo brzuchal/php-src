@@ -180,6 +180,28 @@ ZEND_API zend_vec *zend_set_with(
 ZEND_API zend_vec *zend_set_without(
 	const zend_vec *base, zval *value, zend_set_with_status *status);
 
+/* The three binary set operations. Each requires `base` and `other` to carry the
+ * *same* descriptor (the caller enforces this by pointer identity before calling;
+ * asserted here) and returns a set of that descriptor. Membership is strict identity
+ * (zend_is_identical). Order is receiver-driven (see each). Nothing is allocated for an
+ * empty-effect result: `*changed` is set to false and `base` is returned as an owned
+ * reference (refcount raised), exactly like the with/without no-op path (INV-34); a
+ * changed result is a fresh set (refcount 1) with `*changed` true. `base` is never
+ * mutated. With packed storage and linear membership these are O(count(base)*count(other)).
+ *
+ *   union     — base's members in base order, then other's members not in base, in
+ *               other order. No-op when other is a subset of base.
+ *   intersect — base's members that are also in other, in base order. No-op when every
+ *               base member is in other.
+ *   diff      — base's members that are not in other, in base order. No-op when base and
+ *               other are disjoint. */
+ZEND_API zend_vec *zend_set_union(
+	const zend_vec *base, const zend_vec *other, bool *changed);
+ZEND_API zend_vec *zend_set_intersect(
+	const zend_vec *base, const zend_vec *other, bool *changed);
+ZEND_API zend_vec *zend_set_diff(
+	const zend_vec *base, const zend_vec *other, bool *changed);
+
 /* Construct a value of any packed collection kind (vec, tuple) from a list of
  * already-evaluated elements, dispatching on the resolved node's kind. This is
  * the entry point the construction opcode uses; direct per-kind creators stay
