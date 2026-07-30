@@ -148,6 +148,38 @@ typedef enum _zend_tuple_with_status {
 ZEND_API zend_vec *zend_tuple_with_at(
 	const zend_vec *base, zend_long index, zval *value, zend_tuple_with_status *status);
 
+/* Outcome of the set builders (with / without). A set operation may legitimately
+ * change nothing -- adding a present value or removing an absent one -- so UNCHANGED
+ * is a first-class result, distinct from a type failure. */
+typedef enum _zend_set_with_status {
+	ZEND_SET_WITH_CHANGED = 0,   /* a new set was allocated */
+	ZEND_SET_WITH_UNCHANGED,     /* no-op: value already present (with) / absent (without) */
+	ZEND_SET_WITH_BAD_VALUE,     /* value fails the element type -> TypeError */
+} zend_set_with_status;
+
+/* Build the set that is `base` with `value` added. Membership is strict identity
+ * (zend_is_identical, ===). `value` is validated against the element type first: a
+ * wrong type is *status == BAD_VALUE (return NULL), even though it could never be a
+ * member. If the value is already present nothing is allocated and the receiver is
+ * returned as an *owned* reference (refcount raised) with *status == UNCHANGED;
+ * otherwise a fresh set (refcount 1) is returned with the existing members in order
+ * plus `value` appended, *status == CHANGED. base's exact descriptor is preserved
+ * (borrowed) and base is never mutated. The primitive behind set::with. */
+ZEND_API zend_vec *zend_set_with(
+	const zend_vec *base, zval *value, zend_set_with_status *status);
+
+/* Build the set that is `base` with `value` removed. `value` is validated against
+ * the element type first (BAD_VALUE -> NULL), even though a wrong-typed value can
+ * never be a member. Membership uses the same strict identity predicate as with()
+ * and construction. If the value is absent nothing is allocated and the receiver is
+ * returned as an *owned* reference with *status == UNCHANGED; otherwise a fresh set
+ * with the first matching member removed and the rest compacted (order preserved) is
+ * returned with *status == CHANGED. Removing the only member yields an empty set of
+ * the same descriptor. base's exact descriptor is preserved and base is never
+ * mutated. The primitive behind set::without. */
+ZEND_API zend_vec *zend_set_without(
+	const zend_vec *base, zval *value, zend_set_with_status *status);
+
 /* Construct a value of any packed collection kind (vec, tuple) from a list of
  * already-evaluated elements, dispatching on the resolved node's kind. This is
  * the entry point the construction opcode uses; direct per-kind creators stay
