@@ -429,6 +429,97 @@ static zend_vec *zend_set_create(
 	return set;
 }
 
+/* Build the set that is `base` with `value` added. Nothing is allocated until the
+ * operation is known to change the set: the value is type-checked, then tested for
+ * membership with the same strict-identity predicate construction uses, and only an
+ * absent value allocates. A present value is a no-op that returns `base` itself as
+ * an owned reference (its refcount is raised so the caller's returned value keeps
+ * the receiver alive independently of the frame). base's descriptor is preserved
+ * and base is never mutated. */
+ZEND_API zend_vec *zend_set_with(
+		const zend_vec *base, zval *value, zend_set_with_status *status)
+{
+	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_SET);
+
+	ZVAL_DEREF(value);
+	/* Validate before any membership work: a wrong-typed value can never be a
+	 * member, but it is still a TypeError, not a silent no-op. */
+	if (!collection_member_matches(base->type, 0, value)) {
+		*status = ZEND_SET_WITH_BAD_VALUE;
+		return NULL;
+	}
+
+	/* Already a member: no-op. Return the receiver as an owned reference and
+	 * allocate nothing. */
+	if (zend_set_contains(base, value)) {
+		GC_ADDREF((zend_vec *) base);
+		*status = ZEND_SET_WITH_UNCHANGED;
+		return (zend_vec *) base;
+	}
+
+	/* Absent: the new set is the existing members in order plus `value` at the end. */
+	zend_vec *out = zend_vec_alloc(base->count + 1, base->type);
+	for (uint32_t i = 0; i < base->count; i++) {
+		ZVAL_COPY(&out->elements[i], &base->elements[i]);
+	}
+	ZVAL_COPY(&out->elements[base->count], value);
+	out->count = base->count + 1;
+	*status = ZEND_SET_WITH_CHANGED;
+	return out;
+}
+
+/* Build the set that is `base` with `value` removed. Like with(), nothing is
+ * allocated until a change is known: the value is type-checked, then a single scan
+ * with the same strict-identity predicate locates the first (and, since sets are
+ * unique, only) matching member. An absent value is a no-op that returns `base` as
+ * an owned reference; a present value allocates one compacted set with that member
+ * dropped and the order of the rest preserved. Removing the only member yields an
+ * empty set (zend_vec_alloc(0, ...) is header-only) carrying the same descriptor.
+ * base's descriptor is preserved and base is never mutated. */
+ZEND_API zend_vec *zend_set_without(
+		const zend_vec *base, zval *value, zend_set_with_status *status)
+{
+	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_SET);
+
+	ZVAL_DEREF(value);
+	/* Validate first: a wrong-typed value cannot be present, but it is still a
+	 * TypeError rather than a silent "absent -> no-op". */
+	if (!collection_member_matches(base->type, 0, value)) {
+		*status = ZEND_SET_WITH_BAD_VALUE;
+		return NULL;
+	}
+
+	/* Locate the member to drop with the same predicate as zend_set_contains; a
+	 * set holds at most one identical value, so the first match is the only one. */
+	uint32_t at = base->count;
+	for (uint32_t i = 0; i < base->count; i++) {
+		if (zend_is_identical(&base->elements[i], value)) {
+			at = i;
+			break;
+		}
+	}
+	if (at == base->count) {
+		/* Absent: no-op. Return the receiver as an owned reference. */
+		GC_ADDREF((zend_vec *) base);
+		*status = ZEND_SET_WITH_UNCHANGED;
+		return (zend_vec *) base;
+	}
+
+	/* Present: a new set with member `at` removed and the rest compacted in order.
+	 * count - 1 may be 0 when the only member is removed. */
+	zend_vec *out = zend_vec_alloc(base->count - 1, base->type);
+	uint32_t w = 0;
+	for (uint32_t i = 0; i < base->count; i++) {
+		if (i == at) {
+			continue;
+		}
+		ZVAL_COPY(&out->elements[w++], &base->elements[i]);
+	}
+	out->count = w;   /* == base->count - 1 */
+	*status = ZEND_SET_WITH_CHANGED;
+	return out;
+}
+
 /* The single construction entry point for the VM: dispatch on the resolved
  * node's kind. Every kind that reaches here is value-constructible -- the
  * handler checks that first -- so a kind with no case is a contradiction, not a
