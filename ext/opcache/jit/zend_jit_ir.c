@@ -12575,6 +12575,16 @@ static int zend_jit_fetch_dim_read(zend_jit_ctx       *jit,
 	ir_ref end_inputs = IR_UNUSED;
 	ir_ref not_found_inputs = IR_UNUSED;
 
+	/* Native immutable collections have no JIT DIM path: the array-only IR
+	 * helpers would misread the packed zend_vec. When the container may be a
+	 * collection, decline to compile this opcode so it runs the VM DIM handler
+	 * (strict-int reads for vec/tuple; a hard error for every write form).
+	 * Ordinary array/string/object access carries no MAY_BE_COLLECTION bit and
+	 * is unaffected. */
+	if (op1_info & MAY_BE_COLLECTION) {
+		return 0;
+	}
+
 	orig_op1_addr = OP1_ADDR();
 
 	if (opline->opcode != ZEND_FETCH_DIM_IS
@@ -13035,6 +13045,16 @@ static int zend_jit_fetch_dim(zend_jit_ctx   *jit,
 	ir_ref end_inputs = IR_UNUSED;
 	ir_ref ref, if_type = IR_UNUSED, ht_ref;
 
+	/* Native immutable collections have no JIT DIM path: the array-only IR
+	 * helpers would misread the packed zend_vec. When the container may be a
+	 * collection, decline to compile this opcode so it runs the VM DIM handler
+	 * (strict-int reads for vec/tuple; a hard error for every write form).
+	 * Ordinary array/string/object access carries no MAY_BE_COLLECTION bit and
+	 * is unaffected. */
+	if (op1_info & MAY_BE_COLLECTION) {
+		return 0;
+	}
+
 	if (opline->opcode == ZEND_FETCH_DIM_RW) {
 		jit_SET_EX_OPLINE(jit, opline);
 	}
@@ -13215,6 +13235,15 @@ static int zend_jit_isset_isempty_dim(zend_jit_ctx   *jit,
 	ir_ref if_type = IR_UNUSED;
 	ir_ref false_inputs = IR_UNUSED, end_inputs = IR_UNUSED;
 	ir_refs *true_inputs;
+
+	/* Native immutable collections have no JIT DIM path: the array-only IR
+	 * helpers would misread the packed zend_vec. When the container may be a
+	 * collection, decline to compile this opcode so it runs the VM DIM handler
+	 * (strict-int isset/empty for vec/tuple). Ordinary array/string/object
+	 * access carries no MAY_BE_COLLECTION bit and is unaffected. */
+	if (op1_info & MAY_BE_COLLECTION) {
+		return 0;
+	}
 
 	ir_refs_init(true_inputs, 8);
 
@@ -13409,6 +13438,15 @@ static int zend_jit_assign_dim(zend_jit_ctx  *jit,
 	ir_ref if_type = IR_UNUSED;
 	ir_ref end_inputs = IR_UNUSED, ht_ref;
 
+	/* Native immutable collections have no JIT DIM path: the array-only IR
+	 * helpers would misread the packed zend_vec. When the container may be a
+	 * collection, decline to compile this opcode so it runs the VM DIM handler,
+	 * which rejects the write with a hard error. Ordinary array/string/object
+	 * access carries no MAY_BE_COLLECTION bit and is unaffected. */
+	if (op1_info & MAY_BE_COLLECTION) {
+		return 0;
+	}
+
 	if (op3_addr != op3_def_addr && op3_def_addr) {
 		if (!zend_jit_update_regs(jit, (opline+1)->op1.var, op3_addr, op3_def_addr, val_info)) {
 			return 0;
@@ -13588,6 +13626,16 @@ static int zend_jit_assign_dim_op(zend_jit_ctx   *jit,
 	ir_ref if_type = IS_UNUSED;
 	ir_ref end_inputs = IR_UNUSED, ht_ref;
 	bool emit_fast_path = true;
+
+	/* Native immutable collections have no JIT DIM path: the array-only IR
+	 * helpers would misread the packed zend_vec. When the container may be a
+	 * collection, decline to compile this opcode so it runs the VM DIM handler,
+	 * which rejects the compound write with a hard error. Ordinary
+	 * array/string/object access carries no MAY_BE_COLLECTION bit and is
+	 * unaffected. */
+	if (op1_info & MAY_BE_COLLECTION) {
+		return 0;
+	}
 
 	ZEND_ASSERT(opline->result_type == IS_UNUSED);
 

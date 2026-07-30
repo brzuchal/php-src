@@ -2389,9 +2389,13 @@ static uint32_t zend_convert_type(const zend_script *script, zend_type type, zen
 	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
 		/* Declared, but a collection value has no may-be bit, so this mask
 		 * cannot describe it. Stay unconstrained rather than claiming
-		 * MAY_BE_OBJECT, which would be false. No mask is widened and no type
-		 * bit is added. */
-		return unconstrained;
+		 * MAY_BE_OBJECT, which would be false. Additionally admit
+		 * MAY_BE_COLLECTION (the open-world escape flag, bit 26): it is neither
+		 * MAY_BE_ARRAY nor MAY_BE_OBJECT, so it widens no ordinary mask, but it
+		 * lets a consumer see the operand MAY be a native collection. The JIT
+		 * DIM codegen keys off it to fall back to the VM for $v[$i] instead of
+		 * emitting its array-only fast path. */
+		return unconstrained | MAY_BE_COLLECTION;
 	}
 
 	uint32_t tmp = zend_convert_type_declaration_mask(ZEND_TYPE_PURE_MASK(type));
@@ -3475,9 +3479,12 @@ static zend_always_inline zend_result _zend_update_type_info(
 			 * the mask -- so this type cannot be described. Stay unconstrained,
 			 * exactly as zend_fetch_arg_info_type() does for a declared
 			 * collection: claiming MAY_BE_OBJECT or MAY_BE_ARRAY would be false
-			 * and would let a later pass specialise on it. RC1 is still known:
-			 * the value is freshly constructed and unaliased. */
-			tmp = MAY_BE_RC1|MAY_BE_ANY|MAY_BE_ARRAY_KEY_ANY|MAY_BE_ARRAY_OF_ANY|MAY_BE_ARRAY_OF_REF;
+			 * and would let a later pass specialise on it. We do add
+			 * MAY_BE_COLLECTION (the open-world escape flag): the result of a
+			 * literal is known to be a collection, so a later $x[$i] read must
+			 * see it and let the JIT DIM codegen fall back to the VM. RC1 is
+			 * still known: the value is freshly constructed and unaliased. */
+			tmp = MAY_BE_RC1|MAY_BE_ANY|MAY_BE_COLLECTION|MAY_BE_ARRAY_KEY_ANY|MAY_BE_ARRAY_OF_ANY|MAY_BE_ARRAY_OF_REF;
 			UPDATE_SSA_TYPE(tmp, ssa_op->result_def);
 			break;
 		case ZEND_ADD_ARRAY_UNPACK:

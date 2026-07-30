@@ -3128,6 +3128,18 @@ fetch_from_array:
 		if (UNEXPECTED(GC_DELREF(obj) == 0)) {
 			zend_objects_store_del(obj);
 		}
+	} else if (UNEXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+		/* Writable dimension fetch over an immutable collection: this feeds W / RW /
+		 * UNSET, i.e. `&$v[i]`, `f(&$v[i])`, `$v[i]++`/`--`, and unset via this helper.
+		 * A collection has no writable element slot to alias, so reject with a hard Error
+		 * rather than compute an address. Read access ($v[i], $v[i] ?? d) uses the
+		 * separate read helper and is unaffected. */
+		if (type == BP_VAR_UNSET) {
+			zend_throw_error(NULL, "Cannot unset an offset of an immutable collection");
+		} else {
+			zend_throw_error(NULL, "Cannot modify an immutable collection");
+		}
+		ZVAL_UNDEF(result);
 	} else {
 		if (EXPECTED(Z_TYPE_P(container) <= IS_FALSE)) {
 			if (type != BP_VAR_W && UNEXPECTED(Z_TYPE_P(container) == IS_UNDEF)) {
@@ -3186,6 +3198,76 @@ static zend_never_inline void ZEND_FASTCALL zend_fetch_dimension_address_UNSET(z
 {
 	zval *result = EX_VAR(opline->result.var);
 	zend_fetch_dimension_address(result, container_ptr, dim, dim_type, BP_VAR_UNSET EXECUTE_DATA_CC);
+}
+
+/* Read-only indexed access for vec and tuple (never set). A collection offset is a
+ * strict int in 0..count-1: the index is an integer *type*, not a coercible value, so
+ * "0"/1.0/true/null are rejected rather than coerced the way an array key would be. This
+ * resolver classifies an offset without throwing, so the read path (which throws on a
+ * miss) and the total isset()/empty() paths share one policy. On OK it yields a *borrowed
+ * const* element pointer; the caller copies the value (with its own reference) and never
+ * exposes the internal slot. The collection and its descriptor are never touched. */
+typedef enum {
+	ZEND_COLLECTION_DIM_OK,            /* in-range int index: *element is set */
+	ZEND_COLLECTION_DIM_NOT_INDEXABLE, /* a set has no positional access */
+	ZEND_COLLECTION_DIM_BAD_KEY,       /* offset is not a strict int */
+	ZEND_COLLECTION_DIM_OUT_OF_RANGE,  /* int, but < 0 or >= count */
+} zend_collection_dim_result;
+
+static zend_always_inline zend_collection_dim_result zend_collection_dim_lookup(
+		const zend_vec *vec, zval *offset, zval **element)
+{
+	if (UNEXPECTED(vec->type->kind == ZEND_COLLECTION_TYPE_SET)) {
+		return ZEND_COLLECTION_DIM_NOT_INDEXABLE;
+	}
+	ZVAL_DEREF(offset);
+	if (UNEXPECTED(Z_TYPE_P(offset) != IS_LONG)) {
+		return ZEND_COLLECTION_DIM_BAD_KEY;
+	}
+	zend_long i = Z_LVAL_P(offset);
+	if (UNEXPECTED(i < 0 || i >= (zend_long) vec->count)) {
+		return ZEND_COLLECTION_DIM_OUT_OF_RANGE;
+	}
+	/* A borrowed, read-only pointer into the immutable payload: the caller copies from it
+	 * and never writes through it (no writable slot is exposed to userland). The const is
+	 * dropped only to satisfy the value-copy macros; the collection itself is never mutated
+	 * (its handle here is `const zend_vec *`). */
+	*element = (zval *) &vec->elements[i];
+	return ZEND_COLLECTION_DIM_OK;
+}
+
+/* $v[i] / $t[i] and the read behind $v[i] ?? d. BP_VAR_R throws on any miss; BP_VAR_IS
+ * (the ?? form) is silent, leaving NULL so the coalesce default applies. The element is
+ * copied into result with an owned reference; the collection is never mutated and no
+ * writable slot is exposed. */
+static zend_never_inline void ZEND_FASTCALL zend_collection_read_dimension(
+		zval *result, const zval *container, zval *dim, int type)
+{
+	zval *element;
+	zend_collection_dim_result r = zend_collection_dim_lookup(Z_VEC_P(container), dim, &element);
+
+	if (EXPECTED(r == ZEND_COLLECTION_DIM_OK)) {
+		ZVAL_COPY_DEREF(result, element);
+		return;
+	}
+	if (type != BP_VAR_IS) {
+		ZVAL_DEREF(dim);
+		switch (r) {
+			case ZEND_COLLECTION_DIM_NOT_INDEXABLE:
+				zend_throw_error(NULL, "Cannot index a set");
+				break;
+			case ZEND_COLLECTION_DIM_BAD_KEY:
+				zend_type_error("Collection index must be of type int, %s given",
+					zend_zval_value_name(dim));
+				break;
+			case ZEND_COLLECTION_DIM_OUT_OF_RANGE:
+				zend_value_error("Collection index " ZEND_LONG_FMT " is out of range",
+					Z_LVAL_P(dim));
+				break;
+			default: ZEND_UNREACHABLE();
+		}
+	}
+	ZVAL_NULL(result);
 }
 
 static zend_always_inline void zend_fetch_dimension_address_read(zval *result, const zval *container, zval *dim, int dim_type, int type, bool is_list, bool slow EXECUTE_DATA_DC)
@@ -3324,6 +3406,15 @@ try_string_offset:
 		if (UNEXPECTED(GC_DELREF(obj) == 0)) {
 			zend_objects_store_del(obj);
 		}
+	} else if (EXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+		/* $v[i] / $t[i] read (and the BP_VAR_IS read behind $v[i] ?? d). A constant
+		 * numeric-string key like $v["0"] is compile-time folded to a long, with the
+		 * original string kept as the next literal (ZEND_EXTRA_VALUE); mirror the object
+		 * branch's bump so the strict-int check sees the string and rejects it. */
+		if (dim_type == IS_CONST && Z_EXTRA_P(dim) == ZEND_EXTRA_VALUE) {
+			dim++;
+		}
+		zend_collection_read_dimension(result, container, dim, type);
 	} else {
 		if (type != BP_VAR_IS && UNEXPECTED(Z_TYPE_P(container) == IS_UNDEF)) {
 			container = ZVAL_UNDEFINED_OP1();
@@ -3460,6 +3551,16 @@ str_offset:
 			}
 			return 0;
 		}
+	} else if (EXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+		/* isset($v[i]) / $v[i] ?? — total, never throws. A strict in-range int index
+		 * whose element is non-null is "set"; a set, a non-int key, or an out-of-range
+		 * index is not. */
+		zval *element;
+		if (zend_collection_dim_lookup(Z_VEC_P(container), offset, &element) != ZEND_COLLECTION_DIM_OK) {
+			return 0;
+		}
+		ZVAL_DEREF(element);
+		return Z_TYPE_P(element) != IS_NULL;
 	} else {
 		return 0;
 	}
@@ -3499,6 +3600,16 @@ str_offset:
 			}
 			return 1;
 		}
+	} else if (EXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+		/* empty($v[i]) — total, never throws. Absent (set / non-int / out-of-range) is
+		 * empty; otherwise empty iff the element is falsy (a nested collection is always
+		 * truthy, matching i_zend_is_true). */
+		zval *element;
+		if (zend_collection_dim_lookup(Z_VEC_P(container), offset, &element) != ZEND_COLLECTION_DIM_OK) {
+			return 1;
+		}
+		ZVAL_DEREF(element);
+		return !i_zend_is_true(element);
 	} else {
 		return 1;
 	}
