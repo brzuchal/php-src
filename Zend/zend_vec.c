@@ -192,6 +192,7 @@ ZEND_API zend_vec *zend_vec_create(
  * raises a TypeError. */
 ZEND_API zend_vec *zend_vec_create_with(const zend_vec *base, zval *value, bool prepend)
 {
+	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_VEC);
 	ZVAL_DEREF(value);
 	if (!collection_member_matches(base->type, 0, value)) {
 		return NULL;
@@ -224,6 +225,7 @@ ZEND_API zend_vec *zend_vec_create_with(const zend_vec *base, zval *value, bool 
 ZEND_API zend_vec *zend_vec_with_at(
 		const zend_vec *base, zend_long index, zval *value, zend_vec_with_status *status)
 {
+	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_VEC);
 	/* Wide compare: index is 64-bit and count is 32-bit, so an index at or above
 	 * count -- including one beyond UINT32_MAX -- is rejected here rather than
 	 * being truncated into range by the later cast. */
@@ -262,6 +264,7 @@ ZEND_API zend_vec *zend_vec_with_at(
 ZEND_API zend_vec *zend_vec_without_at(
 		const zend_vec *base, zend_long index, zend_vec_with_status *status)
 {
+	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_VEC);
 	if (index < 0 || index >= (zend_long) base->count) {
 		*status = ZEND_VEC_WITH_BAD_INDEX;
 		return NULL;
@@ -520,13 +523,22 @@ ZEND_API zend_vec *zend_set_without(
 	return out;
 }
 
+/* The three binary set operations share a deliberate two-pass shape:
+ *   pass 1 walks the operands with the strict-identity membership test to determine the
+ *          result size AND whether the operation changes anything (no-op detection);
+ *   pass 2 writes the result.
+ * This repeats the O(count(base)*count(other)) membership work rather than recording
+ * pass 1's per-element decisions in a scratch buffer. The trade is intentional: it buys
+ * exactly ONE result allocation on a change and ZERO allocation on a no-op (INV-34
+ * reuse), which matters more than avoiding a second linear scan for the small, immutable
+ * sets these operate on. This is not a hash set and no hash-set complexity is claimed;
+ * do not introduce scratch storage or redesign the representation here. */
+
 /* The receiver returned unchanged as an owned reference: the empty-effect no-op path
- * shared by union/intersect/diff (INV-34). Raises the refcount and reports "not
- * changed"; allocates nothing. */
-static zend_vec *zend_set_binary_noop(const zend_vec *base, bool *changed)
+ * shared by union/intersect/diff (INV-34). Raises the refcount and allocates nothing. */
+static zend_vec *zend_set_binary_noop(const zend_vec *base)
 {
 	GC_ADDREF((zend_vec *) base);
-	*changed = false;
 	return (zend_vec *) base;
 }
 
@@ -535,7 +547,7 @@ static zend_vec *zend_set_binary_noop(const zend_vec *base, bool *changed)
  * distinct and distinct from base -- no dedup pass is needed beyond the membership test.
  * No-op (reuse) when every member of other is already in base. */
 ZEND_API zend_vec *zend_set_union(
-		const zend_vec *base, const zend_vec *other, bool *changed)
+		const zend_vec *base, const zend_vec *other)
 {
 	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_SET);
 	ZEND_ASSERT(base->type == other->type);
@@ -547,7 +559,7 @@ ZEND_API zend_vec *zend_set_union(
 		}
 	}
 	if (added == 0) {
-		return zend_set_binary_noop(base, changed);
+		return zend_set_binary_noop(base);
 	}
 
 	zend_vec *out = zend_vec_alloc(base->count + added, base->type);
@@ -561,7 +573,6 @@ ZEND_API zend_vec *zend_set_union(
 		}
 	}
 	out->count = w;   /* == base->count + added */
-	*changed = true;
 	return out;
 }
 
@@ -569,7 +580,7 @@ ZEND_API zend_vec *zend_set_union(
  * (reuse) when every base member is in other. An empty intersection is a fresh empty
  * set of the same descriptor. */
 ZEND_API zend_vec *zend_set_intersect(
-		const zend_vec *base, const zend_vec *other, bool *changed)
+		const zend_vec *base, const zend_vec *other)
 {
 	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_SET);
 	ZEND_ASSERT(base->type == other->type);
@@ -581,7 +592,7 @@ ZEND_API zend_vec *zend_set_intersect(
 		}
 	}
 	if (kept == base->count) {
-		return zend_set_binary_noop(base, changed);
+		return zend_set_binary_noop(base);
 	}
 
 	zend_vec *out = zend_vec_alloc(kept, base->type);   /* kept may be 0 */
@@ -592,7 +603,6 @@ ZEND_API zend_vec *zend_set_intersect(
 		}
 	}
 	out->count = w;   /* == kept */
-	*changed = true;
 	return out;
 }
 
@@ -600,7 +610,7 @@ ZEND_API zend_vec *zend_set_intersect(
  * when base and other are disjoint. Removing everything yields a fresh empty set of the
  * same descriptor. */
 ZEND_API zend_vec *zend_set_diff(
-		const zend_vec *base, const zend_vec *other, bool *changed)
+		const zend_vec *base, const zend_vec *other)
 {
 	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_SET);
 	ZEND_ASSERT(base->type == other->type);
@@ -612,7 +622,7 @@ ZEND_API zend_vec *zend_set_diff(
 		}
 	}
 	if (kept == base->count) {
-		return zend_set_binary_noop(base, changed);
+		return zend_set_binary_noop(base);
 	}
 
 	zend_vec *out = zend_vec_alloc(kept, base->type);   /* kept may be 0 */
@@ -623,7 +633,6 @@ ZEND_API zend_vec *zend_set_diff(
 		}
 	}
 	out->count = w;   /* == kept */
-	*changed = true;
 	return out;
 }
 
