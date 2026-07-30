@@ -3687,9 +3687,9 @@ ZEND_API zend_result ZEND_FASTCALL zend_collection_read_intrinsic_property(
  * reallocation, unlike any argument/temp slot. Raw payload access is confined to
  * the ownership helpers below; method handlers never touch Z_PTR(call->This).
  *
- * The vec table currently holds append/prepend/withAt/withoutAt; set and tuple
- * have no intrinsic methods yet. Every method returns a new value and never
- * mutates the receiver.
+ * The vec table currently holds append/prepend/withAt/withoutAt and the tuple
+ * table holds withAt; set has no intrinsic methods yet. Every method returns a
+ * new value and never mutates the receiver.
  * ========================================================================== */
 
 /* Set the owned receiver on a freshly pushed direct-call frame. The frame owns
@@ -3863,6 +3863,54 @@ static ZEND_NAMED_FUNCTION(zend_collection_vec_without_at)
 	ZVAL_VEC(return_value, out); /* out has refcount 1; ownership transfers */
 }
 
+/* $value does not satisfy the type declared for tuple position `index`. Unlike
+ * the vec helper, the expected type is the descriptor member for that specific
+ * position (types[index]), not a single element type; the receiver's index has
+ * already been range-checked, so types[index] is in bounds. */
+static ZEND_COLD void zend_collection_tuple_value_type_error(
+		const zend_vec *receiver, zend_long index, const zval *value)
+{
+	zend_string *coll = zend_collection_info_to_string(receiver->type);
+	zend_string *elem = zend_type_to_string(receiver->type->types[index]);
+	zend_type_error("%s::withAt(): Argument #2 ($value) must be of type %s, %s given",
+		ZSTR_VAL(coll), ZSTR_VAL(elem), zend_zval_value_name(value));
+	zend_string_release(elem);
+	zend_string_release(coll);
+}
+
+/* tuple::withAt(int $index, mixed $value): tuple[]. Build a NEW tuple equal to
+ * the receiver with position $index replaced by $value; the receiver is immutable
+ * and never changes, the arity is invariant, and the result carries the exact
+ * concrete tuple descriptor. $value is validated against the type declared for
+ * that position (see zend_tuple_with_at), so a wrong type is a TypeError naming
+ * the position's type; an out-of-range index is a ValueError. Index is validated
+ * before the value, matching left-to-right argument order ($index is #1). */
+static ZEND_NAMED_FUNCTION(zend_collection_tuple_with_at)
+{
+	zend_vec *receiver = zend_collection_call_get_receiver(execute_data);
+	zend_long index;
+	zval *value;
+
+	ZEND_ASSERT(receiver != NULL);
+
+	ZEND_PARSE_PARAMETERS_START(2, 2)
+		Z_PARAM_LONG(index)
+		Z_PARAM_ZVAL(value)
+	ZEND_PARSE_PARAMETERS_END();
+
+	zend_tuple_with_status status;
+	zend_vec *out = zend_tuple_with_at(receiver, index, value, &status);
+	if (UNEXPECTED(out == NULL)) {
+		if (status == ZEND_TUPLE_WITH_BAD_INDEX) {
+			zend_collection_index_range_error(receiver, "withAt", index);
+		} else {
+			zend_collection_tuple_value_type_error(receiver, index, value);
+		}
+		RETURN_THROWS();
+	}
+	ZVAL_VEC(return_value, out); /* out has refcount 1; ownership transfers */
+}
+
 /* Public signature: append(mixed $value): vec[] / prepend(mixed $value): vec[].
  * $value is a required, mixed public parameter; the return type IS_MIXED here is
  * a placeholder that startup overwrites with the erased vec[] descriptor below
@@ -3888,12 +3936,23 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(zend_collection_vec_without_at_arginfo, 
 	ZEND_ARG_TYPE_INFO(0, index, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
-/* The erased return type `vec[]`: a bare-kind collection descriptor (num_types
- * == 0) that the type checker treats as existential -- satisfied by any concrete
- * vec[T] -- and that Reflection renders as "vec[]". Filled once at startup and
- * read-only thereafter; a static lives for the process, matching the synthetic
- * functions that borrow it. */
+/* Public signature: withAt(int $index, mixed $value): tuple[]. Same shape as
+ * vec::withAt -- strict int $index, mixed $value checked at runtime against the
+ * selected position's type -- but the return placeholder is overwritten with the
+ * erased tuple[] descriptor at startup. Kept separate from the vec arginfo so the
+ * two kinds do not share a symbol. */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(zend_collection_tuple_with_at_arginfo, 0, 2, IS_MIXED, 0)
+	ZEND_ARG_TYPE_INFO(0, index, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, value, IS_MIXED, 0)
+ZEND_END_ARG_INFO()
+
+/* The erased return types `vec[]` and `tuple[]`: bare-kind collection descriptors
+ * (num_types == 0) that the type checker treats as existential -- satisfied by any
+ * concrete value of the same kind -- and that Reflection renders as "vec[]" /
+ * "tuple[]". Filled once at startup and read-only thereafter; statics live for the
+ * process, matching the synthetic functions that borrow them. */
 static zend_collection_type zend_collection_vec_erased_desc;
+static zend_collection_type zend_collection_tuple_erased_desc;
 
 /* One synthetic function per intrinsic. Scope-less (no class), marked with
  * ZEND_ACC2_COLLECTION_RECEIVER so teardown and FCC capture recognise the header
@@ -3904,15 +3963,18 @@ static zend_internal_function zend_collection_vec_append_fn;
 static zend_internal_function zend_collection_vec_prepend_fn;
 static zend_internal_function zend_collection_vec_with_at_fn;
 static zend_internal_function zend_collection_vec_without_at_fn;
+static zend_internal_function zend_collection_tuple_with_at_fn;
 
 /* Runtime (converted, interned) arg_info per function: [0] is the return slot
- * (the erased vec[]), [1..] the parameters. append, prepend and withoutAt take
- * one parameter, withAt two. Each function owns its array -- they are tiny and
- * read-only after startup, so there is no reason to alias them. */
+ * (the erased vec[] / tuple[]), [1..] the parameters. append, prepend and
+ * withoutAt take one parameter; vec::withAt and tuple::withAt take two. Each
+ * function owns its array -- they are tiny and read-only after startup, so there
+ * is no reason to alias them. */
 static zend_arg_info zend_collection_vec_append_rt_arg_info[2];
 static zend_arg_info zend_collection_vec_prepend_rt_arg_info[2];
 static zend_arg_info zend_collection_vec_with_at_rt_arg_info[3];
 static zend_arg_info zend_collection_vec_without_at_rt_arg_info[2];
+static zend_arg_info zend_collection_tuple_with_at_rt_arg_info[3];
 
 /* Closed per-kind method tables (name -> synthetic function). No method-name
  * switches live in the generated VM handlers; the resolver walks these tables.
@@ -3926,19 +3988,21 @@ typedef struct {
 /* append, prepend, withAt, withoutAt, NULL sentinel. */
 static zend_collection_intrinsic_entry zend_collection_vec_methods[5];
 static zend_collection_intrinsic_entry zend_collection_set_methods[1];  /* none yet: NULL sentinel */
-static zend_collection_intrinsic_entry zend_collection_tuple_methods[1];
+static zend_collection_intrinsic_entry zend_collection_tuple_methods[2]; /* withAt, NULL sentinel */
 
-/* Install one synthetic scope-less vec method into `slot`: convert its arg_info
- * through the standard pipeline, overwrite the return slot's IS_MIXED placeholder
- * with the erased vec[] descriptor (the pipeline has no literal spelling for a
- * collection type), and point the function at the runtime arg_info. All num_args
- * parameters are required in v1. ZEND_ACC2_COLLECTION_RECEIVER routes the
- * receiver through the frame header; ZEND_ACC_HAS_RETURN_TYPE exposes vec[] to
- * Reflection and the debug return-type verifier. */
-static void zend_collection_register_vec_method(
+/* Install one synthetic scope-less collection method into `slot`: convert its
+ * arg_info through the standard pipeline, overwrite the return slot's IS_MIXED
+ * placeholder with `erased_return` -- the bare-kind vec[] or tuple[] descriptor
+ * (the pipeline has no literal spelling for a collection type) -- and point the
+ * function at the runtime arg_info. All num_args parameters are required in v1.
+ * ZEND_ACC2_COLLECTION_RECEIVER routes the receiver through the frame header;
+ * ZEND_ACC_HAS_RETURN_TYPE exposes the erased return to Reflection and the debug
+ * return-type verifier. The erased descriptor is the only per-kind input, so vec
+ * and tuple share this one registrar rather than a public method registry. */
+static void zend_collection_register_method(
 		zend_internal_function *fn, const char *name, size_t name_len, zif_handler handler,
 		uint32_t num_args, const zend_internal_arg_info *src, zend_arg_info *rt,
-		zend_collection_intrinsic_entry *slot)
+		const zend_collection_type *erased_return, zend_collection_intrinsic_entry *slot)
 {
 	memset(fn, 0, sizeof(*fn));
 	fn->type = ZEND_INTERNAL_FUNCTION;
@@ -3955,7 +4019,7 @@ static void zend_collection_register_vec_method(
 		zend_convert_internal_arg_info(&rt[i], &src[i], false, true);
 	}
 	memset(&rt[0].type, 0, sizeof(zend_type));
-	ZEND_TYPE_SET_COLLECTION(rt[0].type, &zend_collection_vec_erased_desc);
+	ZEND_TYPE_SET_COLLECTION(rt[0].type, (zend_collection_type *) erased_return);
 
 	fn->arg_info = rt + 1;
 	fn->handler = handler;
@@ -3968,35 +4032,44 @@ static void zend_collection_register_vec_method(
  * internal only: there is deliberately no public API to add entries. */
 ZEND_API void zend_collection_intrinsics_startup(void)
 {
-	/* Erased vec[] return descriptor: bare kind, no members. Shared by every vec
-	 * method's return slot. */
+	/* Erased vec[] / tuple[] return descriptors: bare kind, no members. Each is
+	 * shared by its kind's method return slots. */
 	zend_collection_vec_erased_desc.kind = ZEND_COLLECTION_TYPE_VEC;
 	zend_collection_vec_erased_desc.num_types = 0;
+	zend_collection_tuple_erased_desc.kind = ZEND_COLLECTION_TYPE_TUPLE;
+	zend_collection_tuple_erased_desc.num_types = 0;
 
-	/* append and prepend share the one-parameter insert arginfo (identical
-	 * signatures); withAt and withoutAt have their own. */
-	zend_collection_register_vec_method(
+	/* vec: append and prepend share the one-parameter insert arginfo (identical
+	 * signatures); withAt and withoutAt have their own. All return vec[]. */
+	zend_collection_register_method(
 		&zend_collection_vec_append_fn, "append", sizeof("append") - 1,
 		zend_collection_vec_append, 1,
 		zend_collection_vec_insert_arginfo, zend_collection_vec_append_rt_arg_info,
-		&zend_collection_vec_methods[0]);
-	zend_collection_register_vec_method(
+		&zend_collection_vec_erased_desc, &zend_collection_vec_methods[0]);
+	zend_collection_register_method(
 		&zend_collection_vec_prepend_fn, "prepend", sizeof("prepend") - 1,
 		zend_collection_vec_prepend, 1,
 		zend_collection_vec_insert_arginfo, zend_collection_vec_prepend_rt_arg_info,
-		&zend_collection_vec_methods[1]);
-	zend_collection_register_vec_method(
+		&zend_collection_vec_erased_desc, &zend_collection_vec_methods[1]);
+	zend_collection_register_method(
 		&zend_collection_vec_with_at_fn, "withAt", sizeof("withAt") - 1,
 		zend_collection_vec_with_at, 2,
 		zend_collection_vec_with_at_arginfo, zend_collection_vec_with_at_rt_arg_info,
-		&zend_collection_vec_methods[2]);
-	zend_collection_register_vec_method(
+		&zend_collection_vec_erased_desc, &zend_collection_vec_methods[2]);
+	zend_collection_register_method(
 		&zend_collection_vec_without_at_fn, "withoutAt", sizeof("withoutAt") - 1,
 		zend_collection_vec_without_at, 1,
 		zend_collection_vec_without_at_arginfo, zend_collection_vec_without_at_rt_arg_info,
-		&zend_collection_vec_methods[3]);
-	/* vec_methods[4] and the (empty) set/tuple tables stay zero-initialised: the
-	 * NULL name terminates each table. set and tuple have no methods yet. */
+		&zend_collection_vec_erased_desc, &zend_collection_vec_methods[3]);
+
+	/* tuple: withAt only. Returns tuple[]. */
+	zend_collection_register_method(
+		&zend_collection_tuple_with_at_fn, "withAt", sizeof("withAt") - 1,
+		zend_collection_tuple_with_at, 2,
+		zend_collection_tuple_with_at_arginfo, zend_collection_tuple_with_at_rt_arg_info,
+		&zend_collection_tuple_erased_desc, &zend_collection_tuple_methods[0]);
+	/* vec_methods[4], tuple_methods[1] and the (empty) set table stay
+	 * zero-initialised: the NULL name terminates each table. set has no methods. */
 }
 
 /* Centralised intrinsic-method resolver invoked from the IS_COLLECTION branch of
