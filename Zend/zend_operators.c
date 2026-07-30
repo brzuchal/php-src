@@ -28,6 +28,7 @@
 #include "zend_strtod.h"
 #include "zend_exceptions.h"
 #include "zend_closures.h"
+#include "zend_vec.h"
 
 #include <locale.h>
 #ifdef HAVE_LANGINFO_H
@@ -2551,13 +2552,12 @@ ZEND_API bool ZEND_FASTCALL zend_is_identical(const zval *op1, const zval *op2) 
 		case IS_OBJECT:
 			return (Z_OBJ_P(op1) == Z_OBJ_P(op2));
 		case IS_COLLECTION:
-			/* Interim identity: two collection values are identical iff they
-			 * are the same value, by pointer. This is reflexive ($a === $a is
-			 * true) and distinguishes separately constructed but structurally
-			 * equal values, which stay non-identical until structural equality
-			 * is designed. Z_COUNTED is the collection's refcounted header, the
-			 * same object-like identity IS_OBJECT uses above. */
-			return (Z_COUNTED_P(op1) == Z_COUNTED_P(op2));
+			/* Immutable collections are value types under strict identity:
+			 * recursively equal by descriptor and elements (order-insensitive for
+			 * set), not by pointer. Reflexive ($a === $a) via a same-pointer fast
+			 * path inside. This is the one definition of collection equality; set
+			 * membership and every set operation share it through the same call. */
+			return zend_collection_is_identical(op1, op2);
 		default:
 			return 0;
 	}

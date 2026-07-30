@@ -392,6 +392,67 @@ static bool zend_set_contains(const zend_vec *set, const zval *value)
 	return false;
 }
 
+/* Recursive strict value identity for two collection values, behind the IS_COLLECTION
+ * arm of zend_is_identical() (===/!==). Immutable collections are value types: two are
+ * strictly identical iff they share the exact canonical descriptor and their elements
+ * are strictly identical.
+ *
+ *   descriptor  a->type == b->type -- the request-local intern tier gives one node per
+ *               (kind, element types), so pointer equality *is* semantic descriptor
+ *               equality and already subsumes "same kind". A different descriptor
+ *               (vec[int] vs vec[float], vec vs tuple, vec vs set) is never identical,
+ *               and equality can therefore never bypass a set's declared element type.
+ *   vec / tuple positional, order significant, short-circuit on the first mismatch.
+ *   set         order-insensitive. Both operands are unique by invariant with equal
+ *               counts, so "every element of `a` has an identical element in `b`" is a
+ *               bijection (two `a` elements matching one `b` element would be identical
+ *               to each other, impossible in a set) -- i.e. exactly set equality. It
+ *               reuses zend_set_contains(), the single membership predicate every set
+ *               operation shares, so === and set dedup can never diverge.
+ *
+ * Elements are compared with zend_is_identical(): scalars/objects/arrays by the existing
+ * strict rules, nested collections recurse back here. Collection elements are stored
+ * dereferenced at construction, so an element is never IS_REFERENCE (no writable alias is
+ * possible and no deref is required, exactly as zend_set_contains() already assumes).
+ *
+ * The comparator borrows element pointers only: it allocates nothing, mutates neither
+ * operand nor any descriptor, exposes no internal pointer to userland, holds no reference
+ * to balance on any path, and invokes no userland (strict identity never calls magic), so
+ * it is fiber-safe. Recursion is bounded: a collection cannot acquire a self-reference
+ * (immutable, built bottom-up from snapshots), and any cycle must pass through a mutable
+ * array -- guarded by zend_hash_compare(), which throws "Nesting level too deep" on
+ * re-entry -- or an object, which is compared by handle with no descent. */
+ZEND_API bool zend_collection_is_identical(const zval *op1, const zval *op2)
+{
+	const zend_vec *a = Z_VEC_P(op1);
+	const zend_vec *b = Z_VEC_P(op2);
+
+	/* Reflexive fast path ($x === $x); mirrors IS_ARRAY's Z_ARRVAL == Z_ARRVAL. */
+	if (a == b) {
+		return true;
+	}
+	if (a->type != b->type || a->count != b->count) {
+		return false;
+	}
+
+	if (a->type->kind == ZEND_COLLECTION_TYPE_SET) {
+		for (uint32_t i = 0; i < a->count; i++) {
+			if (!zend_set_contains(b, &a->elements[i])) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/* vec and tuple: both are positional and share this loop. */
+	for (uint32_t i = 0; i < a->count; i++) {
+		if (!zend_is_identical(&a->elements[i], &b->elements[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
 /* Build a set: a single-member collection whose elements are unique. Storage is
  * the shared packed layout; duplicates are silently dropped, keeping the first
  * occurrence, so the value holds at most one of each element and preserves

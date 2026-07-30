@@ -18,7 +18,6 @@ $bad = [
     'unknown member tag'     => 'L:vec:1:{z;}:1:{i:1;}',
     'element type mismatch'  => 'L:vec:1:{i;}:1:{s:1:"x";}',
     'not-constructible kind' => 'L:map:2:{i;s;}:1:{i:1;}',
-    'set member nested'      => 'L:set:1:{l:vec:1:{i;};}:1:{L:vec:1:{i;}:1:{i:1;}}',
     'wrong element count'    => 'L:vec:1:{i;}:3:{i:1;i:2;}',
     'too many elements'      => 'L:tuple:2:{i;s;}:3:{i:1;s:1:"a";i:2;}',
     'arity zero'             => 'L:vec:0:{}:0:{}',
@@ -35,6 +34,9 @@ foreach ($bad as $label => $s) {
 
 echo "-- a valid string still works next to the bad ones --\n";
 var_dump(u('L:vec:1:{i;}:2:{i:1;i:2;}'));
+// set[vec[int]] is now value-constructible, so a well-formed nested-collection set
+// payload round-trips instead of being rejected (the wrong-kind case above still fails).
+var_dump(u('L:set:1:{l:vec:1:{i;};}:1:{L:vec:1:{i;}:1:{i:1;}}'));
 
 echo "-- deep descriptor nesting is bounded, not a stack smash --\n";
 $deep = str_repeat('L:vec:1:{', 200) . 'i;' . str_repeat('};', 200);
@@ -47,7 +49,6 @@ numeric kind (frozen?)   false
 unknown member tag       false
 element type mismatch    false
 not-constructible kind   false
-set member nested        false
 wrong element count      false
 too many elements        false
 arity zero               false
@@ -58,6 +59,7 @@ missing class            false
 class elem type wrong    false
 nested wrong kind        false
 -- a valid string still works next to the bad ones --
+string(10) "collection"
 string(10) "collection"
 -- deep descriptor nesting is bounded, not a stack smash --
 string(5) "false"

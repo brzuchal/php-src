@@ -6,10 +6,11 @@ zend_test
 <?php
 
 /* The value-surface fixes (design-audit A1/A2/A4): a collection value must be
- * safe and coherent under ordinary operations that do NOT require structural
- * comparison. */
+ * safe and coherent under ordinary operations. Strict identity (A1) is now by
+ * recursive value; the dedicated coverage is in collection_identity*.phpt. A2
+ * (truthiness) and A4 (introspection) do not depend on it. */
 
-echo "-- A1: strict identity is reflexive, by value --\n";
+echo "-- A1: strict identity is reflexive and by value --\n";
 foreach ([
     'vec'   => fn() => vec[int]{1, 2},
     'tuple' => fn() => tuple[int, string]{1, 'a'},
@@ -17,17 +18,17 @@ foreach ([
 ] as $kind => $make) {
     $a = $make();
     $b = $a;                 // same value
-    $c = $make();            // separately constructed, structurally equal
+    $c = $make();            // separately constructed, structurally equal -> now identical
     printf("%-5s  \$a===\$a:%d  \$a===\$b:%d  \$a!==\$a:%d  \$a===\$c:%d\n",
         $kind, $a === $a, $a === $b, $a !== $a, $a === $c);
 }
 
-echo "-- A1: strict in_array / array_search find the same instance --\n";
+echo "-- A1: strict in_array / array_search match by value --\n";
 $v = vec[int]{1, 2, 3};
-$other = vec[int]{1, 2, 3};
-var_dump(in_array($v, [$other, $v], true));       // found by identity at index 1
-var_dump(array_search($v, [7 => $other, 9 => $v], true));
-var_dump(in_array($v, [$other], true));           // not the same instance
+$other = vec[int]{1, 2, 3};                        // separate instance, equal value
+var_dump(in_array($v, [$other, $v], true));       // true: matches $other at index 0
+var_dump(array_search($v, [7 => $other, 9 => $v], true));  // 7: first value-equal match
+var_dump(in_array($v, [$other], true));           // true: value-equal, not necessarily same instance
 
 echo "-- A1: match on the same instance --\n";
 $t = tuple[int, int]{1, 2};
@@ -55,14 +56,14 @@ var_dump(set[string]{'x'});
 
 ?>
 --EXPECT--
--- A1: strict identity is reflexive, by value --
-vec    $a===$a:1  $a===$b:1  $a!==$a:0  $a===$c:0
-tuple  $a===$a:1  $a===$b:1  $a!==$a:0  $a===$c:0
-set    $a===$a:1  $a===$b:1  $a!==$a:0  $a===$c:0
--- A1: strict in_array / array_search find the same instance --
+-- A1: strict identity is reflexive and by value --
+vec    $a===$a:1  $a===$b:1  $a!==$a:0  $a===$c:1
+tuple  $a===$a:1  $a===$b:1  $a!==$a:0  $a===$c:1
+set    $a===$a:1  $a===$b:1  $a!==$a:0  $a===$c:1
+-- A1: strict in_array / array_search match by value --
 bool(true)
-int(9)
-bool(false)
+int(7)
+bool(true)
 -- A1: match on the same instance --
 matched
 -- A2: every collection value is truthy, empty or not --
