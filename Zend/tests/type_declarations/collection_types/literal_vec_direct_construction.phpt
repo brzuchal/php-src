@@ -51,7 +51,7 @@ echo "-- value identity still holds for directly-built vecs --\n";
 var_dump(vec[int]{1, 2, 3} === vec[int]{1, 2, 3});
 var_dump(vec[int]{1, 2, 3} === vec[int]{3, 2, 1});
 
-echo "-- tuple and set are unaffected (still array-backed) --\n";
+echo "-- tuple and set use the same builder; construction is still correct --\n";
 var_dump((tuple[int, string]{1, 'a'})->count);
 var_dump((set[int]{1, 1, 2})->count);
 ?>
@@ -94,6 +94,6 @@ Cannot create a value of type vec[?int]
 -- value identity still holds for directly-built vecs --
 bool(true)
 bool(false)
--- tuple and set are unaffected (still array-backed) --
+-- tuple and set use the same builder; construction is still correct --
 int(2)
 int(2)

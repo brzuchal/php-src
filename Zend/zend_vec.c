@@ -195,10 +195,15 @@ ZEND_API zend_vec *zend_vec_builder_alloc(uint32_t count, const zend_collection_
 	 * non-constructible type (e.g. vec[?int]) still evaluates its elements' side effects
 	 * before "Cannot create a value of type ..." is raised, exactly as the array path does.
 	 * Only the kind is asserted here; the payload holds valid zvals regardless, is never
-	 * published, and is destroyed on the FINISH error path. Shared by vec (single member)
-	 * and tuple (positional, exact arity); set keeps the array path (it dedups). */
+	 * published, and is destroyed on the FINISH error path. Shared by vec (single member),
+	 * tuple (positional, exact arity) and set. For set, `count` is the *evaluated-element*
+	 * count (the allocated capacity); FINISH validates, then deduplicates in place and lowers
+	 * `count` to the unique cardinality (see zend_set_builder_dedup) -- the unused tail is
+	 * allocated slack, never published or observed. */
 	ZEND_ASSERT(type != NULL
-		&& (type->kind == ZEND_COLLECTION_TYPE_VEC || type->kind == ZEND_COLLECTION_TYPE_TUPLE));
+		&& (type->kind == ZEND_COLLECTION_TYPE_VEC
+			|| type->kind == ZEND_COLLECTION_TYPE_TUPLE
+			|| type->kind == ZEND_COLLECTION_TYPE_SET));
 	return zend_vec_alloc(count, type);
 }
 
@@ -221,6 +226,71 @@ ZEND_API bool zend_vec_builder_validate(const zend_vec *vec, uint32_t *failed_in
 		}
 	}
 	return true;
+}
+
+/* Deduplicate a set builder payload in place, after every slot has been validated. On entry
+ * `count` is the evaluated-element count (all slots initialized, in source order); on return
+ * it is the unique cardinality and elements[0..count) hold the first occurrence of each
+ * distinct value in first-occurrence order -- the same result the array path produced via
+ * zend_set_create()/zend_set_contains(), using the same zend_is_identical() value identity
+ * (order-insensitive, recursive for collections; NAN never equals NAN; objects by handle;
+ * arrays by value). No hashing, no loose comparison.
+ *
+ * Two phases, and the split is the whole point of the design:
+ *
+ *   1. Partition (no user code, no allocation, no free). A stable read/write scan moves the
+ *      unique values to the front and the discarded duplicates to the tail using pure zval
+ *      *swaps*. A swap exchanges two owned slots, so every slot holds a distinct, valid,
+ *      singly-owned zval at every step -- the payload never contains a stale alias, unlike a
+ *      move-compaction. zend_is_identical() over the accepted prefix [0,write) allocates and
+ *      frees nothing, so this phase cannot trigger GC or re-enter userland. When it ends,
+ *      [0,write) are the uniques (source order) and [write,count) are the discards.
+ *
+ *   2. Release. `count` is lowered to `write` *before* any discard is destroyed, so the
+ *      payload is already the consistent final set when destructors run. Freeing a discarded
+ *      duplicate can decref/free arbitrary values and thereby trigger a GC scan of this
+ *      still-owned TMP -- which now sees only the valid unique prefix (GC scans [0,count)),
+ *      never the tail being torn down. Each of the original `count` refs is released exactly
+ *      once: uniques when the set is finally destroyed, discards here. (In practice a set
+ *      discard is value-equal to a kept element, so destructible content is shared and no
+ *      userland __destruct runs; the protocol is nonetheless correct if one ever did.) */
+ZEND_API void zend_set_builder_dedup(zend_vec *set)
+{
+	ZEND_ASSERT(set->type->kind == ZEND_COLLECTION_TYPE_SET);
+
+	uint32_t evaluated = set->count;
+	uint32_t write = 0;
+
+	for (uint32_t read = 0; read < evaluated; read++) {
+		bool duplicate = false;
+		for (uint32_t j = 0; j < write; j++) {
+			if (zend_is_identical(&set->elements[read], &set->elements[j])) {
+				duplicate = true;
+				break;
+			}
+		}
+		if (duplicate) {
+			/* Leave it where it is; the scan moves later uniques over it, so it ends up in
+			 * the [write,evaluated) discard region without a move of its own. */
+			continue;
+		}
+		if (write != read) {
+			zval tmp;
+			ZVAL_COPY_VALUE(&tmp, &set->elements[write]);
+			ZVAL_COPY_VALUE(&set->elements[write], &set->elements[read]);
+			ZVAL_COPY_VALUE(&set->elements[read], &tmp);
+		}
+		write++;
+	}
+
+	/* Publish the consistent final cardinality before releasing any discard. */
+	set->count = write;
+	for (uint32_t k = write; k < evaluated; k++) {
+		zval discard;
+		ZVAL_COPY_VALUE(&discard, &set->elements[k]);
+		ZVAL_UNDEF(&set->elements[k]);
+		zval_ptr_dtor(&discard);
+	}
 }
 
 /* Build a new vec that is `base` with `value` appended (prepend == false) or
