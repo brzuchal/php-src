@@ -1836,6 +1836,12 @@ static int zend_jit(const zend_op_array *op_array, zend_ssa *ssa, const zend_op 
 						if (PROFITABILITY_CHECKS && (!ssa->ops || !ssa->var_info)) {
 							break;
 						}
+						if (OP1_INFO() & MAY_BE_COLLECTION) {
+							/* Possible native collection: run this DIM op through the VM
+							 * handler (the DIM codegen declines MAY_BE_COLLECTION) instead
+							 * of failing the whole compilation. */
+							break;
+						}
 						if (!zend_jit_supported_binary_op(
 								opline->extended_value, MAY_BE_ANY, OP1_DATA_INFO())) {
 							break;
@@ -1854,6 +1860,11 @@ static int zend_jit(const zend_op_array *op_array, zend_ssa *ssa, const zend_op 
 							break;
 						}
 						if (PROFITABILITY_CHECKS && (!ssa->ops || !ssa->var_info)) {
+							break;
+						}
+						if (OP1_INFO() & MAY_BE_COLLECTION) {
+							/* Possible native collection: run this DIM op through the VM
+							 * handler instead of failing the whole compilation. */
 							break;
 						}
 						if (!zend_jit_assign_dim(&ctx, opline,
@@ -2388,6 +2399,11 @@ static int zend_jit(const zend_op_array *op_array, zend_ssa *ssa, const zend_op 
 						if (PROFITABILITY_CHECKS && (!ssa->ops || !ssa->var_info)) {
 							break;
 						}
+						if (OP1_INFO() & MAY_BE_COLLECTION) {
+							/* Possible native collection: run this DIM op through the VM
+							 * handler instead of failing the whole compilation. */
+							break;
+						}
 						if (!zend_jit_fetch_dim_read(&ctx, opline, ssa, ssa_op,
 								OP1_INFO(), OP1_REG_ADDR(), 0,
 								OP2_INFO(), OP2_REG_ADDR(), OP2_RANGE(),
@@ -2405,6 +2421,11 @@ static int zend_jit(const zend_op_array *op_array, zend_ssa *ssa, const zend_op 
 						if (opline->op1_type != IS_CV) {
 							break;
 						}
+						if (OP1_INFO() & MAY_BE_COLLECTION) {
+							/* Possible native collection: run this DIM op through the VM
+							 * handler instead of failing the whole compilation. */
+							break;
+						}
 						if (!zend_jit_fetch_dim(&ctx, opline,
 								OP1_INFO(), OP1_REG_ADDR(),
 								OP2_INFO(), (opline->op2_type != IS_UNUSED) ? OP2_REG_ADDR() : 0,
@@ -2419,6 +2440,11 @@ static int zend_jit(const zend_op_array *op_array, zend_ssa *ssa, const zend_op 
 							break;
 						}
 						if (PROFITABILITY_CHECKS && (!ssa->ops || !ssa->var_info)) {
+							break;
+						}
+						if (OP1_INFO() & MAY_BE_COLLECTION) {
+							/* Possible native collection: run this DIM op through the VM
+							 * handler instead of failing the whole compilation. */
 							break;
 						}
 						if ((opline->result_type & IS_TMP_VAR)

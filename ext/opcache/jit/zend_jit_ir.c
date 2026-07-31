@@ -12836,6 +12836,7 @@ static int zend_jit_fetch_dim_read(zend_jit_ctx       *jit,
 
 		if ((op1_info & ((MAY_BE_ANY|MAY_BE_UNDEF)-(MAY_BE_ARRAY|MAY_BE_OBJECT|may_be_string)))
 		 && (!exit_addr || !(op1_info & (MAY_BE_ARRAY|MAY_BE_OBJECT|may_be_string)))) {
+			ir_ref if_collection, arg2;
 
 			if (if_type) {
 				ir_IF_FALSE_cold(if_type);
@@ -12856,6 +12857,33 @@ static int zend_jit_fetch_dim_read(zend_jit_ctx       *jit,
 								  false, true, false);
 				}
 			}
+
+			/* A native collection reaches this generic branch only when the operand
+			 * carried no MAY_BE_COLLECTION (an open-world container such as an untyped
+			 * parameter -- with the bit set, compilation is declined above). Dispatch on
+			 * the runtime type so the read keeps VM semantics instead of falling through
+			 * to the invalid-access warning and yielding null. */
+			if_collection = jit_if_Z_TYPE(jit, op1_addr, IS_COLLECTION);
+			ir_IF_TRUE(if_collection);
+			jit_SET_EX_OPLINE(jit, opline);
+			if (opline->op2_type == IS_CONST && Z_EXTRA_P(RT_CONSTANT(opline, opline->op2)) == ZEND_EXTRA_VALUE) {
+				/* a folded numeric-string constant: pass the original string key, so the
+				 * strict-int check rejects it exactly like the VM does */
+				ZEND_ASSERT(Z_MODE(op2_addr) == IS_CONST_ZVAL);
+				arg2 = ir_CONST_ADDR(Z_ZV(op2_addr)+1);
+			} else {
+				arg2 = jit_ZVAL_ADDR(jit, op2_addr);
+			}
+			if (opline->opcode != ZEND_FETCH_DIM_IS) {
+				may_throw = 1;
+				ir_CALL_3(IR_VOID, ir_CONST_FC_FUNC(zend_jit_fetch_dim_collection_r_helper),
+					jit_ZVAL_ADDR(jit, op1_addr), arg2, jit_ZVAL_ADDR(jit, res_addr));
+			} else {
+				ir_CALL_3(IR_VOID, ir_CONST_FC_FUNC(zend_jit_fetch_dim_collection_is_helper),
+					jit_ZVAL_ADDR(jit, op1_addr), arg2, jit_ZVAL_ADDR(jit, res_addr));
+			}
+			ir_END_list(end_inputs);
+			ir_IF_FALSE(if_collection);
 
 			if (opline->opcode != ZEND_FETCH_DIM_IS) {
 				ir_ref ref;

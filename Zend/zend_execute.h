@@ -133,6 +133,13 @@ ZEND_API void ZEND_FASTCALL zend_ref_del_type_source(zend_property_info_source_l
 
 ZEND_API zend_result ZEND_FASTCALL zend_collection_read_intrinsic_property(const zval *collection, zend_string *name, zval *result);
 
+/* Native-collection dimension access, shared with the JIT's generic DIM paths: the
+ * strict-int read behind $v[i] (BP_VAR_R throws on a miss, BP_VAR_IS is silent) and the
+ * total isset()/?? existence check. Both take a container already known to be
+ * IS_COLLECTION; neither ever mutates it. */
+ZEND_API void ZEND_FASTCALL zend_collection_read_dimension(zval *result, const zval *container, zval *dim, int type);
+ZEND_API bool ZEND_FASTCALL zend_collection_isset_dimension(const zval *container, zval *offset);
+
 /* Native-collection intrinsic methods (infrastructure). The receiver travels in
  * the call frame header, Z_PTR(This), with clean no-This call_info; see
  * zend_execute.c. Raw payload access is confined to these helpers. */

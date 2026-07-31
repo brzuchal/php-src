@@ -1386,6 +1386,30 @@ static void ZEND_FASTCALL zend_jit_fetch_dim_obj_is_helper(zval *container, zval
 	}
 }
 
+/* Cold-path DIM read over a native collection that reached the JIT's generic
+ * "not array/string/object" branch: the operand carried no MAY_BE_COLLECTION (an
+ * open-world container such as an untyped parameter), so the opcode was compiled
+ * with the array fast path plus this runtime dispatch. Keeps VM semantics in
+ * lockstep with zend_collection_read_dimension(): strict-int offsets, and a
+ * TypeError/ValueError miss for $v[i] (the _r flavour) vs a silent null for
+ * $v[i] ?? d (the _is flavour). An undefined offset was already warned about by
+ * the emitted code; map it to null like the VM does, without a second warning. */
+static void ZEND_FASTCALL zend_jit_fetch_dim_collection_r_helper(zval *container, zval *dim, zval *result)
+{
+	if (UNEXPECTED(Z_TYPE_P(dim) == IS_UNDEF)) {
+		dim = &EG(uninitialized_zval);
+	}
+	zend_collection_read_dimension(result, container, dim, BP_VAR_R);
+}
+
+static void ZEND_FASTCALL zend_jit_fetch_dim_collection_is_helper(zval *container, zval *dim, zval *result)
+{
+	if (UNEXPECTED(Z_TYPE_P(dim) == IS_UNDEF)) {
+		dim = &EG(uninitialized_zval);
+	}
+	zend_collection_read_dimension(result, container, dim, BP_VAR_IS);
+}
+
 static zend_never_inline void zend_assign_to_string_offset(zval *str, zval *dim, zval *value, zval *result)
 {
 	uint8_t c;
@@ -1611,6 +1635,16 @@ static zend_always_inline void ZEND_FASTCALL zend_jit_fetch_dim_obj_helper(zval 
 		} else {
 			ZVAL_UNDEF(result);
 		}
+	} else if (UNEXPECTED(Z_TYPE_P(object_ptr) == IS_COLLECTION)) {
+		/* Writable dimension fetch (W / RW / UNSET) over an immutable collection: no
+		 * writable slot exists, so reject with the VM's zend_fetch_dimension_address()
+		 * wording instead of the scalar-container error below. */
+		if (type == BP_VAR_UNSET) {
+			zend_throw_error(NULL, "Cannot unset an offset of an immutable collection");
+		} else {
+			zend_throw_error(NULL, "Cannot modify an immutable collection");
+		}
+		ZVAL_UNDEF(result);
 	} else {
 		if (type == BP_VAR_UNSET) {
 			zend_throw_error(NULL, "Cannot unset offset in a non-array variable");
@@ -1919,6 +1953,10 @@ isset_str_offset:
 				goto isset_str_offset;
 			}
 		}
+	} else if (UNEXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+		/* Open-world container (no MAY_BE_COLLECTION on the operand) that is a native
+		 * collection at runtime: same total, never-throwing policy as the VM. */
+		return zend_collection_isset_dimension(container, offset);
 	}
 	return 0;
 }

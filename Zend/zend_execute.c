@@ -3250,8 +3250,9 @@ static zend_always_inline zend_collection_dim_result zend_collection_dim_lookup(
 /* $v[i] / $t[i] and the read behind $v[i] ?? d. BP_VAR_R throws on any miss; BP_VAR_IS
  * (the ?? form) is silent, leaving NULL so the coalesce default applies. The element is
  * copied into result with an owned reference; the collection is never mutated and no
- * writable slot is exposed. */
-static zend_never_inline void ZEND_FASTCALL zend_collection_read_dimension(
+ * writable slot is exposed. Exported (not static) because the JIT's generic DIM paths
+ * reach it for containers the optimizer could not prove collection-free. */
+ZEND_API void ZEND_FASTCALL zend_collection_read_dimension(
 		zval *result, const zval *container, zval *dim, int type)
 {
 	zval *element;
@@ -3279,6 +3280,21 @@ static zend_never_inline void ZEND_FASTCALL zend_collection_read_dimension(
 		}
 	}
 	ZVAL_NULL(result);
+}
+
+/* isset($v[i]) / the existence half of $v[i] ?? — total, never throws. A strict
+ * in-range int index whose element is non-null is "set"; a set, a non-int key, or an
+ * out-of-range index is not. Exported for the JIT's generic isset path, and the single
+ * policy behind zend_isset_dim_slow()'s collection branch. */
+ZEND_API bool ZEND_FASTCALL zend_collection_isset_dimension(const zval *container, zval *offset)
+{
+	zval *element;
+
+	if (zend_collection_dim_lookup(Z_VEC_P(container), offset, &element) != ZEND_COLLECTION_DIM_OK) {
+		return 0;
+	}
+	ZVAL_DEREF(element);
+	return Z_TYPE_P(element) != IS_NULL;
 }
 
 static zend_always_inline void zend_fetch_dimension_address_read(zval *result, const zval *container, zval *dim, int dim_type, int type, bool is_list, bool slow EXECUTE_DATA_DC)
@@ -3563,15 +3579,7 @@ str_offset:
 			return 0;
 		}
 	} else if (EXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
-		/* isset($v[i]) / $v[i] ?? — total, never throws. A strict in-range int index
-		 * whose element is non-null is "set"; a set, a non-int key, or an out-of-range
-		 * index is not. */
-		zval *element;
-		if (zend_collection_dim_lookup(Z_VEC_P(container), offset, &element) != ZEND_COLLECTION_DIM_OK) {
-			return 0;
-		}
-		ZVAL_DEREF(element);
-		return Z_TYPE_P(element) != IS_NULL;
+		return zend_collection_isset_dimension(container, offset);
 	} else {
 		return 0;
 	}
