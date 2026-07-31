@@ -181,6 +181,41 @@ ZEND_API zend_vec *zend_vec_create(
 	return vec;
 }
 
+/* Direct-construction builder (Architecture B, spike). The VM allocates an exact-size,
+ * empty (count == 0) vec payload, stores each *evaluated* literal element into it WITHOUT
+ * type validation (the store + count++ happens in the ADD_COLLECTION_ELEMENT handler), and
+ * validates every stored slot at FINISH_COLLECTION. During this window `count` is the
+ * *initialized-slot* count, not a user-visible validated cardinality: the payload is an
+ * owned VM TMP, never published, and destroy/GC are safe because stored slots hold valid
+ * zvals regardless of whether their element type has been checked yet. */
+ZEND_API zend_vec *zend_vec_builder_alloc(uint32_t count, const zend_collection_info *type)
+{
+	/* INIT_COLLECTION allocates the payload *before* the value-constructibility gate, which
+	 * FINISH_COLLECTION applies only after every element expression has run -- so that a
+	 * non-constructible vec type (e.g. vec[?int]) still evaluates its elements' side effects
+	 * before "Cannot create a value of type ..." is raised, exactly as the array path does.
+	 * Only the kind is asserted here; the payload holds valid zvals regardless, is never
+	 * published, and is destroyed on the FINISH error path. */
+	ZEND_ASSERT(type != NULL && type->kind == ZEND_COLLECTION_TYPE_VEC);
+	return zend_vec_alloc(count, type);
+}
+
+/* Validate every initialized slot of a builder payload against the vec's single member
+ * type, in source (slot) order, so the first offender reported matches the observable
+ * left-to-right position. Elements were stored dereferenced by ADD, so no deref here.
+ * Returns true when all slots pass; otherwise false with *failed_index set. Allocates
+ * nothing and mutates nothing. */
+ZEND_API bool zend_vec_builder_validate(const zend_vec *vec, uint32_t *failed_index)
+{
+	for (uint32_t i = 0; i < vec->count; i++) {
+		if (!collection_member_matches(vec->type, 0, (zval *) &vec->elements[i])) {
+			*failed_index = i;
+			return false;
+		}
+	}
+	return true;
+}
+
 /* Build a new vec that is `base` with `value` appended (prepend == false) or
  * prepended (prepend == true). The result carries base's EXACT descriptor
  * (base->type, borrowed), so append/prepend on a vec[int] yields a vec[int] with

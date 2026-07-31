@@ -332,7 +332,10 @@ END_EXTERN_C()
 #define ZEND_DECLARE_ATTRIBUTED_CONST       210
 #define ZEND_TYPE_ASSERT                    211
 #define ZEND_CONSTRUCT_COLLECTION           212
+#define ZEND_INIT_COLLECTION                213
+#define ZEND_ADD_COLLECTION_ELEMENT         214
+#define ZEND_FINISH_COLLECTION              215
 
-#define ZEND_VM_LAST_OPCODE                 212
+#define ZEND_VM_LAST_OPCODE                 215
 
 #endif

@@ -994,7 +994,8 @@ static bool is_fake_def(zend_op *opline) {
 	/* These opcodes only modify the result, not create it. */
 	return opline->opcode == ZEND_ROPE_ADD
 		|| opline->opcode == ZEND_ADD_ARRAY_ELEMENT
-		|| opline->opcode == ZEND_ADD_ARRAY_UNPACK;
+		|| opline->opcode == ZEND_ADD_ARRAY_UNPACK
+		|| opline->opcode == ZEND_ADD_COLLECTION_ELEMENT;
 }
 
 static bool keeps_op1_alive(zend_op *opline) {

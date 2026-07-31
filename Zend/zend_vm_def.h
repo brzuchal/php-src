@@ -6675,6 +6675,121 @@ ZEND_VM_HANDLER(212, ZEND_CONSTRUCT_COLLECTION, CONST|TMP, UNUSED, NUM)
 	ZEND_VM_NEXT_OPCODE();
 }
 
+/* Direct collection construction (Architecture B spike, vec only). Three opcodes replace
+ * INIT_ARRAY + ADD_ARRAY_ELEMENT + CONSTRUCT_COLLECTION for a `vec[...]{...}` literal, so
+ * no intermediate zend_array/HashTable is built. The final packed payload is an ordinary
+ * owned VM TMP that participates in normal unwind and GC. Evaluation/validation ordering is
+ * preserved: elements are stored WITHOUT type validation, and FINISH validates every slot
+ * only after all element expressions have run. `count` during this window is the
+ * initialized-slot count, not a user-visible validated cardinality; the payload is never
+ * published before FINISH succeeds. tuple/set keep the array path above. */
+ZEND_VM_HANDLER(213, ZEND_INIT_COLLECTION, NUM, UNUSED, NUM)
+{
+	USE_OPLINE
+	zend_type descriptor;
+	const zend_collection_info *info;
+	zend_vec *vec;
+
+	SAVE_OPLINE();
+	/* Resolve the declared type once (a borrowed canonical node after promotion). The
+	 * value-constructibility gate is deferred to FINISH_COLLECTION so that a
+	 * non-constructible type (e.g. vec[?int]) still evaluates its elements' side effects
+	 * before "Cannot create ..." is raised, exactly as the array path does. A compiled
+	 * literal's descriptor always resolves; the NULL guard is defensive. */
+	descriptor = EX(func)->op_array.collection_types[opline->extended_value];
+	info = zend_collection_info_resolve(descriptor);
+	if (UNEXPECTED(info == NULL)) {
+		zend_collection_not_constructible_error(descriptor);
+		UNDEF_RESULT();
+		HANDLE_EXCEPTION();
+	}
+	/* Exact-size, empty payload (count == 0). op1.num is the element count, known at
+	 * compile time (= the number of ADD_COLLECTION_ELEMENT opcodes that follow). */
+	vec = zend_vec_builder_alloc(opline->op1.num, info);
+	ZVAL_VEC(EX_VAR(opline->result.var), vec);
+	ZEND_VM_NEXT_OPCODE();
+}
+
+ZEND_VM_HANDLER(214, ZEND_ADD_COLLECTION_ELEMENT, CONST|TMP|VAR|CV, UNUSED)
+{
+	USE_OPLINE
+	zval *value_ptr, tmp;
+	zend_vec *vec;
+
+	SAVE_OPLINE();
+	value_ptr = GET_OP1_ZVAL_PTR(BP_VAR_R);
+	/* Same operand ownership as ADD_ARRAY_ELEMENT's element path: a TMP is moved into the
+	 * slot (its reference transfers, no addref), a CONST/CV is copied with an addref, a
+	 * VAR is moved (dereferencing a reference operand first). The result is that a stored
+	 * element is never IS_REFERENCE, exactly as the array path guarantees. */
+	if (OP1_TYPE == IS_TMP_VAR) {
+		/* moved: nothing to do */
+	} else if (OP1_TYPE == IS_CONST) {
+		Z_TRY_ADDREF_P(value_ptr);
+	} else if (OP1_TYPE == IS_CV) {
+		ZVAL_DEREF(value_ptr);
+		Z_TRY_ADDREF_P(value_ptr);
+	} else /* IS_VAR */ {
+		if (UNEXPECTED(Z_ISREF_P(value_ptr))) {
+			zend_refcounted *ref = Z_COUNTED_P(value_ptr);
+
+			value_ptr = Z_REFVAL_P(value_ptr);
+			if (UNEXPECTED(GC_DELREF(ref) == 0)) {
+				ZVAL_COPY_VALUE(&tmp, value_ptr);
+				value_ptr = &tmp;
+				efree_size(ref, sizeof(zend_reference));
+			} else if (Z_OPT_REFCOUNTED_P(value_ptr)) {
+				Z_ADDREF_P(value_ptr);
+			}
+		}
+	}
+	vec = Z_VEC_P(EX_VAR(opline->result.var));
+	/* Store, then publish the slot by raising count AFTER the write, so destroy/GC of the
+	 * partial payload never read an uninitialised slot. No type validation here: FINISH
+	 * validates every slot once all element expressions have run (preserves eval order). */
+	ZVAL_COPY_VALUE(&vec->elements[vec->count], value_ptr);
+	vec->count++;
+	ZEND_VM_NEXT_OPCODE();
+}
+
+ZEND_VM_HANDLER(215, ZEND_FINISH_COLLECTION, TMP, UNUSED, NUM)
+{
+	USE_OPLINE
+	zval *payload;
+	zend_vec *vec;
+	uint32_t failed_index = 0;
+
+	SAVE_OPLINE();
+	payload = GET_OP1_ZVAL_PTR(BP_VAR_R);
+	ZEND_ASSERT(Z_TYPE_P(payload) == IS_COLLECTION);
+	vec = Z_VEC_P(payload);
+	/* Value-constructibility is gated here, after every element expression has run, so a
+	 * non-constructible vec type reports "Cannot create ..." only after its elements' side
+	 * effects and takes precedence over an element type error -- exactly as the array path
+	 * does at CONSTRUCT. The unwind (FREE_OP1 -> zend_vec_destroy) frees the stored slots. */
+	if (UNEXPECTED(!ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(vec->type))) {
+		zend_collection_not_constructible_error(
+			EX(func)->op_array.collection_types[opline->extended_value]);
+		FREE_OP1();
+		UNDEF_RESULT();
+		HANDLE_EXCEPTION();
+	}
+	/* Now validate all initialized slots in source order; the first offender's slot index
+	 * is its observable left-to-right position. On failure the ordinary TMP unwind
+	 * (FREE_OP1 -> zend_vec_destroy) destroys exactly the initialized slots, and nothing is
+	 * ever published. */
+	if (UNEXPECTED(!zend_vec_builder_validate(vec, &failed_index))) {
+		zend_collection_element_type_error_ex(vec->type, failed_index, &vec->elements[failed_index]);
+		FREE_OP1();
+		UNDEF_RESULT();
+		HANDLE_EXCEPTION();
+	}
+	/* Publish: the payload itself is the result. op1 is a TMP being consumed, so transfer
+	 * it without an addref and do not free it. */
+	ZVAL_COPY_VALUE(EX_VAR(opline->result.var), payload);
+	ZEND_VM_NEXT_OPCODE();
+}
+
 ZEND_VM_COLD_CONST_HANDLER(51, ZEND_CAST, CONST|TMP|CV, ANY, TYPE)
 {
 	USE_OPLINE

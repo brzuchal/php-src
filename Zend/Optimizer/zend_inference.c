@@ -3474,6 +3474,16 @@ static zend_always_inline zend_result _zend_update_type_info(
 				UPDATE_SSA_TYPE(tmp, ssa_op->result_def);
 			}
 			break;
+		case ZEND_INIT_COLLECTION:
+		case ZEND_ADD_COLLECTION_ELEMENT:
+		case ZEND_FINISH_COLLECTION:
+			/* Direct-builder opcodes (vec spike). Each defines a collection value:
+			 * INIT and FINISH define the payload / finished result, and
+			 * ADD_COLLECTION_ELEMENT redefines the threaded payload in place. All
+			 * are inferred exactly like CONSTRUCT_COLLECTION below -- a collection,
+			 * never an array -- so no pass specialises them as array-producing.
+			 * (ADD_COLLECTION_ELEMENT's op1 value is a plain use with no op1_def:
+			 * collection literals have no by-reference elements.) */
 		case ZEND_CONSTRUCT_COLLECTION:
 			/* A collection value has no may-be bit -- IS_COLLECTION sits above
 			 * the mask -- so this type cannot be described. Stay unconstrained,
