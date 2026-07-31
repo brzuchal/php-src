@@ -216,6 +216,14 @@ ZEND_API bool zend_collection_is_identical(const zval *op1, const zval *op2);
 ZEND_API zend_vec *zend_collection_construct(
 	const HashTable *values, const zend_collection_info *type, uint32_t *failed_index);
 
+/* Direct-construction builder (Architecture B spike, vec only): allocate an exact-size
+ * empty payload, store evaluated elements without validating, then validate all slots at
+ * FINISH. `alloc` exposes the exact-size allocator; `validate` checks every initialized
+ * slot against member 0 and reports the first offender's slot index. The element store
+ * itself is done inline by the ADD_COLLECTION_ELEMENT VM handler. See zend_vec.c. */
+ZEND_API zend_vec *zend_vec_builder_alloc(uint32_t count, const zend_collection_info *type);
+ZEND_API bool zend_vec_builder_validate(const zend_vec *vec, uint32_t *failed_index);
+
 /* Exercise the private construction path's invariants from inside the engine
  * boundary, so they keep direct coverage without re-exporting the two-step
  * constructor. Returns a bitmask of the checks that passed. */

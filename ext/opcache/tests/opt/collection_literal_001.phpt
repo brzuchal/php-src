@@ -1,5 +1,5 @@
 --TEST--
-Collection literal 001: elements are built as an array, then constructed once
+Collection literal 001: vec literals compile to the direct INIT/ADD/FINISH_COLLECTION builder
 --INI--
 opcache.enable=1
 opcache.enable_cli=1
@@ -26,17 +26,21 @@ $_main:
 0000 RETURN int(1)
 
 lit:
-     ; (lines=9, args=1, vars=4, tmps=2)
+     ; (lines=12, args=1, vars=4, tmps=2)
      ; (after optimizer)
      ; %scollection_literal_001.php:2-7
 0000 CV0($n) = RECV 1
-0001 CV1($a) = CONSTRUCT_COLLECTION 0 array(...)
-0002 T4 = INIT_ARRAY 2 (packed) CV0($n) NEXT
-0003 T5 = ADD CV0($n) int(1)
-0004 T4 = ADD_ARRAY_ELEMENT T5 NEXT
-0005 CV2($b) = CONSTRUCT_COLLECTION 1 T4
-0006 T4 = INIT_ARRAY 1 (packed) CV2($b) NEXT
-0007 CV3($c) = CONSTRUCT_COLLECTION 2 T4
-0008 RETURN CV3($c)
+0001 T4 = INIT_COLLECTION 0 0
+0002 CV1($a) = FINISH_COLLECTION 0 T4
+0003 T4 = INIT_COLLECTION 1 2
+0004 T4 = ADD_COLLECTION_ELEMENT CV0($n)
+0005 T5 = ADD CV0($n) int(1)
+0006 T4 = ADD_COLLECTION_ELEMENT T5
+0007 CV2($b) = FINISH_COLLECTION 1 T4
+0008 T4 = INIT_COLLECTION 2 1
+0009 T4 = ADD_COLLECTION_ELEMENT CV2($b)
+0010 CV3($c) = FINISH_COLLECTION 2 T4
+0011 RETURN CV3($c)
 LIVE RANGES:
-     4: 0003 - 0005 (tmp/var)
+     4: 0004 - 0007 (tmp/var)
+     4: 0009 - 0010 (tmp/var)

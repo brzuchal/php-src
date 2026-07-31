@@ -11588,6 +11588,32 @@ static void zend_compile_collection_literal(znode *result, const zend_ast *ast)
 	index = zend_op_array_add_collection_type(CG(active_op_array),
 		zend_compile_collection_descriptor(ast->attr, ast->child[0]));
 
+	/* vec uses the direct builder (spike): INIT_COLLECTION allocates an exact-size empty
+	 * payload, ADD_COLLECTION_ELEMENT stores each evaluated element (no HashTable), and
+	 * FINISH_COLLECTION validates every slot after all elements have run and publishes the
+	 * result. The payload is an ordinary owned TMP threaded from INIT through FINISH, so a
+	 * mid-list exception unwinds it exactly like the array TMP. tuple and set keep the
+	 * array path below until their own lifecycle is proven. */
+	if (ast->attr == ZEND_COLLECTION_TYPE_VEC) {
+		znode payload;
+
+		opline = zend_emit_op_tmp(&payload, ZEND_INIT_COLLECTION, NULL, NULL);
+		opline->op1.num = elements->children;   /* exact element count */
+		opline->extended_value = index;          /* descriptor side-table index */
+
+		for (uint32_t i = 0; i < elements->children; i++) {
+			znode value;
+
+			zend_compile_expr(&value, elements->child[i]);
+			opline = zend_emit_op(NULL, ZEND_ADD_COLLECTION_ELEMENT, &value, NULL);
+			SET_NODE(opline->result, &payload);
+		}
+
+		opline = zend_emit_op_tmp(result, ZEND_FINISH_COLLECTION, &payload, NULL);
+		opline->extended_value = index;          /* descriptor: for the not-constructible message */
+		return;
+	}
+
 	if (elements->children == 0) {
 		zend_emit_op_tmp(&array, ZEND_INIT_ARRAY, NULL, NULL);
 	} else {

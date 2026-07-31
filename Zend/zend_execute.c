@@ -862,11 +862,13 @@ static zend_never_inline ZEND_COLD void zend_collection_not_constructible_error(
 	zend_string_release(type_str);
 }
 
-/* One element of a collection literal does not satisfy the declared member
- * type. `index` is the element's position, which is also its key: the literal
- * is compiled into a packed array with sequential keys. */
-static zend_never_inline ZEND_COLD void zend_collection_element_type_error(
-		const zend_collection_info *info, const HashTable *values, uint32_t index)
+/* One element of a collection literal does not satisfy the declared member type.
+ * `index` is the element's position, which is also its key/slot: the literal is compiled
+ * into sequential positions. `value` is that element (already dereferenced by the caller
+ * for the builder path; the array path passes a live element). Shared by the array
+ * constructor (CONSTRUCT_COLLECTION) and the direct builder (FINISH_COLLECTION). */
+static zend_never_inline ZEND_COLD void zend_collection_element_type_error_ex(
+		const zend_collection_info *info, uint32_t index, zval *value)
 {
 	zend_string *type_str = zend_collection_info_to_string(info);
 	/* Which member type the failed element was checked against. vec and set have
@@ -875,9 +877,7 @@ static zend_never_inline ZEND_COLD void zend_collection_element_type_error(
 	 * check in collection_member_matches(). */
 	uint32_t member_idx = (info->kind == ZEND_COLLECTION_TYPE_TUPLE) ? index : 0;
 	zend_string *member_str = zend_collection_info_member_to_string(info, member_idx);
-	zval *value = zend_hash_index_find((HashTable *) values, index);
 
-	ZEND_ASSERT(value != NULL);
 	ZVAL_DEREF(value);
 
 	zend_string *given_str = zend_zval_collection_type_name(value);
@@ -889,6 +889,17 @@ static zend_never_inline ZEND_COLD void zend_collection_element_type_error(
 	}
 	zend_string_release(member_str);
 	zend_string_release(type_str);
+}
+
+/* Array-constructor variant: the offending element is the value at `index` in the
+ * temporary packed array. */
+static zend_never_inline ZEND_COLD void zend_collection_element_type_error(
+		const zend_collection_info *info, const HashTable *values, uint32_t index)
+{
+	zval *value = zend_hash_index_find((HashTable *) values, index);
+
+	ZEND_ASSERT(value != NULL);
+	zend_collection_element_type_error_ex(info, index, value);
 }
 
 static zend_never_inline ZEND_COLD void zend_verify_class_constant_type_error(const zend_class_constant *c, const zend_string *name, const zval *constant)
