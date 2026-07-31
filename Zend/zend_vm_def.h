@@ -6788,9 +6788,17 @@ ZEND_VM_HANDLER(215, ZEND_FINISH_COLLECTION, TMP, UNUSED, NUM)
 	 * cardinality in place (first occurrence kept, first-occurrence order preserved) and
 	 * releases the discarded duplicates. The partition runs no user code and the count is made
 	 * consistent before any discard is freed, so a GC triggered while freeing a discard scans
-	 * only the finished unique prefix. vec/tuple keep every slot. */
+	 * only the finished unique prefix. vec/tuple keep every slot. The dedup comparison is the
+	 * one construction step that can throw (a recursive strict array comparison); on that it
+	 * returns with the payload fully initialized (count unchanged), so the ordinary TMP unwind
+	 * frees every slot exactly once, exactly like the element-type-error path above. */
 	if (vec->type->kind == ZEND_COLLECTION_TYPE_SET) {
 		zend_set_builder_dedup(vec);
+		if (UNEXPECTED(EG(exception))) {
+			FREE_OP1();
+			UNDEF_RESULT();
+			HANDLE_EXCEPTION();
+		}
 	}
 	/* Publish: the payload itself is the result. op1 is a TMP being consumed, so transfer
 	 * it without an addref and do not free it. */

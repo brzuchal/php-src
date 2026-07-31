@@ -243,8 +243,12 @@ ZEND_API bool zend_vec_builder_validate(const zend_vec *vec, uint32_t *failed_in
  *      *swaps*. A swap exchanges two owned slots, so every slot holds a distinct, valid,
  *      singly-owned zval at every step -- the payload never contains a stale alias, unlike a
  *      move-compaction. zend_is_identical() over the accepted prefix [0,write) allocates and
- *      frees nothing, so this phase cannot trigger GC or re-enter userland. When it ends,
- *      [0,write) are the uniques (source order) and [write,count) are the discards.
+ *      frees nothing, so this phase cannot trigger GC or re-enter userland -- but a recursive
+ *      strict *array* comparison can throw. If it does, we return at once with `count`
+ *      unchanged: the swaps are pure exchanges, so ownership is still bijective and every
+ *      initialized slot is owned exactly once, and the caller frees the whole payload on the
+ *      exception path. When it ends normally, [0,write) are the uniques (source order) and
+ *      [write,count) are the discards.
  *
  *   2. Release. `count` is lowered to `write` *before* any discard is destroyed, so the
  *      payload is already the consistent final set when destructors run. Freeing a discarded
@@ -267,6 +271,16 @@ ZEND_API void zend_set_builder_dedup(zend_vec *set)
 			if (zend_is_identical(&set->elements[read], &set->elements[j])) {
 				duplicate = true;
 				break;
+			}
+			/* zend_is_identical() invokes no userland and frees nothing, but a recursive
+			 * strict *array* comparison can throw ("Nesting level too deep - recursive
+			 * dependency?"). Stop the moment it does, leaving `count` unchanged so it still
+			 * covers every initialized slot: the swaps done so far are pure exchanges, so
+			 * ownership stays bijective and the caller's normal TMP unwind (FREE_OP1) frees
+			 * each of the `evaluated` slots exactly once. Do not partition or drop `count`
+			 * further, and do not release any discard while an exception is pending. */
+			if (UNEXPECTED(EG(exception))) {
+				return;
 			}
 		}
 		if (duplicate) {
