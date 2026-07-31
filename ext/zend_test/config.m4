@@ -10,6 +10,9 @@ if test "$PHP_ZEND_TEST" != "no"; then
       object_handlers.c
       observer.c
       test.c
+      vec_spike.c
+      vec_spike_bench.c
+      vec_spike_test.c
       zend_mm_custom_handlers.c
     ]),
     [$ext_shared],,

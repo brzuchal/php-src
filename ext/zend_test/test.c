@@ -2591,9 +2591,12 @@ static void register_dynamic_function_entries(int module_type) {
 	zend_register_functions(NULL, dynamic_function_entries, NULL, module_type);
 }
 
+void vec_spike_minit(void); /* vec_spike_bench.c — hybrid vec spike (disposable) */
+
 PHP_MINIT_FUNCTION(zend_test)
 {
 	register_dynamic_function_entries(type);
+	vec_spike_minit();
 
 	zend_test_interface = register_class__ZendTestInterface();
 

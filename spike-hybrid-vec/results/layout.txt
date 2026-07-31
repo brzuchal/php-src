@@ -1,0 +1,99 @@
+Array
+(
+    [sizeof_zval] => 16
+    [sizeof_spk_flat_hdr] => 8
+    [sizeof_spk_cap_hdr] => 16
+    [sizeof_spk_block_hdr] => 8
+    [sizeof_spk_spine] => 24
+    [sizeof_spk_hyb] => 32
+    [offsetof_hyb_lv] => 28
+    [zend_debug] => 0
+    [allocs] => Array
+        (
+            [version] => Array
+                (
+                    [sizeof] => 32
+                    [zmm_alloc] => 32
+                    [waste_pct] => 0
+                )
+
+            [spine_struct] => Array
+                (
+                    [sizeof] => 24
+                    [zmm_alloc] => 24
+                    [waste_pct] => 0
+                )
+
+            [block_chunk16] => Array
+                (
+                    [sizeof] => 264
+                    [zmm_alloc] => 320
+                    [waste_pct] => 17.5
+                )
+
+            [block_chunk16_minus1] => Array
+                (
+                    [sizeof] => 248
+                    [zmm_alloc] => 256
+                    [waste_pct] => 3.125
+                )
+
+            [block_chunk32] => Array
+                (
+                    [sizeof] => 520
+                    [zmm_alloc] => 640
+                    [waste_pct] => 18.75
+                )
+
+            [block_chunk32_minus1] => Array
+                (
+                    [sizeof] => 504
+                    [zmm_alloc] => 512
+                    [waste_pct] => 1.5625
+                )
+
+            [block_chunk64] => Array
+                (
+                    [sizeof] => 1032
+                    [zmm_alloc] => 1280
+                    [waste_pct] => 19.375
+                )
+
+            [block_chunk64_minus1] => Array
+                (
+                    [sizeof] => 1016
+                    [zmm_alloc] => 1024
+                    [waste_pct] => 0.78125
+                )
+
+            [block_chunk128] => Array
+                (
+                    [sizeof] => 2056
+                    [zmm_alloc] => 2560
+                    [waste_pct] => 19.6875
+                )
+
+            [block_chunk128_minus1] => Array
+                (
+                    [sizeof] => 2040
+                    [zmm_alloc] => 2048
+                    [waste_pct] => 0.390625
+                )
+
+            [flat_100] => Array
+                (
+                    [sizeof] => 1608
+                    [zmm_alloc] => 1792
+                    [waste_pct] => 10.267857142857
+                )
+
+            [flat_100k] => Array
+                (
+                    [sizeof] => 1600008
+                    [zmm_alloc] => 1601536
+                    [waste_pct] => 0.095408407928389
+                )
+
+        )
+
+)
