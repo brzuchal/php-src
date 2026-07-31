@@ -11588,13 +11588,15 @@ static void zend_compile_collection_literal(znode *result, const zend_ast *ast)
 	index = zend_op_array_add_collection_type(CG(active_op_array),
 		zend_compile_collection_descriptor(ast->attr, ast->child[0]));
 
-	/* vec uses the direct builder (spike): INIT_COLLECTION allocates an exact-size empty
+	/* vec and tuple use the direct builder: INIT_COLLECTION allocates an exact-size empty
 	 * payload, ADD_COLLECTION_ELEMENT stores each evaluated element (no HashTable), and
 	 * FINISH_COLLECTION validates every slot after all elements have run and publishes the
 	 * result. The payload is an ordinary owned TMP threaded from INIT through FINISH, so a
-	 * mid-list exception unwinds it exactly like the array TMP. tuple and set keep the
-	 * array path below until their own lifecycle is proven. */
-	if (ast->attr == ZEND_COLLECTION_TYPE_VEC) {
+	 * mid-list exception unwinds it exactly like the array TMP. vec validates every slot
+	 * against its one member type; tuple validates slot i against member i (arity fixed by
+	 * the descriptor and already checked above). set keeps the array path below -- it needs
+	 * a deduplicating FINISH whose published count differs from the allocated capacity. */
+	if (ast->attr == ZEND_COLLECTION_TYPE_VEC || ast->attr == ZEND_COLLECTION_TYPE_TUPLE) {
 		znode payload;
 
 		opline = zend_emit_op_tmp(&payload, ZEND_INIT_COLLECTION, NULL, NULL);

@@ -192,11 +192,13 @@ ZEND_API zend_vec *zend_vec_builder_alloc(uint32_t count, const zend_collection_
 {
 	/* INIT_COLLECTION allocates the payload *before* the value-constructibility gate, which
 	 * FINISH_COLLECTION applies only after every element expression has run -- so that a
-	 * non-constructible vec type (e.g. vec[?int]) still evaluates its elements' side effects
+	 * non-constructible type (e.g. vec[?int]) still evaluates its elements' side effects
 	 * before "Cannot create a value of type ..." is raised, exactly as the array path does.
 	 * Only the kind is asserted here; the payload holds valid zvals regardless, is never
-	 * published, and is destroyed on the FINISH error path. */
-	ZEND_ASSERT(type != NULL && type->kind == ZEND_COLLECTION_TYPE_VEC);
+	 * published, and is destroyed on the FINISH error path. Shared by vec (single member)
+	 * and tuple (positional, exact arity); set keeps the array path (it dedups). */
+	ZEND_ASSERT(type != NULL
+		&& (type->kind == ZEND_COLLECTION_TYPE_VEC || type->kind == ZEND_COLLECTION_TYPE_TUPLE));
 	return zend_vec_alloc(count, type);
 }
 
@@ -207,8 +209,13 @@ ZEND_API zend_vec *zend_vec_builder_alloc(uint32_t count, const zend_collection_
  * nothing and mutates nothing. */
 ZEND_API bool zend_vec_builder_validate(const zend_vec *vec, uint32_t *failed_index)
 {
+	/* vec has one member type checked against every slot; tuple is positional, so slot i is
+	 * checked against member i (its count equals the arity, compile-checked, which equals
+	 * num_types). This mirrors the per-index rule in collection_member_matches() and in
+	 * zend_collection_element_type_error_ex(), so the diagnostic names the same member. */
+	bool positional = (vec->type->kind == ZEND_COLLECTION_TYPE_TUPLE);
 	for (uint32_t i = 0; i < vec->count; i++) {
-		if (!collection_member_matches(vec->type, 0, (zval *) &vec->elements[i])) {
+		if (!collection_member_matches(vec->type, positional ? i : 0, (zval *) &vec->elements[i])) {
 			*failed_index = i;
 			return false;
 		}
