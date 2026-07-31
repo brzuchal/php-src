@@ -6784,6 +6784,14 @@ ZEND_VM_HANDLER(215, ZEND_FINISH_COLLECTION, TMP, UNUSED, NUM)
 		UNDEF_RESULT();
 		HANDLE_EXCEPTION();
 	}
+	/* A set deduplicates only after every slot is validated: it lowers `count` to the unique
+	 * cardinality in place (first occurrence kept, first-occurrence order preserved) and
+	 * releases the discarded duplicates. The partition runs no user code and the count is made
+	 * consistent before any discard is freed, so a GC triggered while freeing a discard scans
+	 * only the finished unique prefix. vec/tuple keep every slot. */
+	if (vec->type->kind == ZEND_COLLECTION_TYPE_SET) {
+		zend_set_builder_dedup(vec);
+	}
 	/* Publish: the payload itself is the result. op1 is a TMP being consumed, so transfer
 	 * it without an addref and do not free it. */
 	ZVAL_COPY_VALUE(EX_VAR(opline->result.var), payload);

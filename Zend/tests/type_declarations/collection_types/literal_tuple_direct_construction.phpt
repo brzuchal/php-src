@@ -47,7 +47,7 @@ echo "-- value identity of directly-built tuples --\n";
 var_dump(tuple[int, string]{1, 'a'} === tuple[int, string]{1, 'a'});
 var_dump(tuple[int, string]{1, 'a'} === tuple[int, string]{2, 'a'});
 
-echo "-- vec and set unaffected --\n";
+echo "-- vec and set construct correctly (same builder) --\n";
 var_dump((vec[int]{1, 2, 3})->count, (set[int]{1, 1, 2})->count);
 ?>
 --EXPECT--
@@ -88,6 +88,6 @@ string(2) "v3"
 -- value identity of directly-built tuples --
 bool(true)
 bool(false)
--- vec and set unaffected --
+-- vec and set construct correctly (same builder) --
 int(3)
 int(2)

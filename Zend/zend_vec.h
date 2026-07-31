@@ -216,13 +216,17 @@ ZEND_API bool zend_collection_is_identical(const zval *op1, const zval *op2);
 ZEND_API zend_vec *zend_collection_construct(
 	const HashTable *values, const zend_collection_info *type, uint32_t *failed_index);
 
-/* Direct-construction builder (Architecture B spike, vec only): allocate an exact-size
- * empty payload, store evaluated elements without validating, then validate all slots at
- * FINISH. `alloc` exposes the exact-size allocator; `validate` checks every initialized
- * slot against member 0 and reports the first offender's slot index. The element store
- * itself is done inline by the ADD_COLLECTION_ELEMENT VM handler. See zend_vec.c. */
+/* Direct-construction builder (Architecture B) for vec, tuple and set: allocate an
+ * exact-size empty payload, store evaluated elements without validating, then validate all
+ * slots at FINISH. `alloc` exposes the exact-size allocator; `validate` checks every
+ * initialized slot against its member type (member 0 for vec/set, member i for tuple) and
+ * reports the first offender's slot index. The element store itself is done inline by the
+ * ADD_COLLECTION_ELEMENT VM handler. `dedup` is applied by FINISH for a set only, after
+ * validation: it deduplicates the payload in place and lowers `count` to the unique
+ * cardinality (the allocated tail becomes unused slack). See zend_vec.c. */
 ZEND_API zend_vec *zend_vec_builder_alloc(uint32_t count, const zend_collection_info *type);
 ZEND_API bool zend_vec_builder_validate(const zend_vec *vec, uint32_t *failed_index);
+ZEND_API void zend_set_builder_dedup(zend_vec *set);
 
 /* Exercise the private construction path's invariants from inside the engine
  * boundary, so they keep direct coverage without re-exporting the two-step
