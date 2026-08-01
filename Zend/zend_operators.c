@@ -469,6 +469,10 @@ try_again:
 		case IS_UNDEF:
 		case IS_RESOURCE:
 		case IS_ARRAY:
+		case IS_COLLECTION:
+			/* No integer value; like an array, this makes the bitwise/shift
+			 * operator report "Unsupported operand types" rather than reach the
+			 * ZEND_UNREACHABLE() below (a release-build crash, a debug abort). */
 			*failed = true;
 			return 0;
 		case IS_REFERENCE:
@@ -624,6 +628,13 @@ try_again:
 		case IS_REFERENCE:
 			zend_unwrap_reference(op);
 			goto try_again;
+		case IS_COLLECTION:
+			/* A collection has no integer value; throw like the (int) cast
+			 * (zval_get_long_func()) instead of reaching ZEND_UNREACHABLE() -- a
+			 * release-build crash, a debug abort. settype() reaches this. op is
+			 * left unchanged and the pending TypeError propagates. */
+			zend_type_error("Cannot convert a collection to int");
+			return;
 		default: ZEND_UNREACHABLE();
 	}
 }
@@ -683,6 +694,12 @@ try_again:
 		case IS_REFERENCE:
 			zend_unwrap_reference(op);
 			goto try_again;
+		case IS_COLLECTION:
+			/* No float value; throw like the (float) cast instead of the
+			 * ZEND_UNREACHABLE() below. op is left unchanged; the TypeError
+			 * propagates (settype() reaches this). */
+			zend_type_error("Cannot convert a collection to float");
+			break;
 		default: ZEND_UNREACHABLE();
 	}
 }
@@ -765,6 +782,13 @@ try_again:
 		case IS_REFERENCE:
 			zend_unwrap_reference(op);
 			goto try_again;
+		case IS_COLLECTION:
+			/* A collection is always truthy (see i_zend_is_true); release it and
+			 * store true, rather than reaching the ZEND_UNREACHABLE() below.
+			 * settype($c, 'bool') reaches this. */
+			zval_ptr_dtor(op);
+			ZVAL_TRUE(op);
+			break;
 		default: ZEND_UNREACHABLE();
 	}
 }
@@ -820,6 +844,13 @@ try_again:
 			ZVAL_EMPTY_STRING(op);
 			break;
 		}
+		case IS_COLLECTION:
+			/* No string value; throw like the (string) cast
+			 * (__zval_get_string_func()) instead of reaching the
+			 * ZEND_UNREACHABLE() below. op is left unchanged; the TypeError
+			 * propagates (settype($c, 'string') reaches this). */
+			zend_type_error("Cannot convert a collection to string");
+			break;
 		case IS_REFERENCE:
 			zend_unwrap_reference(op);
 			goto try_again;
@@ -2845,6 +2876,9 @@ try_again:
 		}
 		case IS_RESOURCE:
 		case IS_ARRAY:
+		case IS_COLLECTION:
+			/* Like an array, a collection cannot be incremented; report the
+			 * unsupported operation rather than reaching ZEND_UNREACHABLE(). */
 			zend_type_error("Cannot increment %s", zend_zval_value_name(op1));
 			return FAILURE;
 		default: ZEND_UNREACHABLE();
@@ -2952,6 +2986,9 @@ try_again:
 		}
 		case IS_RESOURCE:
 		case IS_ARRAY:
+		case IS_COLLECTION:
+			/* Like an array, a collection cannot be decremented; report the
+			 * unsupported operation rather than reaching ZEND_UNREACHABLE(). */
 			zend_type_error("Cannot decrement %s", zend_zval_value_name(op1));
 			return FAILURE;
 		default: ZEND_UNREACHABLE();
