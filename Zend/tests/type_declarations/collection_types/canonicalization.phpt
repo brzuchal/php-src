@@ -8,6 +8,8 @@ zend_test
 function a_int(vec[int] $x): void {}
 function b_int(vec[int] $x): void {}
 function a_string(vec[string] $x): void {}
+function a_int_nullable(?vec[int] $x): void {}
+function a_int_member_nullable(vec[?int] $x): void {}
 
 function a_foo(vec[Foo] $x): void {}
 function b_foo(vec[FOO] $x): void {}
@@ -26,6 +28,13 @@ var_dump($intern('a_int')['id'] === $intern('b_int')['id']);
 echo "-- different descriptors do not --\n";
 var_dump($intern('a_int')['id'] === $intern('a_string')['id']);
 var_dump($intern('a_foo')['id'] === $intern('a_bar')['id']);
+
+echo "-- root nullability is not part of descriptor identity --\n";
+/* ?vec[int] and vec[int] share one node: the root mask lives in the outer
+ * zend_type and is enforced by the ordinary mask check, never by the matcher,
+ * so the key must not fold it either. Member nullability stays semantic. */
+var_dump($intern('a_int')['id'] === $intern('a_int_nullable')['id']);
+var_dump($intern('a_int')['id'] === $intern('a_int_member_nullable')['id']);
 
 echo "-- repeated promotion returns the identical pointer --\n";
 $first = $intern('a_int')['id'];
@@ -82,6 +91,9 @@ var_dump(zend_test_collection_collision_selftest());
 bool(true)
 -- different descriptors do not --
 bool(false)
+bool(false)
+-- root nullability is not part of descriptor identity --
+bool(true)
 bool(false)
 -- repeated promotion returns the identical pointer --
 bool(true)

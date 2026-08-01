@@ -32,6 +32,9 @@
  *
  *   - only ZEND_TYPE_PURE_MASK participates, so allocation/provenance bits such
  *     as _ZEND_TYPE_ARENA_BIT can never influence the key;
+ *   - at the root, even the pure mask is excluded (see
+ *     zend_collection_key_hash_type()): declaration-side nullability is not
+ *     part of descriptor identity, and the intern matcher never compares it;
  *   - descriptor members are folded positionally, because member order is
  *     semantic for the parameterized kinds (map[K,V], tuple[A,B,C]);
  *   - class names are folded case-insensitively, because that function compares
@@ -163,6 +166,16 @@ ZEND_API zend_ulong zend_collection_key_hash_type(zend_type type)
 	 * table cannot tolerate. */
 	ZEND_ASSERT(zend_collection_key_is_supported(type)
 		&& "collection key: unsupported descriptor form");
+
+	/* The root may-be mask is excluded from the key. Declaration-side
+	 * nullability (?vec[int]) lives in the outer zend_type and is enforced by
+	 * the ordinary mask check, never by descriptor identity:
+	 * collection_info_matches_type() does not read the root mask, and hash and
+	 * matcher must agree on what identity means, or ?vec[int] and vec[int]
+	 * intern as two nodes and the runtime pointer check rejects a structurally
+	 * matching value. Member masks keep folding: vec[?int] is a distinct
+	 * type. */
+	ZEND_TYPE_FULL_MASK(type) &= ~_ZEND_TYPE_MAY_BE_MASK;
 
 	return collection_key_hash_type(COLLECTION_KEY_SEED, type);
 }
