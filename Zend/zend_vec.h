@@ -97,6 +97,13 @@ ZEND_STATIC_ASSERT(offsetof(zend_vec, elements) == offsetof(zend_vec, count) + 8
 # error "hybrid vec storage currently requires a supported 64-bit layout (LP64/LLP64); 32-bit targets are not supported"
 #endif
 
+/* Master gate for producing HYBRID values from PHP surfaces. The mechanism
+ * (representation, ownership, transitions, matrix, readers) lands first with
+ * the gate OFF so every intermediate commit keeps current public semantics;
+ * the flatten-policy commit flips it ON once all observers are
+ * representation-aware. C-level selftests construct hybrids regardless. */
+#define ZEND_VEC_HYBRID_ENABLED 0
+
 #define ZEND_VEC_HYBRID_FLAG   (UINT32_C(1) << 31)
 #define ZEND_VEC_CAP_MASK      (~ZEND_VEC_HYBRID_FLAG)          /* 0x7fffffff */
 #define ZEND_VEC_IS_HYBRID(v)  (((v)->capacity & ZEND_VEC_HYBRID_FLAG) != 0)
@@ -286,6 +293,20 @@ ZEND_API zend_vec *zend_vec_create(
  * vec (refcount 1), or NULL when the value does not satisfy the element type
  * (caller raises a TypeError). This is the primitive behind vec::append/prepend. */
 ZEND_API zend_vec *zend_vec_create_with(zend_vec *base, zval *value, bool prepend, bool exclusive);
+
+/* Append dispatcher (the primitive behind vec::append). Chooses the
+ * representation for the result:
+ *   - a FLAT base appended non-exclusively (retained/shared receiver) shares the
+ *     base and puts the new value in a fresh one-element tail, yielding a HYBRID
+ *     root -- the base is never copied (the C1 primary target);
+ *   - a FLAT base appended exclusively (a consumable temporary) mutates/grows in
+ *     place, returning the base itself;
+ *   - a HYBRID base runs the root/tail exclusivity matrix (introduced separately).
+ * `value` is validated against the element type first; NULL is returned on a type
+ * failure with nothing published (the caller raises a TypeError). `exclusive` is
+ * the centralized frame-ownership verdict for the receiver. prepend has no hybrid
+ * form in C1 and continues through zend_vec_create_with. */
+ZEND_API zend_vec *zend_vec_append_value(zend_vec *base, zval *value, bool exclusive);
 
 /* Outcome of an index-addressed builder (with_at / without_at). Only OK yields a
  * result; the two failure codes tell the caller which diagnostic to raise, so the

@@ -3942,7 +3942,12 @@ static zend_always_inline void zend_collection_vec_insert(
 	ZEND_PARSE_PARAMETERS_END();
 
 	bool exclusive = zend_collection_call_receiver_is_exclusive(execute_data, receiver);
-	zend_vec *out = zend_vec_create_with(receiver, value, prepend, exclusive);
+	/* append routes through the C1 dispatcher (retained flat -> HYBRID, exclusive
+	 * flat -> in-place, hybrid -> matrix); prepend has no hybrid form in C1 and
+	 * stays the flat create_with path. */
+	zend_vec *out = prepend
+		? zend_vec_create_with(receiver, value, /* prepend */ true, exclusive)
+		: zend_vec_append_value(receiver, value, exclusive);
 	if (UNEXPECTED(out == NULL)) {
 		zend_collection_method_value_type_error(receiver, method, 1, "value", value);
 		RETURN_THROWS();

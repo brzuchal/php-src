@@ -438,6 +438,92 @@ ZEND_API zend_vec *zend_vec_create_with(zend_vec *base, zval *value, bool prepen
 	return out;
 }
 
+/* Materialize a hybrid's logical elements -- the base elements in
+ * order, then the tail elements -- into a fresh exact-size FLAT vec (FLAT_EXACT).
+ * The children are never mutated; each element is copied (addref'd). Used as the
+ * flatten primitive (Commits 4/7) and the interim hybrid-append fallback. */
+static zend_vec *zend_hybrid_flatten(const zend_vec *h)
+{
+	ZEND_ASSERT(ZEND_VEC_IS_HYBRID(h));
+	zend_vec *base = ZEND_VEC_HYBRID_BASE_VEC(h);
+	zend_vec *tail = ZEND_VEC_HYBRID_TAIL_VEC(h);
+	zend_vec *out  = zend_vec_alloc(h->count, h->type);   /* exact size */
+	uint32_t at = 0;
+
+	for (uint32_t i = 0; i < base->count; i++) {
+		ZVAL_COPY(&out->elements[at++], &base->elements[i]);
+	}
+	for (uint32_t i = 0; i < tail->count; i++) {
+		ZVAL_COPY(&out->elements[at++], &tail->elements[i]);
+	}
+	ZEND_ASSERT(at == h->count);
+	out->count = at;
+	return out;
+}
+
+/* Retained-append transition. `base` is a FLAT
+ * vec observed elsewhere (not exclusively owned), so instead of copying base + 1
+ * we SHARE base and place the new value in a fresh one-element tail -- a HYBRID
+ * root. `value` is validated FIRST; on failure nothing is allocated and NULL is
+ * returned. base is neither mutated nor copied. */
+static zend_vec *zend_flat_append_to_hybrid(zend_vec *base, zval *value)
+{
+	ZEND_ASSERT(!ZEND_VEC_IS_HYBRID(base));
+	ZVAL_DEREF(value);
+	if (!collection_member_matches(base->type, 0, value)) {
+		return NULL;   /* type failure: nothing allocated, caller raises TypeError */
+	}
+
+	/* Fresh one-element tail (rc 1); its sole reference is consumed by the root. */
+	zend_vec *tail = zend_vec_alloc(1, base->type);
+	ZVAL_COPY(&tail->elements[0], value);   /* addref the value into the tail slot */
+	tail->count = 1;
+
+	/* Assemble the root: shares base (addref, base kept by the caller too) and
+	 * takes the tail's sole reference. */
+	return zend_hybrid_alloc(base, tail);
+}
+
+ZEND_API zend_vec *zend_vec_append_value(zend_vec *base, zval *value, bool exclusive)
+{
+	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_VEC);
+
+	if (!ZEND_VEC_IS_HYBRID(base)) {
+		if (exclusive) {
+			/* Flat consumable temporary: mutate/grow in place. */
+			return zend_vec_create_with(base, value, /* prepend */ false, /* exclusive */ true);
+		}
+#if ZEND_VEC_HYBRID_ENABLED
+		/* Retained/shared flat append: share base, one-element tail -> HYBRID. */
+		return zend_flat_append_to_hybrid(base, value);
+#else
+		/* Hybrid production is gated off until every observer (indexed read,
+		 * iteration, identity, serialization, display) is representation-aware;
+		 * the flatten-policy commit flips the gate. Until then a retained
+		 * append copies, exactly as before this mechanism existed. */
+		return zend_vec_create_with(base, value, /* prepend */ false, /* exclusive */ false);
+#endif
+	}
+
+	/* HYBRID receiver. the full root/tail exclusivity matrix is introduced separately;
+	 * this is the correct interim: validate, flatten the hybrid to a fresh flat
+	 * base, then form a new hybrid over it. Slower (it copies the logical value)
+	 * but never mutates the shared receiver. */
+	ZVAL_DEREF(value);
+	if (!collection_member_matches(base->type, 0, value)) {
+		return NULL;
+	}
+	{
+		zend_vec *flat = zend_hybrid_flatten(base);          /* flat copy, rc 1 (ours)      */
+		zend_vec *tail = zend_vec_alloc(1, base->type);
+		ZVAL_COPY(&tail->elements[0], value);
+		tail->count = 1;
+		zend_vec *out = zend_hybrid_alloc(flat, tail);        /* addrefs flat (->2), takes tail */
+		GC_DELREF(flat);                                      /* drop our flat ref (out owns it) */
+		return out;
+	}
+}
+
 /* Build a new vec equal to `base` with the element at `index` replaced by
  * `value`. base's descriptor is preserved exactly (borrowed), base is never
  * mutated, and only `value` is validated -- base's other elements are already
@@ -1126,7 +1212,7 @@ ZEND_API uint32_t zend_hybrid_lifecycle_selftest(void)
 		result |= ZEND_HYBRID_SELFTEST_TAIL_OWNED;
 	}
 
-	/* GC-children exposure (Commit 2): the span contract yields exactly the two
+	/* GC-children exposure: the span contract yields exactly the two
 	 * child collection zvals {base, tail}; the debug asserts inside zend_stor_span_get
 	 * fire here on a real hybrid. */
 	{
