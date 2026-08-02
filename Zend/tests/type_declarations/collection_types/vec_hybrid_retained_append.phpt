@@ -1,5 +1,7 @@
 --TEST--
 vec hybrid: retained append shares the base (no copy) — constant memory per branch
+--SKIPIF--
+<?php if (PHP_INT_SIZE !== 8) die('skip hybrid vec storage is 64-bit only; a retained append is a flat copy on 32-bit'); ?>
 --EXTENSIONS--
 zend_test
 --FILE--

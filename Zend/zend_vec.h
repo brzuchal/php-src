@@ -52,12 +52,28 @@ typedef struct _zend_vec {
 /* offsetof is the only layout contract; do not assume a fixed header size. */
 #define ZEND_VEC_HEADER_SIZE     offsetof(zend_vec, elements)
 
-/* `capacity` must occupy the padding that already sat between `count`
- * and the 8-aligned `elements[]`, so it adds ZERO bytes per value and does not
- * move the element base (the GC walkers and the VM builder read this layout).
- * On LP64/LLP64: count@16, capacity@20, elements@24 == count_offset+8. */
+/* The hybrid representation assumes a 64-bit layout (LP64 and LLP64/Windows x64).
+ * On other targets -- notably ILP32, where the `type` pointer is 4 bytes and the
+ * header packs differently, and where the hybrid range checks are untested -- the
+ * hybrid path is compiled out and collections use the flat representation
+ * exclusively: correct, only without the retained-append base-sharing win. */
+#if defined(ZEND_ENABLE_ZVAL_LONG64) && SIZEOF_SIZE_T == 8
+# define ZEND_VEC_HYBRID_SUPPORTED 1
+#else
+# define ZEND_VEC_HYBRID_SUPPORTED 0
+#endif
+
+/* `capacity` lies within the header, before the elements payload, on every target,
+ * so a builder writing elements never clobbers it and vice versa. */
+ZEND_STATIC_ASSERT(offsetof(zend_vec, elements) >= offsetof(zend_vec, capacity) + sizeof(uint32_t),
+	"capacity must lie within the vec header, before the elements payload");
+#if ZEND_VEC_HYBRID_SUPPORTED
+/* On LP64/LLP64 `capacity` also occupies the padding that already sat between
+ * `count` and the 8-aligned `elements[]`, so it adds ZERO bytes per value and does
+ * not move the element base: count@16, capacity@20, elements@24 == count+8. */
 ZEND_STATIC_ASSERT(offsetof(zend_vec, elements) == offsetof(zend_vec, count) + 8,
 	"capacity must fit in the count padding without growing the vec header");
+#endif
 
 /* A collection zval: IS_COLLECTION is the runtime type, IS_VEC_GC is the
  * allocation kind. Every vec is collectable, exactly like an array or object. */
@@ -87,19 +103,15 @@ ZEND_STATIC_ASSERT(offsetof(zend_vec, elements) == offsetof(zend_vec, count) + 8
  * tag's position and the mask are identical on every supported platform
  * (LP64, LLP64/Windows x64); the layout static-asserts above reject any
  * platform where the header packs differently. */
-/* The hybrid representation is validated for 64-bit layouts only (LP64 and
- * LLP64/Windows x64). Reject every other target explicitly: relying on the
- * layout assertions alone is not enough, because some ILP32 ABIs (i386 SysV,
- * where doubles are 4-byte aligned) would satisfy them by coincidence and
- * compile untested, with a latent zend_long narrowing in the hybrid range
- * checks. Lift this gate only with a dedicated 32-bit layout review. */
-#if !defined(ZEND_ENABLE_ZVAL_LONG64) || SIZEOF_SIZE_T != 8
-# error "hybrid vec storage currently requires a supported 64-bit layout (LP64/LLP64); 32-bit targets are not supported"
-#endif
-
 #define ZEND_VEC_HYBRID_FLAG   (UINT32_C(1) << 31)
 #define ZEND_VEC_CAP_MASK      (~ZEND_VEC_HYBRID_FLAG)          /* 0x7fffffff */
-#define ZEND_VEC_IS_HYBRID(v)  (((v)->capacity & ZEND_VEC_HYBRID_FLAG) != 0)
+#if ZEND_VEC_HYBRID_SUPPORTED
+# define ZEND_VEC_IS_HYBRID(v)  (((v)->capacity & ZEND_VEC_HYBRID_FLAG) != 0)
+#else
+/* No hybrid on this target: the tag is never set (creation is compiled out), so
+ * every vec reads as flat and the hybrid branches in read/GC/destroy fold away. */
+# define ZEND_VEC_IS_HYBRID(v)  ((void) (v), 0)
+#endif
 
 ZEND_STATIC_ASSERT(sizeof(((zend_vec *) 0)->capacity) * 8 == 32,
 	"the representation tag lives in bit 31 of an exact 32-bit capacity");

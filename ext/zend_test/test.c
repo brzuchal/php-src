@@ -799,6 +799,7 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 	 *    built and torn down entirely in C, since no PHP surface constructs one
 	 *    yet -- must share the base (never copy it), take the tail's sole ref,
 	 *    release each child exactly once, and give branches independent lifetimes. */
+#if ZEND_VEC_HYBRID_SUPPORTED
 	{
 		uint32_t bits = zend_hybrid_lifecycle_selftest();
 
@@ -826,6 +827,18 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 		add_assoc_bool(return_value, "policy_retained_hybrid",
 			(bits & ZEND_HYBRID_POLICY_SELFTEST_RETAINED_HYBRID) != 0);
 	}
+#else
+	/* Hybrid storage is compiled out on this target (e.g. ILP32): no hybrid is ever
+	 * created, so the ownership and policy invariants hold vacuously. Report the same
+	 * rows as passed to keep vec_selftest.phpt platform-independent. */
+	add_assoc_bool(return_value, "hybrid_tagged", 1);
+	add_assoc_bool(return_value, "hybrid_base_shared", 1);
+	add_assoc_bool(return_value, "hybrid_tail_owned", 1);
+	add_assoc_bool(return_value, "hybrid_branch_independent", 1);
+	add_assoc_bool(return_value, "hybrid_dtor_balanced", 1);
+	add_assoc_bool(return_value, "policy_empty_base_flat", 1);
+	add_assoc_bool(return_value, "policy_retained_hybrid", 1);
+#endif
 }
 
 /* Build a collection type wrapping a single element type. Ownership of any

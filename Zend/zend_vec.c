@@ -607,8 +607,14 @@ ZEND_API zend_vec *zend_vec_append_value(zend_vec *base, zval *value, bool exclu
 			/* Flat consumable temporary: mutate/grow in place. */
 			return zend_vec_create_with(base, value, /* prepend */ false, /* exclusive */ true);
 		}
-		/* Retained/shared flat append: share base, one-element tail -> HYBRID. */
-		return zend_flat_append_to_hybrid(base, value);
+		/* Retained/shared flat append: share base, one-element tail -> HYBRID. On a
+		 * target without hybrid support the tag can never be set, so fall back to a
+		 * plain flat copy (correct, only without the base-sharing win). The predicate
+		 * is a compile-time constant, so exactly one arm is kept. */
+		if (ZEND_VEC_HYBRID_SUPPORTED) {
+			return zend_flat_append_to_hybrid(base, value);
+		}
+		return zend_vec_create_with(base, value, /* prepend */ false, /* exclusive */ false);
 	}
 
 	/* HYBRID receiver: validate the value, then run the root/tail exclusivity
