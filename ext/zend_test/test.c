@@ -1137,6 +1137,38 @@ static ZEND_FUNCTION(zend_test_vec_get)
 	RETURN_COPY(zend_stor_get(Z_VEC_P(v), (uint32_t) idx));
 }
 
+/* TEMPORARY (benchmark-only, uncommitted): report the storage representation of
+ * a vec value so the C1 benchmark can PROVE a value is hybrid instead of
+ * inferring it from timing. flat: kind/count/capacity/tail=0; hybrid:
+ * kind/count/base/tail. */
+static ZEND_FUNCTION(zend_test_vec_repr)
+{
+	zval *v;
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_ZVAL(v)
+	ZEND_PARSE_PARAMETERS_END();
+
+	ZVAL_DEREF(v);
+	if (Z_TYPE_P(v) != IS_COLLECTION) {
+		zend_argument_type_error(1, "must be a collection");
+		RETURN_THROWS();
+	}
+	zend_vec *vec = Z_VEC_P(v);
+	array_init(return_value);
+	add_assoc_long(return_value, "count", (zend_long) vec->count);
+	if (ZEND_VEC_IS_HYBRID(vec)) {
+		add_assoc_string(return_value, "kind", "hybrid");
+		add_assoc_long(return_value, "base",
+			(zend_long) ZEND_VEC_COUNT(ZEND_VEC_HYBRID_BASE_VEC(vec)));
+		add_assoc_long(return_value, "tail",
+			(zend_long) ZEND_VEC_COUNT(Z_VEC_P(ZEND_VEC_HYBRID_TAIL(vec))));
+	} else {
+		add_assoc_string(return_value, "kind", "flat");
+		add_assoc_long(return_value, "capacity", (zend_long) (vec->capacity & ZEND_VEC_CAP_MASK));
+		add_assoc_long(return_value, "tail", 0);
+	}
+}
+
 /* Structural-key hooks. These exercise the PROBE side only: a key computed by
  * walking a raw compiler-produced zend_type tree. No interning exists yet. */
 static bool test_collection_first_param_type(zend_string *fname, zend_type *out)

@@ -1,5 +1,5 @@
 /* This is a generated file, edit test.stub.php instead.
- * Stub hash: 52811b8c2aadf8c8e6cdaf9a0e95da21e248644a
+ * Stub hash: 63726b9d6caacd02c7b83d950ed05a8515d96e96
  * Has decl header: yes */
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_trigger_bailout, 0, 0, 0)
@@ -139,6 +139,8 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_vec_get, 0, 0, 2)
 	ZEND_ARG_INFO(0, vec)
 	ZEND_ARG_INFO(0, index)
 ZEND_END_ARG_INFO()
+
+#define arginfo_zend_test_vec_repr arginfo_zend_test_vec_count
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_collection_key, 0, 0, 1)
 	ZEND_ARG_INFO(0, function)
@@ -345,6 +347,7 @@ static ZEND_FUNCTION(zend_test_type_code_alias_selftest);
 static ZEND_FUNCTION(zend_test_make_vec);
 static ZEND_FUNCTION(zend_test_vec_count);
 static ZEND_FUNCTION(zend_test_vec_get);
+static ZEND_FUNCTION(zend_test_vec_repr);
 static ZEND_FUNCTION(zend_test_collection_key);
 static ZEND_FUNCTION(zend_test_collection_key_supported);
 static ZEND_FUNCTION(zend_test_collection_key_positional);
@@ -469,6 +472,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_test_make_vec, arginfo_zend_test_make_vec)
 	ZEND_FE(zend_test_vec_count, arginfo_zend_test_vec_count)
 	ZEND_FE(zend_test_vec_get, arginfo_zend_test_vec_get)
+	ZEND_FE(zend_test_vec_repr, arginfo_zend_test_vec_repr)
 	ZEND_FE(zend_test_collection_key, arginfo_zend_test_collection_key)
 	ZEND_FE(zend_test_collection_key_supported, arginfo_zend_test_collection_key_supported)
 	ZEND_FE(zend_test_collection_key_positional, arginfo_zend_test_collection_key_positional)

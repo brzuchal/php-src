@@ -334,6 +334,9 @@ namespace {
 
     function zend_test_vec_get(mixed $vec, int $index): mixed {}
 
+    /** TEMPORARY (benchmark-only): storage representation of a vec value. */
+    function zend_test_vec_repr(mixed $vec): array {}
+
     /** Structural key of the first parameter's collection descriptor. */
     function zend_test_collection_key(string $function): int {}
 
