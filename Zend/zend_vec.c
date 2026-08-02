@@ -77,10 +77,15 @@ ZEND_API bool zend_vec_type_is_supported(zend_type type)
 static zend_vec *zend_vec_alloc(uint32_t count, const zend_collection_info *type)
 {
 	/* safe_emalloc computes count * sizeof(zval) + header with overflow
-	 * checking, so a large count cannot silently wrap the allocation size. */
+	 * checking, so a large count cannot silently wrap the allocation size.
+	 * `count` here is the number of slots to reserve, i.e. the capacity; the
+	 * logical count starts at 0 and grows as elements are installed. Callers
+	 * that want an exact value pass the final element count (capacity == count);
+	 * a copy path may pass a grown capacity to leave spare slots. */
 	zend_vec *vec = safe_emalloc(count, sizeof(zval), ZEND_VEC_HEADER_SIZE);
 
 	GC_SET_REFCOUNT(vec, 1);
+	vec->capacity = count;
 	/* Collectable, uniformly and unconditionally, exactly like an array or an
 	 * object. An element may be an object or an array and can therefore close a
 	 * cycle back to this vec, so the collector must be able to reach it. The

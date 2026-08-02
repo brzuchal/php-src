@@ -41,7 +41,8 @@ BEGIN_EXTERN_C()
 typedef struct _zend_vec {
 	zend_refcounted_h gc;
 	const zend_collection_info *type;   /* borrowed; the whole vec[T], not just T */
-	uint32_t          count;
+	uint32_t          count;            /* logical size: iteration/GC/serialize bound  */
+	uint32_t          capacity;         /* allocated slots; count <= capacity          */
 	zval              elements[1];
 } zend_vec;
 
@@ -50,6 +51,13 @@ typedef struct _zend_vec {
 
 /* offsetof is the only layout contract; do not assume a fixed header size. */
 #define ZEND_VEC_HEADER_SIZE     offsetof(zend_vec, elements)
+
+/* `capacity` must occupy the padding that already sat between `count` and the
+ * 8-aligned `elements[]`, so it adds ZERO bytes per value and does not move
+ * the element base (the GC walkers and the VM builder read this layout).
+ * On LP64/LLP64: count@16, capacity@20, elements@24 == count_offset+8. */
+ZEND_STATIC_ASSERT(offsetof(zend_vec, elements) == offsetof(zend_vec, count) + 8,
+	"capacity must fit in the count padding without growing the vec header");
 
 /* A collection zval: IS_COLLECTION is the runtime type, IS_VEC_GC is the
  * allocation kind. Every vec is collectable, exactly like an array or object. */
