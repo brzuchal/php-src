@@ -1276,7 +1276,7 @@ static bool zend_check_intersection_type_from_list(
 
 static zend_always_inline bool zend_check_type_slow(
 		const zend_type *type, zval *arg, const zend_reference *ref,
-		bool is_return_type, bool is_internal)
+		bool current_frame, bool is_internal)
 {
 	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*type)) {
 		return zend_check_collection_type(type, arg);
@@ -1335,7 +1335,7 @@ static zend_always_inline bool zend_check_type_slow(
 		/* We cannot have conversions for typed refs. */
 		return 0;
 	}
-	if (is_internal && is_return_type) {
+	if (is_internal && current_frame) {
 		/* For internal returns, the type has to match exactly, because we're not
 		 * going to check it for non-debug builds, and there will be no chance to
 		 * apply coercions. */
@@ -1343,7 +1343,7 @@ static zend_always_inline bool zend_check_type_slow(
 	}
 
 	return zend_verify_scalar_type_hint(type_mask, arg,
-		is_return_type ? ZEND_RET_USES_STRICT_TYPES() : ZEND_ARG_USES_STRICT_TYPES(),
+		current_frame ? ZEND_RET_USES_STRICT_TYPES() : ZEND_ARG_USES_STRICT_TYPES(),
 		is_internal);
 
 	/* Special handling for IS_VOID is not necessary (for return types),
@@ -1351,7 +1351,7 @@ static zend_always_inline bool zend_check_type_slow(
 }
 
 static zend_always_inline bool zend_check_type(
-		const zend_type *type, zval *arg, bool is_return_type, bool is_internal)
+		const zend_type *type, zval *arg, bool current_frame, bool is_internal)
 {
 	const zend_reference *ref = NULL;
 	ZEND_ASSERT(ZEND_TYPE_IS_SET(*type));
@@ -1365,14 +1365,21 @@ static zend_always_inline bool zend_check_type(
 		return 1;
 	}
 
-	return zend_check_type_slow(type, arg, ref, is_return_type, is_internal);
+	return zend_check_type_slow(type, arg, ref, current_frame, is_internal);
+}
+
+/* We can not expose zend_check_type() directly because it's inline and uses static functions */
+ZEND_API bool zend_check_type_ex(
+		const zend_type *type, zval *arg, bool current_frame, bool is_internal)
+{
+	return zend_check_type(type, arg, current_frame, is_internal);
 }
 
 ZEND_API bool zend_check_user_type_slow(
-		const zend_type *type, zval *arg, const zend_reference *ref, bool is_return_type)
+		const zend_type *type, zval *arg, const zend_reference *ref, bool current_frame)
 {
 	return zend_check_type_slow(
-		type, arg, ref, is_return_type, /* is_internal */ false);
+		type, arg, ref, current_frame, /* is_internal */ false);
 }
 
 static zend_always_inline bool zend_verify_recv_arg_type(const zend_function *zf, uint32_t arg_num, zval *arg)
@@ -5682,6 +5689,7 @@ ZEND_API void zend_unfinished_calls_gc(zend_execute_data *execute_data, zend_exe
 				case ZEND_DO_UCALL:
 				case ZEND_DO_FCALL_BY_NAME:
 				case ZEND_CALLABLE_CONVERT:
+				case ZEND_CALLABLE_CONVERT_PARTIAL:
 					level++;
 					break;
 				case ZEND_INIT_FCALL:
@@ -5738,6 +5746,7 @@ ZEND_API void zend_unfinished_calls_gc(zend_execute_data *execute_data, zend_exe
 					case ZEND_DO_UCALL:
 					case ZEND_DO_FCALL_BY_NAME:
 					case ZEND_CALLABLE_CONVERT:
+					case ZEND_CALLABLE_CONVERT_PARTIAL:
 						level++;
 						break;
 					case ZEND_INIT_FCALL:
@@ -5818,6 +5827,7 @@ static void cleanup_unfinished_calls(zend_execute_data *execute_data, uint32_t o
 					case ZEND_DO_UCALL:
 					case ZEND_DO_FCALL_BY_NAME:
 					case ZEND_CALLABLE_CONVERT:
+					case ZEND_CALLABLE_CONVERT_PARTIAL:
 						level++;
 						break;
 					case ZEND_INIT_FCALL:
@@ -5875,6 +5885,7 @@ static void cleanup_unfinished_calls(zend_execute_data *execute_data, uint32_t o
 						case ZEND_DO_UCALL:
 						case ZEND_DO_FCALL_BY_NAME:
 						case ZEND_CALLABLE_CONVERT:
+						case ZEND_CALLABLE_CONVERT_PARTIAL:
 							level++;
 							break;
 						case ZEND_INIT_FCALL:
@@ -6594,9 +6605,10 @@ zval * ZEND_FASTCALL zend_handle_named_arg(
 		}
 	} else {
 		arg = ZEND_CALL_VAR_NUM(call, arg_offset);
+
 		if (UNEXPECTED(!Z_ISUNDEF_P(arg))) {
-			zend_throw_error(NULL, "Named parameter $%s overwrites previous argument",
-				ZSTR_VAL(arg_name));
+			zend_throw_error(NULL, "Named parameter $%s overwrites previous %s",
+				ZSTR_VAL(arg_name), Z_TYPE_P(arg) == _IS_PLACEHOLDER ? "placeholder" : "argument");
 			return NULL;
 		}
 	}

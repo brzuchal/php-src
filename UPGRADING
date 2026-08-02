@@ -19,6 +19,11 @@ PHP 8.6 UPGRADE NOTES
 1. Backward Incompatible Changes
 ========================================
 
+- Core:
+  . ??/empty() on a magic property no longer call __get() when __isset()
+    has materialised the property by writing into the property table.
+    The freshly-written value is returned directly. isset() is unaffected.
+
 - COM
   . It is no longer possible to clone variant objects, this is because
     the cloning behaviour was ill defined.
@@ -41,6 +46,12 @@ PHP 8.6 UPGRADE NOTES
 - GD:
   . imagesetstyle(), imagefilter() and imagecrop() filter their array arguments
     types / values and raise a TypeError / ValueError accordingly.
+
+- GMP:
+  . GMP power and shift operators now throw ValueError when GMP right operands
+    are outside the unsigned long range, instead of silently truncating them.
+  . GMP integer string parsing now throw ValueError strings containing NUL
+    bytes, instead of silently truncating them.
 
 - Intl:
   . Passing a non-stringable object as a time zone to Intl APIs that accept
@@ -235,6 +246,8 @@ PHP 8.6 UPGRADE NOTES
     RFC: https://wiki.php.net/rfc/debugable-enums
   . #[\Override] can now be applied to class constants, including enum cases.
     RFC: https://wiki.php.net/rfc/override_constants
+  . Implemented partial function application
+    RFC: https://wiki.php.net/rfc/partial_function_application_v2
 
 - Curl:
   . curl_getinfo() return array now includes a new size_delivered key, which
@@ -558,6 +571,8 @@ PHP 8.6 UPGRADE NOTES
 - Core:
   . In case of a hard OOM PHP now calls abort() instead of exit(1), changing
     the exit code to 134 and possibly creating a core dump.
+  . The PHP_OS_FAMILY constant has an AIX value for when running on AIX or
+    IBM i via PASE.
 
 ========================================
 14. Performance Improvements

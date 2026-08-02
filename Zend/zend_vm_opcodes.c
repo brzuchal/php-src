@@ -21,7 +21,7 @@
 #include <zend.h>
 #include <zend_vm_opcodes.h>
 
-static const char *zend_vm_opcodes_names[216] = {
+static const char *zend_vm_opcodes_names[218] = {
 	"ZEND_NOP",
 	"ZEND_ADD",
 	"ZEND_SUB",
@@ -234,13 +234,15 @@ static const char *zend_vm_opcodes_names[216] = {
 	"ZEND_INIT_PARENT_PROPERTY_HOOK_CALL",
 	"ZEND_DECLARE_ATTRIBUTED_CONST",
 	"ZEND_TYPE_ASSERT",
+	"ZEND_CALLABLE_CONVERT_PARTIAL",
+	"ZEND_SEND_PLACEHOLDER",
 	"ZEND_CONSTRUCT_COLLECTION",
 	"ZEND_INIT_COLLECTION",
 	"ZEND_ADD_COLLECTION_ELEMENT",
 	"ZEND_FINISH_COLLECTION",
 };
 
-static uint32_t zend_vm_opcodes_flags[216] = {
+static uint32_t zend_vm_opcodes_flags[218] = {
 	0x00000000,
 	0x00000b0b,
 	0x00000b0b,
@@ -453,6 +455,8 @@ static uint32_t zend_vm_opcodes_flags[216] = {
 	0x01001103,
 	0x00000303,
 	0x01000003,
+	0x010003a0,
+	0x00001301,
 	0x01000103,
 	0x01000110,
 	0x00000103,

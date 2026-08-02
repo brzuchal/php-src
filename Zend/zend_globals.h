@@ -325,6 +325,7 @@ struct _zend_executor_globals {
 	zend_strtod_state strtod_state;
 
 	HashTable callable_convert_cache;
+	HashTable partial_function_application_cache;
 
 	/* Request tier of canonical collection type nodes. Owns every node it
 	 * holds; values borrow. Destroyed in zend_shutdown_executor_values(). */
