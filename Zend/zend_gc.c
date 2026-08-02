@@ -990,8 +990,13 @@ handle_zvals:
 		 * packed-array walker below applies unchanged. Nested collections need
 		 * no special case: a contained vec is simply another collectable
 		 * element that the same walker follows. */
-		n = ((zend_vec*)ref)->count;
-		zv = ((zend_vec*)ref)->elements;
+		/* Traverse via the storage span contract. FLAT is exactly one span
+		 * {elements, count}, so this compiles to the same n/zv load as before;
+		 * a multi-span backend (hybrid/trie) must loop every span here. */
+		zend_stor_span span = zend_stor_span_get((zend_vec*)ref, 0);
+		ZEND_ASSERT(zend_stor_span_count((zend_vec*)ref) == 1);
+		n = span.n;
+		zv = span.base;
 		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		ZEND_ASSERT((zend_array*)ref != &EG(symbol_table));
@@ -1176,8 +1181,13 @@ handle_zvals:
 		 * packed-array walker below applies unchanged. Nested collections need
 		 * no special case: a contained vec is simply another collectable
 		 * element that the same walker follows. */
-		n = ((zend_vec*)ref)->count;
-		zv = ((zend_vec*)ref)->elements;
+		/* Traverse via the storage span contract. FLAT is exactly one span
+		 * {elements, count}, so this compiles to the same n/zv load as before;
+		 * a multi-span backend (hybrid/trie) must loop every span here. */
+		zend_stor_span span = zend_stor_span_get((zend_vec*)ref, 0);
+		ZEND_ASSERT(zend_stor_span_count((zend_vec*)ref) == 1);
+		n = span.n;
+		zv = span.base;
 		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		ZEND_ASSERT(((zend_array*)ref) != &EG(symbol_table));
@@ -1403,8 +1413,13 @@ handle_zvals:
 		 * packed-array walker below applies unchanged. Nested collections need
 		 * no special case: a contained vec is simply another collectable
 		 * element that the same walker follows. */
-		n = ((zend_vec*)ref)->count;
-		zv = ((zend_vec*)ref)->elements;
+		/* Traverse via the storage span contract. FLAT is exactly one span
+		 * {elements, count}, so this compiles to the same n/zv load as before;
+		 * a multi-span backend (hybrid/trie) must loop every span here. */
+		zend_stor_span span = zend_stor_span_get((zend_vec*)ref, 0);
+		ZEND_ASSERT(zend_stor_span_count((zend_vec*)ref) == 1);
+		n = span.n;
+		zv = span.base;
 		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		ht = (HashTable *)ref;
@@ -1653,8 +1668,13 @@ handle_zvals:
 		if (!GC_INFO(ref)) {
 			gc_add_garbage(ref);
 		}
-		n = ((zend_vec*)ref)->count;
-		zv = ((zend_vec*)ref)->elements;
+		/* Traverse via the storage span contract. FLAT is exactly one span
+		 * {elements, count}, so this compiles to the same n/zv load as before;
+		 * a multi-span backend (hybrid/trie) must loop every span here. */
+		zend_stor_span span = zend_stor_span_get((zend_vec*)ref, 0);
+		ZEND_ASSERT(zend_stor_span_count((zend_vec*)ref) == 1);
+		n = span.n;
+		zv = span.base;
 		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		/* optimization: color is GC_BLACK (0) */
@@ -1854,8 +1874,13 @@ handle_zvals:
 		 * packed-array walker below applies unchanged. Nested collections need
 		 * no special case: a contained vec is simply another collectable
 		 * element that the same walker follows. */
-		n = ((zend_vec*)ref)->count;
-		zv = ((zend_vec*)ref)->elements;
+		/* Traverse via the storage span contract. FLAT is exactly one span
+		 * {elements, count}, so this compiles to the same n/zv load as before;
+		 * a multi-span backend (hybrid/trie) must loop every span here. */
+		zend_stor_span span = zend_stor_span_get((zend_vec*)ref, 0);
+		ZEND_ASSERT(zend_stor_span_count((zend_vec*)ref) == 1);
+		n = span.n;
+		zv = span.base;
 		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		ht = (zend_array*)ref;

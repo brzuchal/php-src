@@ -67,6 +67,101 @@ typedef struct _zend_vec {
 #define ZEND_VEC_COUNT(vec)      ((vec)->count)
 #define ZEND_VEC_ELEMENTS(vec)   ((vec)->elements)
 
+/* ---- Storage contract ------------------------------------------------------
+ * A narrow internal contract so collection operations do not hard-code the
+ * flat contiguous payload: every consumer goes through the representation
+ * dispatch and the primitive vocabulary below (get / iterate / count / span
+ * enumeration), never through raw `elements` arithmetic.
+ *
+ * With a single FLAT representation the tag is a COMPILE-TIME CONSTANT: every
+ * non-flat switch arm is dead-code-eliminated and the hot get/count/iterate
+ * collapse to the exact `elements[i]` / `count` loads they compiled to before
+ * this contract existed, so the abstraction adds zero overhead on the flat
+ * backend. A second representation replaces ZEND_STOR_REPR() with a real
+ * per-value runtime tag; call sites and primitives stay identical. */
+typedef enum _zend_stor_repr {
+	ZEND_STOR_FLAT = 0,
+} zend_stor_repr;
+
+/* Single-representation constant; the argument is evaluated for
+ * side-effect-freedom only. */
+#define ZEND_STOR_REPR(c)        ((void) (c), ZEND_STOR_FLAT)
+
+/* Hot path: logical element count. Identical for every representation. */
+static zend_always_inline uint32_t zend_stor_count(const zend_vec *c)
+{
+	return c->count;
+}
+
+/* Hot path R1: O(1) random read of element `index` (0 <= index < count). Backs
+ * the single scalar dim-read choke point (zend_collection_dim_lookup). */
+static zend_always_inline zval *zend_stor_get(const zend_vec *c, uint32_t index)
+{
+	switch (ZEND_STOR_REPR(c)) {
+		case ZEND_STOR_FLAT:
+			return (zval *) &c->elements[index];
+		default: ZEND_UNREACHABLE();
+	}
+}
+
+/* Hot path R2: ordered read at logical position `pos`. The foreach cursor stays
+ * a bare uint32_t index (the JIT/VM assume u2.fe_pos is a plain int and that a
+ * collection owns no ht_iterators slot, so the cursor must stay index-shaped). */
+static zend_always_inline zval *zend_stor_iter(const zend_vec *c, uint32_t pos)
+{
+	switch (ZEND_STOR_REPR(c)) {
+		case ZEND_STOR_FLAT:
+			return (zval *) &c->elements[pos];
+		default: ZEND_UNREACHABLE();
+	}
+}
+
+/* GC / serialization / bulk traversal: enumerate contiguous zval runs. FLAT is
+ * exactly one span {elements, count}; hybrid/trie yield base + chunk/leaf spans.
+ * GC keeps walking contiguous runs (no per-element call on the mark/scan path). */
+typedef struct _zend_stor_span {
+	zval    *base;
+	uint32_t n;
+} zend_stor_span;
+
+static zend_always_inline uint32_t zend_stor_span_count(const zend_vec *c)
+{
+	switch (ZEND_STOR_REPR(c)) {
+		case ZEND_STOR_FLAT:
+			return 1;
+		default: ZEND_UNREACHABLE();
+	}
+}
+
+static zend_always_inline zend_stor_span zend_stor_span_get(const zend_vec *c, uint32_t s)
+{
+	ZEND_ASSERT(s < zend_stor_span_count(c));
+	switch (ZEND_STOR_REPR(c)) {
+		case ZEND_STOR_FLAT: {
+			zend_stor_span sp;
+			sp.base = (zval *) c->elements;
+			sp.n    = c->count;
+			return sp;
+		}
+		default: ZEND_UNREACHABLE();
+	}
+}
+
+/* Encapsulated builder append: move `value` into the next builder slot and raise
+ * count (install-then-publish). Replaces the raw elements[count]/count++ that the
+ * ADD_COLLECTION_ELEMENT VM handler open-codes, so the payload layout stays
+ * private. Ownership of `value` transfers into the slot (caller relinquishes). */
+static zend_always_inline void zend_stor_builder_append(zend_vec *b, zval *value)
+{
+	switch (ZEND_STOR_REPR(b)) {
+		case ZEND_STOR_FLAT:
+			ZVAL_COPY_VALUE(&b->elements[b->count], value);
+			b->count++;
+			return;
+		default: ZEND_UNREACHABLE();
+	}
+}
+
 /* The element subset a value may hold, for a *leaf* member: a pure builtin mask
  * of exactly one element kind, or a single class-name zend_string with no extra
  * may-be bits. Narrower than what canonicalization accepts as a *type*.

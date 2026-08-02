@@ -6746,9 +6746,10 @@ ZEND_VM_HANDLER(214, ZEND_ADD_COLLECTION_ELEMENT, CONST|TMP|VAR|CV, UNUSED)
 	vec = Z_VEC_P(EX_VAR(opline->result.var));
 	/* Store, then publish the slot by raising count AFTER the write, so destroy/GC of the
 	 * partial payload never read an uninitialised slot. No type validation here: FINISH
-	 * validates every slot once all element expressions have run (preserves eval order). */
-	ZVAL_COPY_VALUE(&vec->elements[vec->count], value_ptr);
-	vec->count++;
+	 * validates every slot once all element expressions have run (preserves eval order).
+	 * The store + count-raise is the storage contract's encapsulated append, so the payload
+	 * layout stays private to the backend. */
+	zend_stor_builder_append(vec, value_ptr);
 	ZEND_VM_NEXT_OPCODE();
 }
 
@@ -7541,15 +7542,16 @@ ZEND_VM_HELPER(zend_fe_fetch_collection_helper, ANY, ANY)
 	ZEND_ASSERT(Z_TYPE_P(array) == IS_COLLECTION);
 	vec = Z_VEC_P(array);
 	pos = Z_FE_POS_P(array);
-	if (UNEXPECTED(pos >= ZEND_VEC_COUNT(vec))) {
+	if (UNEXPECTED(pos >= zend_stor_count(vec))) {
 		/* reached end of iteration */
 		ZEND_VM_SET_RELATIVE_OPCODE(opline, opline->extended_value);
 		ZEND_VM_CONTINUE();
 	}
-	/* Packed storage has no holes in [0, count): index directly, no skip loop.
-	 * The position advances in the result temp only; the shared vec is never
-	 * written, so a second loop over the same value is independent. */
-	value = ZEND_VEC_ELEMENTS(vec) + pos;
+	/* Ordered read at logical position pos via the storage contract. Packed
+	 * storage has no holes in [0, count): FLAT resolves to elements[pos] with no
+	 * skip loop. The position advances in the result temp only; the shared vec is
+	 * never written, so a second loop over the same value is independent. */
+	value = zend_stor_iter(vec, pos);
 	value_type = Z_TYPE_INFO_P(value);
 	Z_FE_POS_P(array) = pos + 1;
 	if (RETURN_VALUE_USED(opline)) {

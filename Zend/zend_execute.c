@@ -3243,7 +3243,7 @@ static zend_always_inline zend_collection_dim_result zend_collection_dim_lookup(
 	 * and never writes through it (no writable slot is exposed to userland). The const is
 	 * dropped only to satisfy the value-copy macros; the collection itself is never mutated
 	 * (its handle here is `const zend_vec *`). */
-	*element = (zval *) &vec->elements[i];
+	*element = zend_stor_get(vec, (uint32_t) i);
 	return ZEND_COLLECTION_DIM_OK;
 }
 
@@ -3787,7 +3787,7 @@ ZEND_API zend_result ZEND_FASTCALL zend_collection_read_intrinsic_property(
 {
 	ZEND_ASSERT(Z_TYPE_P(collection) == IS_COLLECTION);
 
-	uint32_t count = ZEND_VEC_COUNT(Z_VEC_P((zval *) collection));
+	uint32_t count = zend_stor_count(Z_VEC_P((zval *) collection));
 
 	if (zend_string_equals_literal(name, "count")) {
 		ZVAL_LONG(result, (zend_long) count);
