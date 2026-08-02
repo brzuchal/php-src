@@ -200,7 +200,7 @@ ZEND_API zend_vec *zend_vec_create(
  * against the element type (base's elements are already valid). Returns a fresh
  * vec (refcount 1), or NULL when the value does not satisfy the element type
  * (caller raises a TypeError). This is the primitive behind vec::append/prepend. */
-ZEND_API zend_vec *zend_vec_create_with(const zend_vec *base, zval *value, bool prepend);
+ZEND_API zend_vec *zend_vec_create_with(zend_vec *base, zval *value, bool prepend, bool exclusive);
 
 /* Outcome of an index-addressed builder (with_at / without_at). Only OK yields a
  * result; the two failure codes tell the caller which diagnostic to raise, so the
@@ -219,7 +219,7 @@ typedef enum _zend_vec_with_status {
  * BAD_INDEX (out of range) or BAD_VALUE (value fails the element type). The
  * primitive behind vec::withAt. */
 ZEND_API zend_vec *zend_vec_with_at(
-	const zend_vec *base, zend_long index, zval *value, zend_vec_with_status *status);
+	zend_vec *base, zend_long index, zval *value, zend_vec_with_status *status, bool exclusive);
 
 /* Build a new vec that is `base` with the element at `index` removed and the
  * following elements compacted down. Removing the only element yields an empty
@@ -228,7 +228,7 @@ ZEND_API zend_vec *zend_vec_with_at(
  * NULL with *status == BAD_INDEX (the only possible failure: there is no value to
  * type-check). The primitive behind vec::withoutAt. */
 ZEND_API zend_vec *zend_vec_without_at(
-	const zend_vec *base, zend_long index, zend_vec_with_status *status);
+	zend_vec *base, zend_long index, zend_vec_with_status *status, bool exclusive);
 
 /* Outcome of the tuple index-addressed builder (with_at). Mirrors the vec status,
  * but a tuple is positional: BAD_VALUE means the replacement fails the type of the

@@ -81,7 +81,7 @@ static zend_vec *zend_vec_alloc(uint32_t count, const zend_collection_info *type
 	 * `count` here is the number of slots to reserve, i.e. the capacity; the
 	 * logical count starts at 0 and grows as elements are installed. Callers
 	 * that want an exact value pass the final element count (capacity == count);
-	 * a copy path may pass a grown capacity to leave spare slots. */
+	 * the append copy path passes a grown capacity for exclusive-consume spare. */
 	zend_vec *vec = safe_emalloc(count, sizeof(zval), ZEND_VEC_HEADER_SIZE);
 
 	GC_SET_REFCOUNT(vec, 1);
@@ -321,7 +321,21 @@ ZEND_API void zend_set_builder_dedup(zend_vec *set)
  * a fresh vec (refcount 1) on success, or NULL (nothing is allocated on the
  * failure path) when `value` does not satisfy the element type, so the caller
  * raises a TypeError. */
-ZEND_API zend_vec *zend_vec_create_with(const zend_vec *base, zval *value, bool prepend)
+/* Growth for the append copy path when an exclusive value has outgrown its
+ * spare capacity (a transient chain continuation): give headroom so subsequent
+ * exclusive appends consume instead of reallocating. Small values get +4, larger
+ * +50%. Overflow-safe (never returns < final). A copy off a *retained* base
+ * (exclusive == false) allocates exact -- no waste on single updates. */
+static zend_always_inline uint32_t zend_vec_grow_capacity(uint32_t final)
+{
+	uint32_t extra = final < 8 ? 4u : (final >> 1);
+	if (UNEXPECTED(extra > UINT32_MAX - final)) {
+		return final;
+	}
+	return final + extra;
+}
+
+ZEND_API zend_vec *zend_vec_create_with(zend_vec *base, zval *value, bool prepend, bool exclusive)
 {
 	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_VEC);
 	ZVAL_DEREF(value);
@@ -329,7 +343,31 @@ ZEND_API zend_vec *zend_vec_create_with(const zend_vec *base, zval *value, bool 
 		return NULL;
 	}
 
-	zend_vec *out = zend_vec_alloc(base->count + 1, base->type);
+	/* Exclusive-consume fast path (append only). The caller proved the receiver
+	 * is observed by no other zval -- GC_REFCOUNT == 1, established by the frame
+	 * addref + FREE_OP1 of a consumed TMP/VAR (frame addref plus FREE_OP1 of a consumed TMP/VAR).
+	 * With a spare slot, install the value and publish by raising count: no
+	 * allocation, no copy. Returns `base` itself so the handler transfers base's
+	 * sole reference to the result. The value was validated above, so a type
+	 * error never mutates the receiver. prepend has no tail slot, so it copies. */
+	if (exclusive && base->count < base->capacity) {
+		if (prepend) {
+			/* Shift the initialized prefix up by one into the spare tail slot, then
+			 * place the value at index 0. memmove *moves* each zval (refcount
+			 * preserved, no addref); no allocation. O(n) move, not O(1), but avoids
+			 * the copy allocation -- benchmarked separately, no asymptotic claim. */
+			memmove(&base->elements[1], &base->elements[0], base->count * sizeof(zval));
+			ZVAL_COPY(&base->elements[0], value);         /* addref into slot 0        */
+		} else {
+			ZVAL_COPY(&base->elements[base->count], value); /* addref into spare slot  */
+		}
+		base->count++;                                    /* publish after the write   */
+		return base;
+	}
+
+	uint32_t final = base->count + 1;
+	uint32_t cap = exclusive ? zend_vec_grow_capacity(final) : final;
+	zend_vec *out = zend_vec_alloc(cap, base->type);
 	uint32_t at = 0;
 
 	if (prepend) {
@@ -341,8 +379,7 @@ ZEND_API zend_vec *zend_vec_create_with(const zend_vec *base, zval *value, bool 
 	if (!prepend) {
 		ZVAL_COPY(&out->elements[at++], value);
 	}
-	/* Publish all slots at once: every slot above is now initialised, so a later
-	 * destroy() reads only live zvals. */
+	/* Publish all live slots at once (<= capacity); destroy() reads only [0,count). */
 	out->count = at;
 	return out;
 }
@@ -354,7 +391,7 @@ ZEND_API zend_vec *zend_vec_create_with(const zend_vec *base, zval *value, bool 
  * detected before anything is allocated: an out-of-range index (BAD_INDEX) and a
  * value that fails the element type (BAD_VALUE). */
 ZEND_API zend_vec *zend_vec_with_at(
-		const zend_vec *base, zend_long index, zval *value, zend_vec_with_status *status)
+		zend_vec *base, zend_long index, zval *value, zend_vec_with_status *status, bool exclusive)
 {
 	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_VEC);
 	/* Wide compare: index is 64-bit and count is 32-bit, so an index at or above
@@ -372,6 +409,18 @@ ZEND_API zend_vec *zend_vec_with_at(
 	}
 
 	uint32_t at = (uint32_t) index;   /* in range: the narrowing is exact */
+
+	/* Exclusive-consume: replace one slot in place, O(1), no allocation. Both the
+	 * index and the value are validated ABOVE, so the receiver is never mutated on
+	 * a failure. The replaced element is destroyed exactly once; the receiver's
+	 * sole reference is transferred to the result by the handler. */
+	if (exclusive) {
+		i_zval_ptr_dtor(&base->elements[at]);   /* destroy the old value once */
+		ZVAL_COPY(&base->elements[at], value);  /* install the new value      */
+		*status = ZEND_VEC_WITH_OK;
+		return base;
+	}
+
 	zend_vec *out = zend_vec_alloc(base->count, base->type);
 	for (uint32_t i = 0; i < base->count; i++) {
 		if (i == at) {
@@ -393,7 +442,7 @@ ZEND_API zend_vec *zend_vec_with_at(
  * The only failure is an out-of-range index (BAD_INDEX); there is no value to
  * type-check. */
 ZEND_API zend_vec *zend_vec_without_at(
-		const zend_vec *base, zend_long index, zend_vec_with_status *status)
+		zend_vec *base, zend_long index, zend_vec_with_status *status, bool exclusive)
 {
 	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_VEC);
 	if (index < 0 || index >= (zend_long) base->count) {
@@ -402,6 +451,24 @@ ZEND_API zend_vec *zend_vec_without_at(
 	}
 
 	uint32_t skip = (uint32_t) index;
+
+	/* Exclusive-consume: remove the slot in place. Destroy the removed value once,
+	 * shift the suffix down (memmove *moves* each zval, refcount preserved), clear
+	 * the now-duplicate final slot so it is never scanned, and lower count. O(n)
+	 * move, no allocation. There is no value to validate, so nothing can fail after
+	 * the destroy. */
+	if (exclusive) {
+		i_zval_ptr_dtor(&base->elements[skip]);
+		uint32_t tail = base->count - 1u - skip;    /* elements after the removed one */
+		if (tail) {
+			memmove(&base->elements[skip], &base->elements[skip + 1], tail * sizeof(zval));
+		}
+		ZVAL_UNDEF(&base->elements[base->count - 1]);   /* clear the vacated tail slot */
+		base->count--;
+		*status = ZEND_VEC_WITH_OK;
+		return base;
+	}
+
 	zend_vec *out = zend_vec_alloc(base->count - 1, base->type);
 	uint32_t at = 0;
 	for (uint32_t i = 0; i < base->count; i++) {

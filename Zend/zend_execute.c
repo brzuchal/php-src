@@ -3901,6 +3901,28 @@ static ZEND_COLD void zend_collection_index_range_error(
 	zend_string_release(coll);
 }
 
+/* The exclusive-consume ownership condition (centralized; used by append, prepend,
+ * withAt, withoutAt): the direct-call frame owns the SOLE observable reference to the
+ * receiver, so the receiver may be mutated in place instead of copied.
+ *
+ * True iff (1) the frame is NOT a closure invocation -- a first-class callable only
+ * BORROWS the receiver from the Closure's retained value_receiver, so consuming there
+ * would corrupt the retained value and break FCC repeatability -- AND (2) no other zval
+ * references the storage (GC_REFCOUNT == 1). The direct-call INIT_METHOD_CALL branch
+ * addrefs the receiver (set_receiver) then FREE_OP1s the operand, so a *consumed*
+ * sole-owner TMP/VAR collapses to rc 1 here, while a borrowed CV or any alias stays
+ * >= 2. The consume operations never invoke userland, suspend a fiber, or re-enter, so
+ * the receiver cannot be observed at rc 1 mid-operation (observer hooks that retain it
+ * would addref, raising rc). GC-root membership is uncounted and tolerates the
+ * install-then-publish mutation. This is the same predicate PHP arrays use for
+ * copy-on-write. */
+static zend_always_inline bool zend_collection_call_receiver_is_exclusive(
+		const zend_execute_data *call, const zend_vec *receiver)
+{
+	return !(ZEND_CALL_INFO(call) & ZEND_CALL_CLOSURE)
+		&& GC_REFCOUNT(receiver) == 1;
+}
+
 /* Shared body for vec::append / vec::prepend. Build a NEW vec that is the
  * receiver with $value appended (prepend == false) or prepended; the receiver is
  * immutable and never changes. The result carries the receiver's exact concrete
@@ -3919,12 +3941,19 @@ static zend_always_inline void zend_collection_vec_insert(
 		Z_PARAM_ZVAL(value)
 	ZEND_PARSE_PARAMETERS_END();
 
-	zend_vec *out = zend_vec_create_with(receiver, value, prepend);
+	bool exclusive = zend_collection_call_receiver_is_exclusive(execute_data, receiver);
+	zend_vec *out = zend_vec_create_with(receiver, value, prepend, exclusive);
 	if (UNEXPECTED(out == NULL)) {
 		zend_collection_method_value_type_error(receiver, method, 1, "value", value);
 		RETURN_THROWS();
 	}
-	ZVAL_VEC(return_value, out); /* out has refcount 1; ownership transfers */
+	if (out == receiver) {
+		/* Consumed the receiver in place: move its sole, frame-owned reference to
+		 * the result and disarm the frame teardown -- no addref, no double-free. */
+		zend_collection_call_transfer_receiver(execute_data, return_value);
+	} else {
+		ZVAL_VEC(return_value, out); /* fresh refcount 1; teardown releases the receiver */
+	}
 }
 
 static ZEND_NAMED_FUNCTION(zend_collection_vec_append)
@@ -3957,7 +3986,8 @@ static ZEND_NAMED_FUNCTION(zend_collection_vec_with_at)
 	ZEND_PARSE_PARAMETERS_END();
 
 	zend_vec_with_status status;
-	zend_vec *out = zend_vec_with_at(receiver, index, value, &status);
+	bool exclusive = zend_collection_call_receiver_is_exclusive(execute_data, receiver);
+	zend_vec *out = zend_vec_with_at(receiver, index, value, &status, exclusive);
 	if (UNEXPECTED(out == NULL)) {
 		if (status == ZEND_VEC_WITH_BAD_INDEX) {
 			zend_collection_index_range_error(receiver, "withAt", index);
@@ -3966,7 +3996,11 @@ static ZEND_NAMED_FUNCTION(zend_collection_vec_with_at)
 		}
 		RETURN_THROWS();
 	}
-	ZVAL_VEC(return_value, out); /* out has refcount 1; ownership transfers */
+	if (out == receiver) {
+		zend_collection_call_transfer_receiver(execute_data, return_value);
+	} else {
+		ZVAL_VEC(return_value, out); /* out has refcount 1; teardown releases the receiver */
+	}
 }
 
 /* vec::withoutAt(int $index): vec[]. Build a NEW vec equal to the receiver with
@@ -3986,13 +4020,18 @@ static ZEND_NAMED_FUNCTION(zend_collection_vec_without_at)
 	ZEND_PARSE_PARAMETERS_END();
 
 	zend_vec_with_status status;
-	zend_vec *out = zend_vec_without_at(receiver, index, &status);
+	bool exclusive = zend_collection_call_receiver_is_exclusive(execute_data, receiver);
+	zend_vec *out = zend_vec_without_at(receiver, index, &status, exclusive);
 	if (UNEXPECTED(out == NULL)) {
 		ZEND_ASSERT(status == ZEND_VEC_WITH_BAD_INDEX);
 		zend_collection_index_range_error(receiver, "withoutAt", index);
 		RETURN_THROWS();
 	}
-	ZVAL_VEC(return_value, out); /* out has refcount 1; ownership transfers */
+	if (out == receiver) {
+		zend_collection_call_transfer_receiver(execute_data, return_value);
+	} else {
+		ZVAL_VEC(return_value, out); /* out has refcount 1; teardown releases the receiver */
+	}
 }
 
 /* $value does not satisfy the type declared for tuple position `index`. Unlike
