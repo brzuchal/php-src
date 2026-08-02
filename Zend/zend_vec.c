@@ -495,6 +495,80 @@ static zend_vec *zend_flat_append_to_hybrid(zend_vec *base, zval *value)
 	return zend_hybrid_alloc(base, tail);
 }
 
+/* T: the maximum tail element count a published hybrid may carry. A hybrid is
+ * never published with a larger tail -- it flattens first. The flatten-policy
+ * commit sets the validated bound and adds the tail/base ratio knob. */
+#define ZEND_HYBRID_TAIL_MAX 255u
+
+/* Build a fresh tail = the old tail's elements followed by `value`, with spare
+ * capacity for subsequent in-place appends. The old tail is not modified; `value`
+ * is already validated and dereferenced. */
+static zend_vec *zend_hybrid_grow_tail(
+		const zend_vec *tail, zval *value, const zend_collection_info *type)
+{
+	uint32_t n = tail->count;
+	zend_vec *nt = zend_vec_alloc(zend_vec_grow_capacity(n + 1), type);
+
+	for (uint32_t i = 0; i < n; i++) {
+		ZVAL_COPY(&nt->elements[i], &tail->elements[i]);
+	}
+	ZVAL_COPY(&nt->elements[n], value);
+	nt->count = n + 1;
+	return nt;
+}
+
+/* Hybrid append ownership matrix. `value` is already
+ * validated and dereferenced. `root_exclusive` is the centralized frame-ownership
+ * verdict for the root; tail exclusivity is checked INDEPENDENTLY via its own
+ * refcount, never inferred from the root. Ownership transfer is annotated per arm. */
+static zend_vec *zend_hybrid_append(zend_vec *root, zval *value, bool root_exclusive)
+{
+	zend_vec *base = ZEND_VEC_HYBRID_BASE_VEC(root);
+	zend_vec *tail = ZEND_VEC_HYBRID_TAIL_VEC(root);
+
+	/* Flatten before the tail would cross the bound: produce a fresh flat value
+	 * (base + tail + value). Never publishes a tail > T; the shared root/base are
+	 * untouched, so this is a new value, never an in-place mutation of a shared one. */
+	if (UNEXPECTED(tail->count + 1 > ZEND_HYBRID_TAIL_MAX)) {
+		zend_vec *flat = zend_hybrid_flatten(root);                        /* [base..,tail..] rc1 */
+		zend_vec *out  = zend_vec_create_with(flat, value, false, true);   /* + value             */
+		if (out != flat) {
+			zend_vec_destroy(flat);
+		}
+		return out;
+	}
+
+	bool tail_exclusive = (GC_REFCOUNT(tail) == 1);
+	bool tail_spare     = (tail->count < ZEND_VEC_CAPACITY(tail));
+
+	if (root_exclusive) {
+		if (tail_exclusive && tail_spare) {
+			/* (1) Every mutable component is exclusively owned and the tail has a
+			 * spare slot: install the value and publish by raising both counts.
+			 * No allocation. The root's sole frame reference transfers to the result. */
+			ZVAL_COPY(&tail->elements[tail->count], value);
+			tail->count++;
+			root->count++;
+			return root;
+		}
+		/* (2) tail full, or (3) tail unexpectedly shared: the root is ours but the
+		 * tail cannot be mutated, so install a fresh grown tail and release the old
+		 * tail reference exactly once. base (and the cached base_count) are unchanged. */
+		zend_vec *nt = zend_hybrid_grow_tail(tail, value, root->type);
+		i_zval_ptr_dtor(ZEND_VEC_HYBRID_TAIL(root));   /* drop the old tail ref (free if last) */
+		ZVAL_VEC(ZEND_VEC_HYBRID_TAIL(root), nt);       /* take the new tail's sole reference   */
+		root->count++;
+		return root;
+	}
+
+	/* (4) The root is shared: leave it wholly untouched and build a NEW root that
+	 * shares the immutable base (addref, no copy) and owns an independent new tail. */
+	{
+		zend_vec *nt = zend_hybrid_grow_tail(tail, value, root->type);
+		return zend_hybrid_alloc(base, nt);   /* addrefs base, consumes nt */
+	}
+}
+
 ZEND_API zend_vec *zend_vec_append_value(zend_vec *base, zval *value, bool exclusive)
 {
 	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_VEC);
@@ -516,23 +590,13 @@ ZEND_API zend_vec *zend_vec_append_value(zend_vec *base, zval *value, bool exclu
 #endif
 	}
 
-	/* HYBRID receiver. the full root/tail exclusivity matrix is introduced separately;
-	 * this is the correct interim: validate, flatten the hybrid to a fresh flat
-	 * base, then form a new hybrid over it. Slower (it copies the logical value)
-	 * but never mutates the shared receiver. */
+	/* HYBRID receiver: validate the value, then run the root/tail exclusivity
+	 * matrix. base->type is the shared descriptor for root/base/tail. */
 	ZVAL_DEREF(value);
 	if (!collection_member_matches(base->type, 0, value)) {
 		return NULL;
 	}
-	{
-		zend_vec *flat = zend_hybrid_flatten(base);          /* flat copy, rc 1 (ours)      */
-		zend_vec *tail = zend_vec_alloc(1, base->type);
-		ZVAL_COPY(&tail->elements[0], value);
-		tail->count = 1;
-		zend_vec *out = zend_hybrid_alloc(flat, tail);        /* addrefs flat (->2), takes tail */
-		GC_DELREF(flat);                                      /* drop our flat ref (out owns it) */
-		return out;
-	}
+	return zend_hybrid_append(base, value, exclusive);
 }
 
 /* Build a new vec equal to `base` with the element at `index` replaced by
