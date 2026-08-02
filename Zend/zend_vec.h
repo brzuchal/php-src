@@ -75,6 +75,61 @@ ZEND_STATIC_ASSERT(offsetof(zend_vec, elements) == offsetof(zend_vec, count) + 8
 #define ZEND_VEC_COUNT(vec)      ((vec)->count)
 #define ZEND_VEC_ELEMENTS(vec)   ((vec)->elements)
 
+/* ---- Hybrid representation tag ---------------------------------------------
+ * A HYBRID vec is an immutable flat `base` plus one bounded flat `tail`, so a
+ * retained value can be extended without copying the base. The high bit of
+ * `capacity` tags a HYBRID root; the low 31 bits then cache the base child's
+ * element count (a hybrid has no flat capacity of its own). A FLAT vec never
+ * sets the bit: its capacity is a real slot count that the allocation and
+ * growth paths cap below 2^31. No generic code may read `->capacity` raw --
+ * the tag must be impossible to mistake for a slot count, so every read goes
+ * through a masked accessor. `capacity` is an exact-width uint32_t, so the
+ * tag's position and the mask are identical on every supported platform
+ * (LP64, LLP64/Windows x64); the layout static-asserts above reject any
+ * platform where the header packs differently. */
+/* The hybrid representation is validated for 64-bit layouts only (LP64 and
+ * LLP64/Windows x64). Reject every other target explicitly: relying on the
+ * layout assertions alone is not enough, because some ILP32 ABIs (i386 SysV,
+ * where doubles are 4-byte aligned) would satisfy them by coincidence and
+ * compile untested, with a latent zend_long narrowing in the hybrid range
+ * checks. Lift this gate only with a dedicated 32-bit layout review. */
+#if !defined(ZEND_ENABLE_ZVAL_LONG64) || SIZEOF_SIZE_T != 8
+# error "hybrid vec storage currently requires a supported 64-bit layout (LP64/LLP64); 32-bit targets are not supported"
+#endif
+
+#define ZEND_VEC_HYBRID_FLAG   (UINT32_C(1) << 31)
+#define ZEND_VEC_CAP_MASK      (~ZEND_VEC_HYBRID_FLAG)          /* 0x7fffffff */
+#define ZEND_VEC_IS_HYBRID(v)  (((v)->capacity & ZEND_VEC_HYBRID_FLAG) != 0)
+
+ZEND_STATIC_ASSERT(sizeof(((zend_vec *) 0)->capacity) * 8 == 32,
+	"the representation tag lives in bit 31 of an exact 32-bit capacity");
+
+/* Flat slot capacity. Meaningful only for a FLAT vec; the mask is defensive (a
+ * flat vec never has the tag bit set) and documents that a raw read is a bug. */
+#define ZEND_VEC_CAPACITY(v)   ((v)->capacity & ZEND_VEC_CAP_MASK)
+
+/* Maximum representable slot count of a flat vec: the tag bit is reserved, so
+ * allocation and growth must never produce a capacity above this. */
+#define ZEND_VEC_MAX_CAPACITY  ZEND_VEC_CAP_MASK
+
+/* HYBRID child overlay: the two owned child collection zvals live in the first
+ * two element slots, so the GC walker enumerates them as an ordinary 2-zval run
+ * and a hybrid root needs no bespoke struct. elements[0] = the immutable FLAT
+ * base (owned ref, shared by every branch); elements[1] = the bounded FLAT tail
+ * (owned ref). A hybrid allocation is ZEND_VEC_HEADER_SIZE + 2*sizeof(zval). */
+#define ZEND_VEC_HYBRID_BASE(v)        (&(v)->elements[0])
+#define ZEND_VEC_HYBRID_TAIL(v)        (&(v)->elements[1])
+#define ZEND_VEC_HYBRID_BASE_VEC(v)    Z_VEC_P(ZEND_VEC_HYBRID_BASE(v))
+#define ZEND_VEC_HYBRID_TAIL_VEC(v)    Z_VEC_P(ZEND_VEC_HYBRID_TAIL(v))
+/* Cached base element count (the low 31 bits of the tagged capacity). base is
+ * immutable, so this never changes across a hybrid root's lifetime. */
+#define ZEND_VEC_HYBRID_BASE_COUNT(v)  ((v)->capacity & ZEND_VEC_CAP_MASK)
+
+/* The overlay assumes the element slots are zvals; a layout change here would
+ * silently desync the GC walker and the accessors above. */
+ZEND_STATIC_ASSERT(sizeof(((zend_vec *) 0)->elements[0]) == sizeof(zval),
+	"hybrid base/tail overlay requires elements[] to be zvals");
+
 /* ---- Storage contract ------------------------------------------------------
  * A narrow internal contract so collection operations do not hard-code the
  * flat contiguous payload: every consumer goes through the representation
@@ -88,12 +143,16 @@ ZEND_STATIC_ASSERT(offsetof(zend_vec, elements) == offsetof(zend_vec, count) + 8
  * backend. A second representation replaces ZEND_STOR_REPR() with a real
  * per-value runtime tag; call sites and primitives stay identical. */
 typedef enum _zend_stor_repr {
-	ZEND_STOR_FLAT = 0,
+	ZEND_STOR_FLAT   = 0,
+	ZEND_STOR_HYBRID = 1,   /* immutable flat base + one bounded flat tail */
 } zend_stor_repr;
 
-/* Single-representation constant; the argument is evaluated for
- * side-effect-freedom only. */
-#define ZEND_STOR_REPR(c)        ((void) (c), ZEND_STOR_FLAT)
+/* A real per-value runtime tag, read from the high capacity bit. FLAT stays
+ * the predicted-taken branch on every hot path: the contract was proven
+ * zero-overhead with the tag pinned to a constant, and gaining the hybrid
+ * representation costs a single predictable bit test. */
+#define ZEND_STOR_REPR(c) \
+	(ZEND_VEC_IS_HYBRID(c) ? ZEND_STOR_HYBRID : ZEND_STOR_FLAT)
 
 /* Hot path: logical element count. Identical for every representation. */
 static zend_always_inline uint32_t zend_stor_count(const zend_vec *c)
@@ -124,9 +183,17 @@ static zend_always_inline zval *zend_stor_iter(const zend_vec *c, uint32_t pos)
 	}
 }
 
-/* GC / serialization / bulk traversal: enumerate contiguous zval runs. FLAT is
- * exactly one span {elements, count}; hybrid/trie yield base + chunk/leaf spans.
- * GC keeps walking contiguous runs (no per-element call on the mark/scan path). */
+/* GC-children traversal: enumerate the contiguous zval runs whose refcounted
+ * members the collector must reach. This is the *GC child* view, NOT logical
+ * element iteration (serialize/foreach use zend_stor_get/iter by position):
+ *   FLAT   -> one run {elements, count}: a flat vec's GC children ARE its logical
+ *             elements.
+ *   HYBRID -> one run {elements, 2}: a hybrid root's GC children are exactly its
+ *             two owned child collections (base, tail). Their element payloads are
+ *             reached when each child is itself visited as a node -- so a shared
+ *             base is scanned once, not once per branch, and no base/tail element
+ *             is scanned from here. GC walks contiguous runs (no per-element call
+ *             on the mark/scan path). */
 typedef struct _zend_stor_span {
 	zval    *base;
 	uint32_t n;
@@ -136,21 +203,39 @@ static zend_always_inline uint32_t zend_stor_span_count(const zend_vec *c)
 {
 	switch (ZEND_STOR_REPR(c)) {
 		case ZEND_STOR_FLAT:
-			return 1;
+			return 1;   /* the element run */
+		case ZEND_STOR_HYBRID:
+			return 1;   /* the {base, tail} children run */
 		default: ZEND_UNREACHABLE();
 	}
 }
 
 static zend_always_inline zend_stor_span zend_stor_span_get(const zend_vec *c, uint32_t s)
 {
+	zend_stor_span sp;
 	ZEND_ASSERT(s < zend_stor_span_count(c));
 	switch (ZEND_STOR_REPR(c)) {
-		case ZEND_STOR_FLAT: {
-			zend_stor_span sp;
+		case ZEND_STOR_FLAT:
 			sp.base = (zval *) c->elements;
 			sp.n    = c->count;
 			return sp;
-		}
+		case ZEND_STOR_HYBRID:
+			/* Exactly the two child collection zvals overlaid on elements[0..1].
+			 * Debug-assert the published-hybrid invariants right at the GC exposure
+			 * point: both children initialised collections of the same descriptor,
+			 * and the logical count is the sum of the children's counts (so no spare
+			 * tail capacity can be mistaken for an initialised element). */
+			ZEND_ASSERT(Z_TYPE_P(ZEND_VEC_HYBRID_BASE(c)) == IS_COLLECTION);
+			ZEND_ASSERT(Z_TYPE_P(ZEND_VEC_HYBRID_TAIL(c)) == IS_COLLECTION);
+			ZEND_ASSERT(!ZEND_VEC_IS_HYBRID(ZEND_VEC_HYBRID_BASE_VEC(c)));
+			ZEND_ASSERT(!ZEND_VEC_IS_HYBRID(ZEND_VEC_HYBRID_TAIL_VEC(c)));
+			ZEND_ASSERT(ZEND_VEC_HYBRID_BASE_VEC(c)->type == c->type);
+			ZEND_ASSERT(ZEND_VEC_HYBRID_TAIL_VEC(c)->type == c->type);
+			ZEND_ASSERT(c->count == ZEND_VEC_HYBRID_BASE_VEC(c)->count
+			                      + ZEND_VEC_HYBRID_TAIL_VEC(c)->count);
+			sp.base = (zval *) c->elements;   /* &elements[0]: the base child zval */
+			sp.n    = 2;                       /* base, tail */
+			return sp;
 		default: ZEND_UNREACHABLE();
 	}
 }
@@ -341,6 +426,26 @@ ZEND_API void zend_set_builder_dedup(zend_vec *set);
 #define ZEND_VEC_SELFTEST_ALL                  (0xfu)
 
 ZEND_API uint32_t zend_vec_lifecycle_selftest(void);
+
+/* Hybrid ownership selftest. Builds a HYBRID root over a shared flat base and
+ * a fresh tail entirely in C, then asserts the ownership invariants the
+ * representation promises:
+ *  - the root tags HYBRID, count == base_count + tail_count, descriptors match;
+ *  - creating the root raises base's refcount by exactly one (base is shared,
+ *    never copied) and takes the tail's sole reference;
+ *  - a second branch over the same base shares it (refcount 2), and destroying
+ *    one branch leaves the base and the other branch intact (independent
+ *    lifetimes through refcounting);
+ *  - destroying the final root drops base to its original refcount and releases
+ *    the tail exactly once (no leak, no double free). */
+#define ZEND_HYBRID_SELFTEST_TAGGED_HYBRID     (1u << 0)  /* repr/count/descriptor invariants */
+#define ZEND_HYBRID_SELFTEST_BASE_SHARED       (1u << 1)  /* create addrefs base by exactly 1  */
+#define ZEND_HYBRID_SELFTEST_TAIL_OWNED        (1u << 2)  /* root takes the tail's sole ref    */
+#define ZEND_HYBRID_SELFTEST_BRANCH_INDEP      (1u << 3)  /* destroy one branch, base+other live*/
+#define ZEND_HYBRID_SELFTEST_DTOR_BALANCED     (1u << 4)  /* final dtor: base restored, tail freed*/
+#define ZEND_HYBRID_SELFTEST_ALL               (0x1fu)
+
+ZEND_API uint32_t zend_hybrid_lifecycle_selftest(void);
 
 /* Release the element type, the element zvals, and the allocation. Reached
  * through rc_dtor_func() when the refcount drops to zero. */

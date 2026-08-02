@@ -76,6 +76,14 @@ ZEND_API bool zend_vec_type_is_supported(zend_type type)
 
 static zend_vec *zend_vec_alloc(uint32_t count, const zend_collection_info *type)
 {
+	/* A flat vec's capacity is a real slot count and must never reach the tag
+	 * bit that marks a HYBRID root: reject the request before any allocation
+	 * arithmetic, unconditionally (a capacity at or above 2^31 would be
+	 * misread as the hybrid tag, which is memory corruption, not a limit). */
+	if (UNEXPECTED(count > ZEND_VEC_MAX_CAPACITY)) {
+		zend_error_noreturn(E_ERROR,
+			"Possible integer overflow in collection allocation (%u elements)", count);
+	}
 	/* safe_emalloc computes count * sizeof(zval) + header with overflow
 	 * checking, so a large count cannot silently wrap the allocation size.
 	 * `count` here is the number of slots to reserve, i.e. the capacity; the
@@ -101,6 +109,46 @@ static zend_vec *zend_vec_alloc(uint32_t count, const zend_collection_info *type
 	vec->type = type;
 
 	return vec;
+}
+
+/* Assemble a HYBRID root over an immutable flat `base` and a bounded
+ * flat `tail`. Ownership convention -- the root takes ONE owned reference to each
+ * child:
+ *   base  is SHARED: addref'd here, so the caller keeps its own reference (a share
+ *         never consumes the receiver). elements[0].
+ *   tail  is TRANSFERRED: the caller's sole reference moves into the root (no
+ *         addref), so a freshly built tail is handed straight in. elements[1].
+ * Both children must be flat and carry the same borrowed descriptor as the root.
+ *
+ * safe_emalloc bails out on OOM rather than returning, and this is a single
+ * allocation, so there is no partially built root to roll back: it either wholly
+ * succeeds or unwinds through the engine bailout (which reclaims the request
+ * arena). The one recoverable failure -- a value that fails the element type -- is
+ * rejected by the caller BEFORE any allocation, so this primitive runs only once
+ * the result is certain to be published. */
+static zend_vec *zend_hybrid_alloc(zend_vec *base, zend_vec *tail)
+{
+	ZEND_ASSERT(!ZEND_VEC_IS_HYBRID(base) && "C1 base must be flat (no nested hybrids)");
+	ZEND_ASSERT(!ZEND_VEC_IS_HYBRID(tail) && "C1 tail must be flat");
+	ZEND_ASSERT(base->type == tail->type && "base and tail must share the descriptor");
+	ZEND_ASSERT(base->count <= ZEND_VEC_CAP_MASK && "base count must fit the tagged capacity");
+
+	zend_vec *root = safe_emalloc(2, sizeof(zval), ZEND_VEC_HEADER_SIZE);
+
+	GC_SET_REFCOUNT(root, 1);
+	GC_TYPE_INFO(root) = GC_VEC;
+	root->type     = base->type;                         /* borrowed, shared with children */
+	root->count    = base->count + tail->count;          /* logical total                  */
+	root->capacity = ZEND_VEC_HYBRID_FLAG | base->count;  /* tag + cached base element count */
+
+	/* elements[0] = base: share it (addref); the caller keeps its own reference. */
+	ZVAL_VEC(ZEND_VEC_HYBRID_BASE(root), base);
+	GC_ADDREF(base);
+	/* elements[1] = tail: take over the caller's sole reference (no addref). */
+	ZVAL_VEC(ZEND_VEC_HYBRID_TAIL(root), tail);
+
+	ZEND_ASSERT(root->count == ZEND_VEC_HYBRID_BASE_COUNT(root) + tail->count);
+	return root;
 }
 
 /* Does `value` satisfy member `member_idx` of the type? Shallow: a matching
@@ -329,7 +377,10 @@ ZEND_API void zend_set_builder_dedup(zend_vec *set)
 static zend_always_inline uint32_t zend_vec_grow_capacity(uint32_t final)
 {
 	uint32_t extra = final < 8 ? 4u : (final >> 1);
-	if (UNEXPECTED(extra > UINT32_MAX - final)) {
+	/* Never cross the representation-tag boundary: a flat capacity at or above
+	 * 2^31 would read as a HYBRID tag. Growth degrades to an exact allocation
+	 * near the limit; zend_vec_alloc() hard-errors past it. */
+	if (UNEXPECTED(extra > ZEND_VEC_MAX_CAPACITY - final)) {
 		return final;
 	}
 	return final + extra;
@@ -338,6 +389,9 @@ static zend_always_inline uint32_t zend_vec_grow_capacity(uint32_t final)
 ZEND_API zend_vec *zend_vec_create_with(zend_vec *base, zval *value, bool prepend, bool exclusive)
 {
 	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_VEC);
+	/* The flat append/prepend primitive. A HYBRID base routes through the hybrid
+	 * append path instead, so base is flat here. */
+	ZEND_ASSERT(!ZEND_VEC_IS_HYBRID(base));
 	ZVAL_DEREF(value);
 	if (!collection_member_matches(base->type, 0, value)) {
 		return NULL;
@@ -350,7 +404,7 @@ ZEND_API zend_vec *zend_vec_create_with(zend_vec *base, zval *value, bool prepen
 	 * allocation, no copy. Returns `base` itself so the handler transfers base's
 	 * sole reference to the result. The value was validated above, so a type
 	 * error never mutates the receiver. prepend has no tail slot, so it copies. */
-	if (exclusive && base->count < base->capacity) {
+	if (exclusive && base->count < ZEND_VEC_CAPACITY(base)) {
 		if (prepend) {
 			/* Shift the initialized prefix up by one into the spare tail slot, then
 			 * place the value at index 0. memmove *moves* each zval (refcount
@@ -917,13 +971,24 @@ ZEND_API zend_vec *zend_collection_construct(
 
 ZEND_API void ZEND_FASTCALL zend_vec_destroy(zend_vec *vec)
 {
-	zval *p = vec->elements, *end = p + vec->count;
-
 	/* A vec is collectable, so it may be sitting in the GC root buffer. Drop it
 	 * before the allocation goes away, or the collector is left holding a
 	 * dangling root. Arrays do the same in zend_array_destroy(). */
 	GC_REMOVE_FROM_BUFFER(vec);
 
+	if (UNEXPECTED(ZEND_VEC_IS_HYBRID(vec))) {
+		/* A HYBRID root owns exactly two child references -- the shared
+		 * flat base and the bounded flat tail, overlaid on elements[0..1]. Release
+		 * each once; i_zval_ptr_dtor recursively destroys a child only when its own
+		 * refcount reaches zero, so a base still shared by another branch survives.
+		 * The element payloads belong to the children and are never walked here. */
+		i_zval_ptr_dtor(ZEND_VEC_HYBRID_BASE(vec));
+		i_zval_ptr_dtor(ZEND_VEC_HYBRID_TAIL(vec));
+		efree(vec);
+		return;
+	}
+
+	zval *p = vec->elements, *end = p + vec->count;
 	while (p != end) {
 		i_zval_ptr_dtor(p);
 		p++;
@@ -1001,5 +1066,108 @@ ZEND_API uint32_t zend_vec_lifecycle_selftest(void)
 	zend_string_release(b);
 	zend_string_release(spare);   /* the copy in the untouched slot */
 	zend_string_release(spare);
+	return result;
+}
+
+/* Exercise HYBRID ownership entirely in C, so the invariants hold before any PHP
+ * surface builds a hybrid yet. Two branches share one flat base; refcounts prove
+ * the base is shared (never copied), each child is released exactly once, and
+ * branches have independent lifetimes. */
+ZEND_API uint32_t zend_hybrid_lifecycle_selftest(void)
+{
+	zend_type str_type = ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
+	union {
+		zend_collection_type desc;
+		char buf[ZEND_TYPE_COLLECTION_SIZE(1)];
+	} probe;
+	zend_type probe_type = ZEND_TYPE_INIT_NONE(0);
+	const zend_collection_info *vec_of_string;
+	zend_string *a = zend_string_init("a", 1, 0);
+	zend_string *b = zend_string_init("b", 1, 0);
+	zend_string *c = zend_string_init("c", 1, 0);
+	zend_string *d = zend_string_init("d", 1, 0);
+	zend_vec *base, *tail1, *tail2, *h1, *h2;
+	uint32_t result = 0, base_rc0;
+	zval tmp;
+
+	probe.desc.kind = ZEND_COLLECTION_TYPE_VEC;
+	probe.desc.num_types = 1;
+	probe.desc.types[0] = str_type;
+	ZEND_TYPE_SET_COLLECTION(probe_type, &probe.desc);
+	vec_of_string = zend_collection_info_intern(probe_type);
+	ZEND_ASSERT(vec_of_string != NULL);
+
+	/* Immutable flat base ["a","b"]; base_rc0 is our sole reference. */
+	base = zend_vec_alloc(2, vec_of_string);
+	ZVAL_STR_COPY(&tmp, a); zend_vec_append(base, &tmp); zval_ptr_dtor(&tmp);
+	ZVAL_STR_COPY(&tmp, b); zend_vec_append(base, &tmp); zval_ptr_dtor(&tmp);
+	base_rc0 = GC_REFCOUNT(base);
+
+	/* Fresh tail ["c"] (rc 1); its sole reference is consumed by the hybrid. */
+	tail1 = zend_vec_alloc(1, vec_of_string);
+	ZVAL_STR_COPY(&tmp, c); zend_vec_append(tail1, &tmp); zval_ptr_dtor(&tmp);
+	h1 = zend_hybrid_alloc(base, tail1);
+
+	/* (1) repr / count / descriptor invariants, and the base/tail overlay. */
+	if (ZEND_VEC_IS_HYBRID(h1)
+	 && h1->count == 3
+	 && ZEND_VEC_HYBRID_BASE_COUNT(h1) == base->count
+	 && h1->type == base->type
+	 && ZEND_VEC_HYBRID_BASE_VEC(h1) == base
+	 && ZEND_VEC_HYBRID_TAIL_VEC(h1) == tail1) {
+		result |= ZEND_HYBRID_SELFTEST_TAGGED_HYBRID;
+	}
+	/* (2) base is shared: creating the root raised its refcount by exactly one. */
+	if (GC_REFCOUNT(base) == base_rc0 + 1) {
+		result |= ZEND_HYBRID_SELFTEST_BASE_SHARED;
+	}
+	/* (3) tail is owned: the root took our sole tail reference (still rc 1). */
+	if (GC_REFCOUNT(tail1) == 1) {
+		result |= ZEND_HYBRID_SELFTEST_TAIL_OWNED;
+	}
+
+	/* GC-children exposure (Commit 2): the span contract yields exactly the two
+	 * child collection zvals {base, tail}; the debug asserts inside zend_stor_span_get
+	 * fire here on a real hybrid. */
+	{
+		zend_stor_span sp = zend_stor_span_get(h1, 0);
+		ZEND_ASSERT(zend_stor_span_count(h1) == 1);
+		ZEND_ASSERT(sp.n == 2);
+		ZEND_ASSERT(sp.base == ZEND_VEC_HYBRID_BASE(h1));
+		ZEND_ASSERT(Z_VEC(sp.base[0]) == base);
+		ZEND_ASSERT(Z_VEC(sp.base[1]) == tail1);
+	}
+
+	/* A second branch over the same base -- base now shared three ways. */
+	tail2 = zend_vec_alloc(1, vec_of_string);
+	ZVAL_STR_COPY(&tmp, d); zend_vec_append(tail2, &tmp); zval_ptr_dtor(&tmp);
+	h2 = zend_hybrid_alloc(base, tail2);
+
+	/* (4) destroy one branch; the base and the other branch survive independently,
+	 * and the destroyed branch's tail element was released exactly once. */
+	zend_vec_destroy(h1);
+	if (GC_REFCOUNT(base) == base_rc0 + 1
+	 && GC_REFCOUNT(c) == 1
+	 && ZEND_VEC_IS_HYBRID(h2)
+	 && h2->count == 3
+	 && ZEND_VEC_HYBRID_BASE_VEC(h2) == base
+	 && Z_TYPE(base->elements[0]) == IS_STRING) {
+		result |= ZEND_HYBRID_SELFTEST_BRANCH_INDEP;
+	}
+
+	/* (5) destroy the final branch; base refcount is restored and tail2 freed once. */
+	zend_vec_destroy(h2);
+	if (GC_REFCOUNT(base) == base_rc0 && GC_REFCOUNT(d) == 1) {
+		result |= ZEND_HYBRID_SELFTEST_DTOR_BALANCED;
+	}
+
+	zend_vec_destroy(base);
+	/* Every base element was released exactly once, back to our held reference. */
+	ZEND_ASSERT(GC_REFCOUNT(a) == 1 && GC_REFCOUNT(b) == 1);
+
+	zend_string_release(a);
+	zend_string_release(b);
+	zend_string_release(c);
+	zend_string_release(d);
 	return result;
 }

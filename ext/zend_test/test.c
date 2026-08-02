@@ -791,6 +791,25 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 			zend_vec_type_is_supported(ok_type)
 			&& !zend_vec_type_is_supported(bad_type));
 	}
+
+	/* 7. Hybrid ownership. A hybrid root over a shared flat base --
+	 *    built and torn down entirely in C, since no PHP surface constructs one
+	 *    yet -- must share the base (never copy it), take the tail's sole ref,
+	 *    release each child exactly once, and give branches independent lifetimes. */
+	{
+		uint32_t bits = zend_hybrid_lifecycle_selftest();
+
+		add_assoc_bool(return_value, "hybrid_tagged",
+			(bits & ZEND_HYBRID_SELFTEST_TAGGED_HYBRID) != 0);
+		add_assoc_bool(return_value, "hybrid_base_shared",
+			(bits & ZEND_HYBRID_SELFTEST_BASE_SHARED) != 0);
+		add_assoc_bool(return_value, "hybrid_tail_owned",
+			(bits & ZEND_HYBRID_SELFTEST_TAIL_OWNED) != 0);
+		add_assoc_bool(return_value, "hybrid_branch_independent",
+			(bits & ZEND_HYBRID_SELFTEST_BRANCH_INDEP) != 0);
+		add_assoc_bool(return_value, "hybrid_dtor_balanced",
+			(bits & ZEND_HYBRID_SELFTEST_DTOR_BALANCED) != 0);
+	}
 }
 
 /* Build a collection type wrapping a single element type. Ownership of any
