@@ -239,14 +239,15 @@ again:
 			zend_vec *vec = Z_VEC_P(struc);
 			zend_string *name = zend_zval_collection_type_name(struc);
 			uint32_t vcount = ZEND_VEC_COUNT(vec);
-			zval *elements = ZEND_VEC_ELEMENTS(vec);
 
 			php_printf("%s%s(%u) {\n", COMMON, name ? ZSTR_VAL(name) : "collection", vcount);
 			if (name) {
 				zend_string_release(name);
 			}
+			/* Iterate by logical position so a hybrid (base+tail) value renders in
+			 * the same order as a flat one -- representation-independent, no flatten. */
 			for (uint32_t i = 0; i < vcount; i++) {
-				php_array_element_dump(&elements[i], i, NULL, level);
+				php_array_element_dump(zend_stor_iter(vec, i), i, NULL, level);
 			}
 			if (level > 1) {
 				php_printf("%*c", level - 1, ' ');
@@ -454,15 +455,15 @@ PHPAPI void php_debug_zval_dump(zval *struc, int level) /* {{{ */
 		zend_vec *vec = Z_VEC_P(struc);
 		zend_string *name = zend_zval_collection_type_name(struc);
 		uint32_t vcount = ZEND_VEC_COUNT(vec);
-		zval *elements = ZEND_VEC_ELEMENTS(vec);
 
 		php_printf("%s(%u) refcount(%u){\n",
 			name ? ZSTR_VAL(name) : "collection", vcount, Z_REFCOUNT_P(struc));
 		if (name) {
 			zend_string_release(name);
 		}
+		/* Logical-position iteration: representation-independent (flat or hybrid). */
 		for (uint32_t i = 0; i < vcount; i++) {
-			zval_array_element_dump(&elements[i], i, NULL, level);
+			zval_array_element_dump(zend_stor_iter(vec, i), i, NULL, level);
 		}
 		if (level > 1) {
 			php_printf("%*c", level - 1, ' ');
@@ -729,7 +730,6 @@ again:
 			zend_vec *vec = Z_VEC_P(struc);
 			zend_string *type = zend_collection_info_to_string(vec->type);
 			uint32_t count = ZEND_VEC_COUNT(vec);
-			zval *elements = ZEND_VEC_ELEMENTS(vec);
 
 			if (level > 1) {
 				smart_str_appendc(buf, '\n');
@@ -738,9 +738,11 @@ again:
 			smart_str_append(buf, type);
 			zend_string_release(type);
 			smart_str_appendl(buf, "{\n", 2);
+			/* Logical-position iteration -> the source literal is identical for a
+			 * flat or a hybrid value with the same elements. */
 			for (uint32_t i = 0; i < count; i++) {
 				buffer_append_spaces(buf, level + 1);
-				if (php_var_export_ex(&elements[i], level + 2, buf) == FAILURE) {
+				if (php_var_export_ex(zend_stor_iter(vec, i), level + 2, buf) == FAILURE) {
 					return FAILURE;
 				}
 				smart_str_appendl(buf, ",\n", 2);
@@ -1456,7 +1458,6 @@ again:
 			 * lives in the descriptor, so vec/tuple/set share one token. */
 			zend_vec *vec = Z_VEC_P(struc);
 			uint32_t count = ZEND_VEC_COUNT(vec);
-			zval *elements = ZEND_VEC_ELEMENTS(vec);
 
 			smart_str_appendl(buf, "L:", 2);
 			php_collection_serialize_descriptor(buf, vec->type);
@@ -1466,8 +1467,9 @@ again:
 			for (uint32_t i = 0; i < count; i++) {
 				/* Elements are plain values; the element type is carried by the
 				 * descriptor, not repeated per element. Not is_root, so nested
-				 * collections serialize the same way recursively. */
-				php_var_serialize_intern(buf, &elements[i], var_hash, false, false);
+				 * collections serialize the same way recursively. Iterate by logical
+				 * position so a hybrid serializes byte-identically to the flat value. */
+				php_var_serialize_intern(buf, zend_stor_iter(vec, i), var_hash, false, false);
 			}
 			smart_str_appendc(buf, '}');
 			return;

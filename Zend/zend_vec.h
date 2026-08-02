@@ -52,9 +52,9 @@ typedef struct _zend_vec {
 /* offsetof is the only layout contract; do not assume a fixed header size. */
 #define ZEND_VEC_HEADER_SIZE     offsetof(zend_vec, elements)
 
-/* `capacity` must occupy the padding that already sat between `count` and the
- * 8-aligned `elements[]`, so it adds ZERO bytes per value and does not move
- * the element base (the GC walkers and the VM builder read this layout).
+/* `capacity` must occupy the padding that already sat between `count`
+ * and the 8-aligned `elements[]`, so it adds ZERO bytes per value and does not
+ * move the element base (the GC walkers and the VM builder read this layout).
  * On LP64/LLP64: count@16, capacity@20, elements@24 == count_offset+8. */
 ZEND_STATIC_ASSERT(offsetof(zend_vec, elements) == offsetof(zend_vec, count) + 8,
 	"capacity must fit in the count padding without growing the vec header");
@@ -141,23 +141,16 @@ ZEND_STATIC_ASSERT(sizeof(((zend_vec *) 0)->elements[0]) == sizeof(zval),
  * A narrow internal contract so collection operations do not hard-code the
  * flat contiguous payload: every consumer goes through the representation
  * dispatch and the primitive vocabulary below (get / iterate / count / span
- * enumeration), never through raw `elements` arithmetic.
- *
- * With a single FLAT representation the tag is a COMPILE-TIME CONSTANT: every
- * non-flat switch arm is dead-code-eliminated and the hot get/count/iterate
- * collapse to the exact `elements[i]` / `count` loads they compiled to before
- * this contract existed, so the abstraction adds zero overhead on the flat
- * backend. A second representation replaces ZEND_STOR_REPR() with a real
- * per-value runtime tag; call sites and primitives stay identical. */
+ * enumeration), never through raw `elements` arithmetic. The tag costs one
+ * predictable bit test; FLAT stays the predicted-taken branch on every hot
+ * path (the contract was proven zero-overhead with the tag pinned to a
+ * compile-time constant before the hybrid representation existed). */
 typedef enum _zend_stor_repr {
 	ZEND_STOR_FLAT   = 0,
 	ZEND_STOR_HYBRID = 1,   /* immutable flat base + one bounded flat tail */
 } zend_stor_repr;
 
-/* A real per-value runtime tag, read from the high capacity bit. FLAT stays
- * the predicted-taken branch on every hot path: the contract was proven
- * zero-overhead with the tag pinned to a constant, and gaining the hybrid
- * representation costs a single predictable bit test. */
+/* A real per-value runtime tag, read from the high capacity bit. */
 #define ZEND_STOR_REPR(c) \
 	(ZEND_VEC_IS_HYBRID(c) ? ZEND_STOR_HYBRID : ZEND_STOR_FLAT)
 
@@ -174,6 +167,17 @@ static zend_always_inline zval *zend_stor_get(const zend_vec *c, uint32_t index)
 	switch (ZEND_STOR_REPR(c)) {
 		case ZEND_STOR_FLAT:
 			return (zval *) &c->elements[index];
+		case ZEND_STOR_HYBRID: {
+			/* O(1): one repr test (above) + one base-boundary test. base_count is
+			 * cached in the tagged capacity, so the base pointer is dereferenced only
+			 * on the branch actually taken. index < count is guaranteed by the caller,
+			 * so index - base_count is in range for the tail (all uint32, no overflow). */
+			uint32_t base_count = ZEND_VEC_HYBRID_BASE_COUNT(c);
+			if (index < base_count) {
+				return &ZEND_VEC_HYBRID_BASE_VEC(c)->elements[index];
+			}
+			return &ZEND_VEC_HYBRID_TAIL_VEC(c)->elements[index - base_count];
+		}
 		default: ZEND_UNREACHABLE();
 	}
 }
@@ -186,6 +190,16 @@ static zend_always_inline zval *zend_stor_iter(const zend_vec *c, uint32_t pos)
 	switch (ZEND_STOR_REPR(c)) {
 		case ZEND_STOR_FLAT:
 			return (zval *) &c->elements[pos];
+		case ZEND_STOR_HYBRID: {
+			/* Ordered read: the base elements in order, then the tail elements. Same
+			 * O(1) mapping as zend_stor_get; the foreach cursor stays a bare uint32_t
+			 * position that spans base then tail. */
+			uint32_t base_count = ZEND_VEC_HYBRID_BASE_COUNT(c);
+			if (pos < base_count) {
+				return &ZEND_VEC_HYBRID_BASE_VEC(c)->elements[pos];
+			}
+			return &ZEND_VEC_HYBRID_TAIL_VEC(c)->elements[pos - base_count];
+		}
 		default: ZEND_UNREACHABLE();
 	}
 }
@@ -301,7 +315,7 @@ ZEND_API zend_vec *zend_vec_create_with(zend_vec *base, zval *value, bool prepen
  *     root -- the base is never copied (the C1 primary target);
  *   - a FLAT base appended exclusively (a consumable temporary) mutates/grows in
  *     place, returning the base itself;
- *   - a HYBRID base runs the root/tail exclusivity matrix (introduced separately).
+ *   - a HYBRID base runs the root/tail exclusivity matrix.
  * `value` is validated against the element type first; NULL is returned on a type
  * failure with nothing published (the caller raises a TypeError). `exclusive` is
  * the centralized frame-ownership verdict for the receiver. prepend has no hybrid

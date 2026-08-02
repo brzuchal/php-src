@@ -128,8 +128,8 @@ static zend_vec *zend_vec_alloc(uint32_t count, const zend_collection_info *type
  * the result is certain to be published. */
 static zend_vec *zend_hybrid_alloc(zend_vec *base, zend_vec *tail)
 {
-	ZEND_ASSERT(!ZEND_VEC_IS_HYBRID(base) && "C1 base must be flat (no nested hybrids)");
-	ZEND_ASSERT(!ZEND_VEC_IS_HYBRID(tail) && "C1 tail must be flat");
+	ZEND_ASSERT(!ZEND_VEC_IS_HYBRID(base) && "hybrid base must be flat (no nested hybrids)");
+	ZEND_ASSERT(!ZEND_VEC_IS_HYBRID(tail) && "hybrid tail must be flat");
 	ZEND_ASSERT(base->type == tail->type && "base and tail must share the descriptor");
 	ZEND_ASSERT(base->count <= ZEND_VEC_CAP_MASK && "base count must fit the tagged capacity");
 
@@ -150,6 +150,9 @@ static zend_vec *zend_hybrid_alloc(zend_vec *base, zend_vec *tail)
 	ZEND_ASSERT(root->count == ZEND_VEC_HYBRID_BASE_COUNT(root) + tail->count);
 	return root;
 }
+
+/* Defined below; the flat update primitives use it for their HYBRID fallback. */
+static zend_vec *zend_hybrid_flatten(const zend_vec *h);
 
 /* Does `value` satisfy member `member_idx` of the type? Shallow: a matching
  * element may itself be a mutable array or object, or a nested collection value.
@@ -389,9 +392,17 @@ static zend_always_inline uint32_t zend_vec_grow_capacity(uint32_t final)
 ZEND_API zend_vec *zend_vec_create_with(zend_vec *base, zval *value, bool prepend, bool exclusive)
 {
 	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_VEC);
-	/* The flat append/prepend primitive. A HYBRID base routes through the hybrid
-	 * append path instead, so base is flat here. */
-	ZEND_ASSERT(!ZEND_VEC_IS_HYBRID(base));
+	/* append routes hybrids through zend_vec_append_value; prepend has no hybrid
+	 * form and reaches here directly. Fall back: flatten the hybrid to a fresh
+	 * flat value and run the flat primitive on that (never consuming the temp, so it
+	 * is always freed; NULL on a type error leaves nothing allocated). A native
+	 * tail form for the update ops is deliberately deferred. */
+	if (UNEXPECTED(ZEND_VEC_IS_HYBRID(base))) {
+		zend_vec *flat = zend_hybrid_flatten(base);
+		zend_vec *out  = zend_vec_create_with(flat, value, prepend, /* exclusive */ false);
+		zend_vec_destroy(flat);
+		return out;
+	}
 	ZVAL_DEREF(value);
 	if (!collection_member_matches(base->type, 0, value)) {
 		return NULL;
@@ -534,6 +545,16 @@ ZEND_API zend_vec *zend_vec_with_at(
 		zend_vec *base, zend_long index, zval *value, zend_vec_with_status *status, bool exclusive)
 {
 	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_VEC);
+	/* C1 fallback: a HYBRID base is flattened, then withAt runs on the flat value
+	 * (the flatten policy and any native tail-region form come separately). base->count
+	 * is the logical count for both representations, so the range check below is
+	 * still correct pre-flatten. */
+	if (UNEXPECTED(ZEND_VEC_IS_HYBRID(base))) {
+		zend_vec *flat = zend_hybrid_flatten(base);
+		zend_vec *out  = zend_vec_with_at(flat, index, value, status, /* exclusive */ false);
+		zend_vec_destroy(flat);
+		return out;
+	}
 	/* Wide compare: index is 64-bit and count is 32-bit, so an index at or above
 	 * count -- including one beyond UINT32_MAX -- is rejected here rather than
 	 * being truncated into range by the later cast. */
@@ -585,6 +606,14 @@ ZEND_API zend_vec *zend_vec_without_at(
 		zend_vec *base, zend_long index, zend_vec_with_status *status, bool exclusive)
 {
 	ZEND_ASSERT(base->type->kind == ZEND_COLLECTION_TYPE_VEC);
+	/* Fallback: flatten a HYBRID base, then remove on the flat value. A native
+	 * tail-region form for removal is deliberately deferred. */
+	if (UNEXPECTED(ZEND_VEC_IS_HYBRID(base))) {
+		zend_vec *flat = zend_hybrid_flatten(base);
+		zend_vec *out  = zend_vec_without_at(flat, index, status, /* exclusive */ false);
+		zend_vec_destroy(flat);
+		return out;
+	}
 	if (index < 0 || index >= (zend_long) base->count) {
 		*status = ZEND_VEC_WITH_BAD_INDEX;
 		return NULL;
@@ -774,17 +803,22 @@ ZEND_API bool zend_collection_is_identical(const zval *op1, const zval *op2)
 	}
 
 	if (a->type->kind == ZEND_COLLECTION_TYPE_SET) {
+		/* Sets are never hybrid (only vec append produces one), but iterate by
+		 * logical position so this stays representation-independent regardless. */
 		for (uint32_t i = 0; i < a->count; i++) {
-			if (!zend_set_contains(b, &a->elements[i])) {
+			if (!zend_set_contains(b, zend_stor_iter(a, i))) {
 				return false;
 			}
 		}
 		return true;
 	}
 
-	/* vec and tuple: both are positional and share this loop. */
+	/* vec and tuple: both are positional and share this loop. Iterate by logical
+	 * position so a flat value and a hybrid value -- or two hybrids split
+	 * differently between base and tail -- with the same elements compare identical,
+	 * without flattening either side. */
 	for (uint32_t i = 0; i < a->count; i++) {
-		if (!zend_is_identical(&a->elements[i], &b->elements[i])) {
+		if (!zend_is_identical(zend_stor_iter(a, i), zend_stor_iter(b, i))) {
 			return false;
 		}
 	}

@@ -615,7 +615,6 @@ static void zend_print_zval_r_to_buf(smart_str *buf, zval *expr, int indent) /* 
 			zend_vec *vec = Z_VEC_P(expr);
 			zend_string *name = zend_zval_collection_type_name(expr);
 			uint32_t count = ZEND_VEC_COUNT(vec);
-			zval *elements = ZEND_VEC_ELEMENTS(vec);
 			int i;
 
 			if (name) {
@@ -637,7 +636,8 @@ static void zend_print_zval_r_to_buf(smart_str *buf, zval *expr, int indent) /* 
 				smart_str_appendc(buf, '[');
 				smart_str_append_long(buf, (zend_long) j);
 				smart_str_appends(buf, "] => ");
-				zend_print_zval_r_to_buf(buf, &elements[j], indent + PRINT_ZVAL_INDENT);
+				/* Logical position: hybrid values print like the equivalent flat one. */
+				zend_print_zval_r_to_buf(buf, zend_stor_iter(vec, j), indent + PRINT_ZVAL_INDENT);
 				smart_str_appends(buf, "\n");
 			}
 			indent -= PRINT_ZVAL_INDENT;

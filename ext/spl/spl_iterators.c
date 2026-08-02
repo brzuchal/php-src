@@ -3056,11 +3056,12 @@ PHP_FUNCTION(iterator_to_array)
 		 * are already 0..n-1, so both modes yield the same list. */
 		zend_vec *vec = Z_VEC_P(obj);
 		uint32_t count = ZEND_VEC_COUNT(vec);
-		zval *elements = ZEND_VEC_ELEMENTS(vec);
 		array_init_size(return_value, count);
+		/* Iterate by logical position so a hybrid (base+tail) copies in the same
+		 * order as a flat value -- representation-independent. */
 		for (uint32_t i = 0; i < count; i++) {
 			zval tmp;
-			ZVAL_COPY(&tmp, &elements[i]);
+			ZVAL_COPY(&tmp, zend_stor_iter(vec, i));
 			zend_hash_next_index_insert(Z_ARRVAL_P(return_value), &tmp);
 		}
 		return;

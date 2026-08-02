@@ -1117,7 +1117,11 @@ static ZEND_FUNCTION(zend_test_vec_get)
 		zend_argument_value_error(2, "is out of range");
 		RETURN_THROWS();
 	}
-	RETURN_COPY(&Z_VEC_P(v)->elements[idx]);
+	/* Logical-position read via the storage contract: on a HYBRID root the
+	 * elements[] overlay holds the two child collection zvals, not logical
+	 * elements, so a raw elements[idx] would be type confusion (idx 0..1) or
+	 * out of bounds (idx >= 2). */
+	RETURN_COPY(zend_stor_get(Z_VEC_P(v), (uint32_t) idx));
 }
 
 /* Structural-key hooks. These exercise the PROBE side only: a key computed by
