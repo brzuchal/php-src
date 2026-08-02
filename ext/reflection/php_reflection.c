@@ -2733,6 +2733,16 @@ ZEND_METHOD(ReflectionParameter, getClass)
 			}
 		}
 		zend_reflection_class_factory(ce, return_value);
+	} else if (ZEND_TYPE_IS_ITERABLE_FALLBACK(param->arg_info->type)) {
+		/* An `iterable` parameter reports Traversable from the (deprecated)
+		 * getClass(), as it did before iterable types carried the collection-era
+		 * provenance bit. This covers the decomposed `Traversable|array` form that
+		 * keeps the iterable provenance bit -- e.g. an internal function's `iterable`
+		 * argument -- for which the ZEND_TYPE_HAS_NAME branch above does not fire. A
+		 * genuine Traversable|array union without the provenance bit still resolves
+		 * through HAS_NAME, and a collection descriptor never sets the iterable bit,
+		 * so both are unaffected. */
+		zend_reflection_class_factory(zend_ce_traversable, return_value);
 	}
 }
 /* }}} */
