@@ -993,10 +993,27 @@ handle_zvals:
 		/* Traverse via the storage span contract. FLAT is exactly one span
 		 * {elements, count}, so this compiles to the same n/zv load as before;
 		 * a multi-span backend (hybrid/trie) must loop every span here. */
-		zend_stor_span span = zend_stor_span_get((zend_vec*)ref, 0);
-		ZEND_ASSERT(zend_stor_span_count((zend_vec*)ref) == 1);
-		n = span.n;
-		zv = span.base;
+		{
+			/* General span traversal via the storage contract, bounded by logical
+			 * count so unused capacity is never scanned. FLAT/CAPACITY yield exactly
+			 * one span {elements, count} (an empty value is one span with n == 0, so
+			 * the walker skips it); a multi-span representation enqueues spans
+			 * 1..N-1 at the guarded point below. For a single span this folds to the
+			 * same n/zv load as before, so the one-span path is unchanged. */
+			zend_vec *vec = (zend_vec *) ref;
+			uint32_t nspans = zend_stor_span_count(vec);
+			if (UNEXPECTED(nspans > 1)) {
+				ZEND_UNREACHABLE(); /* multi-span extension point */
+			}
+			if (EXPECTED(nspans == 1)) {
+				zend_stor_span span = zend_stor_span_get(vec, 0);
+				n = span.n;
+				zv = span.base;
+			} else {
+				n = 0;      /* zero-span backend: nothing to scan */
+				zv = NULL;
+			}
+		}
 		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		ZEND_ASSERT((zend_array*)ref != &EG(symbol_table));
@@ -1184,10 +1201,27 @@ handle_zvals:
 		/* Traverse via the storage span contract. FLAT is exactly one span
 		 * {elements, count}, so this compiles to the same n/zv load as before;
 		 * a multi-span backend (hybrid/trie) must loop every span here. */
-		zend_stor_span span = zend_stor_span_get((zend_vec*)ref, 0);
-		ZEND_ASSERT(zend_stor_span_count((zend_vec*)ref) == 1);
-		n = span.n;
-		zv = span.base;
+		{
+			/* General span traversal via the storage contract, bounded by logical
+			 * count so unused capacity is never scanned. FLAT/CAPACITY yield exactly
+			 * one span {elements, count} (an empty value is one span with n == 0, so
+			 * the walker skips it); a multi-span representation enqueues spans
+			 * 1..N-1 at the guarded point below. For a single span this folds to the
+			 * same n/zv load as before, so the one-span path is unchanged. */
+			zend_vec *vec = (zend_vec *) ref;
+			uint32_t nspans = zend_stor_span_count(vec);
+			if (UNEXPECTED(nspans > 1)) {
+				ZEND_UNREACHABLE(); /* multi-span extension point */
+			}
+			if (EXPECTED(nspans == 1)) {
+				zend_stor_span span = zend_stor_span_get(vec, 0);
+				n = span.n;
+				zv = span.base;
+			} else {
+				n = 0;      /* zero-span backend: nothing to scan */
+				zv = NULL;
+			}
+		}
 		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		ZEND_ASSERT(((zend_array*)ref) != &EG(symbol_table));
@@ -1416,10 +1450,27 @@ handle_zvals:
 		/* Traverse via the storage span contract. FLAT is exactly one span
 		 * {elements, count}, so this compiles to the same n/zv load as before;
 		 * a multi-span backend (hybrid/trie) must loop every span here. */
-		zend_stor_span span = zend_stor_span_get((zend_vec*)ref, 0);
-		ZEND_ASSERT(zend_stor_span_count((zend_vec*)ref) == 1);
-		n = span.n;
-		zv = span.base;
+		{
+			/* General span traversal via the storage contract, bounded by logical
+			 * count so unused capacity is never scanned. FLAT/CAPACITY yield exactly
+			 * one span {elements, count} (an empty value is one span with n == 0, so
+			 * the walker skips it); a multi-span representation enqueues spans
+			 * 1..N-1 at the guarded point below. For a single span this folds to the
+			 * same n/zv load as before, so the one-span path is unchanged. */
+			zend_vec *vec = (zend_vec *) ref;
+			uint32_t nspans = zend_stor_span_count(vec);
+			if (UNEXPECTED(nspans > 1)) {
+				ZEND_UNREACHABLE(); /* multi-span extension point */
+			}
+			if (EXPECTED(nspans == 1)) {
+				zend_stor_span span = zend_stor_span_get(vec, 0);
+				n = span.n;
+				zv = span.base;
+			} else {
+				n = 0;      /* zero-span backend: nothing to scan */
+				zv = NULL;
+			}
+		}
 		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		ht = (HashTable *)ref;
@@ -1671,10 +1722,27 @@ handle_zvals:
 		/* Traverse via the storage span contract. FLAT is exactly one span
 		 * {elements, count}, so this compiles to the same n/zv load as before;
 		 * a multi-span backend (hybrid/trie) must loop every span here. */
-		zend_stor_span span = zend_stor_span_get((zend_vec*)ref, 0);
-		ZEND_ASSERT(zend_stor_span_count((zend_vec*)ref) == 1);
-		n = span.n;
-		zv = span.base;
+		{
+			/* General span traversal via the storage contract, bounded by logical
+			 * count so unused capacity is never scanned. FLAT/CAPACITY yield exactly
+			 * one span {elements, count} (an empty value is one span with n == 0, so
+			 * the walker skips it); a multi-span representation enqueues spans
+			 * 1..N-1 at the guarded point below. For a single span this folds to the
+			 * same n/zv load as before, so the one-span path is unchanged. */
+			zend_vec *vec = (zend_vec *) ref;
+			uint32_t nspans = zend_stor_span_count(vec);
+			if (UNEXPECTED(nspans > 1)) {
+				ZEND_UNREACHABLE(); /* multi-span extension point */
+			}
+			if (EXPECTED(nspans == 1)) {
+				zend_stor_span span = zend_stor_span_get(vec, 0);
+				n = span.n;
+				zv = span.base;
+			} else {
+				n = 0;      /* zero-span backend: nothing to scan */
+				zv = NULL;
+			}
+		}
 		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		/* optimization: color is GC_BLACK (0) */
@@ -1877,10 +1945,27 @@ handle_zvals:
 		/* Traverse via the storage span contract. FLAT is exactly one span
 		 * {elements, count}, so this compiles to the same n/zv load as before;
 		 * a multi-span backend (hybrid/trie) must loop every span here. */
-		zend_stor_span span = zend_stor_span_get((zend_vec*)ref, 0);
-		ZEND_ASSERT(zend_stor_span_count((zend_vec*)ref) == 1);
-		n = span.n;
-		zv = span.base;
+		{
+			/* General span traversal via the storage contract, bounded by logical
+			 * count so unused capacity is never scanned. FLAT/CAPACITY yield exactly
+			 * one span {elements, count} (an empty value is one span with n == 0, so
+			 * the walker skips it); a multi-span representation enqueues spans
+			 * 1..N-1 at the guarded point below. For a single span this folds to the
+			 * same n/zv load as before, so the one-span path is unchanged. */
+			zend_vec *vec = (zend_vec *) ref;
+			uint32_t nspans = zend_stor_span_count(vec);
+			if (UNEXPECTED(nspans > 1)) {
+				ZEND_UNREACHABLE(); /* multi-span extension point */
+			}
+			if (EXPECTED(nspans == 1)) {
+				zend_stor_span span = zend_stor_span_get(vec, 0);
+				n = span.n;
+				zv = span.base;
+			} else {
+				n = 0;      /* zero-span backend: nothing to scan */
+				zv = NULL;
+			}
+		}
 		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		ht = (zend_array*)ref;
