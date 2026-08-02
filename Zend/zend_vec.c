@@ -480,6 +480,14 @@ static zend_vec *zend_hybrid_flatten(const zend_vec *h)
 static zend_vec *zend_flat_append_to_hybrid(zend_vec *base, zval *value)
 {
 	ZEND_ASSERT(!ZEND_VEC_IS_HYBRID(base));
+	/* Policy degenerate case (== zend_hybrid_should_flatten(1, base->count) at
+	 * the frozen R = 1.0; keep in sync with the knobs below): a one-element
+	 * tail over an EMPTY base would publish tail > R*base and shares nothing.
+	 * Publish a FLAT copy instead -- the copy cost is the appended element
+	 * alone, so no published hybrid ever crosses a flatten trigger. */
+	if (UNEXPECTED(base->count == 0)) {
+		return zend_vec_create_with(base, value, /* prepend */ false, /* exclusive */ false);
+	}
 	ZVAL_DEREF(value);
 	if (!collection_member_matches(base->type, 0, value)) {
 		return NULL;   /* type failure: nothing allocated, caller raises TypeError */
@@ -495,10 +503,30 @@ static zend_vec *zend_flat_append_to_hybrid(zend_vec *base, zval *value)
 	return zend_hybrid_alloc(base, tail);
 }
 
-/* T: the maximum tail element count a published hybrid may carry. A hybrid is
- * never published with a larger tail -- it flattens first. The flatten-policy
- * commit sets the validated bound and adds the tail/base ratio knob. */
-#define ZEND_HYBRID_TAIL_MAX 255u
+/* Flatten policy knobs. Two INDEPENDENT triggers bound the tail so a hybrid
+ * always stays "small tail over a large shared base":
+ *   T  -- the absolute maximum tail count. Caps read/GC/tail-copy cost and MM-bin
+ *         footprint for a large base (where the ratio never fires).
+ *   R  -- the tail/base ratio, as NUM/DEN. A tail that grows past R*base no longer
+ *         benefits from base-sharing, so it flattens; this only ever LOWERS the
+ *         bound below T, and only for small bases (for base >= T/R, T dominates).
+ * T = 127 with R = 1.0 is the VALIDATED policy (storage benchmark, 2026-08-02:
+ * retained append O(1); 116 B marginal retained memory per live branch at 1000
+ * branches from a 100k base; CV-accumulation log-log slope 1.85 -> 1.20; flat
+ * and hybrid read/foreach within 11% of the flat baseline). */
+#define ZEND_HYBRID_TAIL_MAX 127u
+#define ZEND_HYBRID_RATIO_NUM 1u
+#define ZEND_HYBRID_RATIO_DEN 1u
+
+/* True when publishing a tail of `new_tail` over a base of `base_count` would
+ * cross either flatten trigger. 64-bit products avoid overflow at the T/ratio
+ * scales. */
+static zend_always_inline bool zend_hybrid_should_flatten(uint32_t new_tail, uint32_t base_count)
+{
+	return new_tail > ZEND_HYBRID_TAIL_MAX
+	    || (uint64_t) new_tail * ZEND_HYBRID_RATIO_DEN
+	         > (uint64_t) base_count * ZEND_HYBRID_RATIO_NUM;
+}
 
 /* Build a fresh tail = the old tail's elements followed by `value`, with spare
  * capacity for subsequent in-place appends. The old tail is not modified; `value`
@@ -526,10 +554,11 @@ static zend_vec *zend_hybrid_append(zend_vec *root, zval *value, bool root_exclu
 	zend_vec *base = ZEND_VEC_HYBRID_BASE_VEC(root);
 	zend_vec *tail = ZEND_VEC_HYBRID_TAIL_VEC(root);
 
-	/* Flatten before the tail would cross the bound: produce a fresh flat value
-	 * (base + tail + value). Never publishes a tail > T; the shared root/base are
-	 * untouched, so this is a new value, never an in-place mutation of a shared one. */
-	if (UNEXPECTED(tail->count + 1 > ZEND_HYBRID_TAIL_MAX)) {
+	/* Flatten before the tail would cross a trigger: produce a fresh flat value
+	 * (base + tail + value). Never publishes a tail past T or R*base; the shared
+	 * root/base are untouched, so this is a NEW value, never an in-place mutation of
+	 * a shared one (a read-only op never reaches here). */
+	if (UNEXPECTED(zend_hybrid_should_flatten(tail->count + 1, ZEND_VEC_HYBRID_BASE_COUNT(root)))) {
 		zend_vec *flat = zend_hybrid_flatten(root);                        /* [base..,tail..] rc1 */
 		zend_vec *out  = zend_vec_create_with(flat, value, false, true);   /* + value             */
 		if (out != flat) {
@@ -578,16 +607,8 @@ ZEND_API zend_vec *zend_vec_append_value(zend_vec *base, zval *value, bool exclu
 			/* Flat consumable temporary: mutate/grow in place. */
 			return zend_vec_create_with(base, value, /* prepend */ false, /* exclusive */ true);
 		}
-#if ZEND_VEC_HYBRID_ENABLED
 		/* Retained/shared flat append: share base, one-element tail -> HYBRID. */
 		return zend_flat_append_to_hybrid(base, value);
-#else
-		/* Hybrid production is gated off until every observer (indexed read,
-		 * iteration, identity, serialization, display) is representation-aware;
-		 * the flatten-policy commit flips the gate. Until then a retained
-		 * append copies, exactly as before this mechanism existed. */
-		return zend_vec_create_with(base, value, /* prepend */ false, /* exclusive */ false);
-#endif
 	}
 
 	/* HYBRID receiver: validate the value, then run the root/tail exclusivity
@@ -1353,5 +1374,73 @@ ZEND_API uint32_t zend_hybrid_lifecycle_selftest(void)
 	zend_string_release(b);
 	zend_string_release(c);
 	zend_string_release(d);
+	return result;
+}
+
+/* Prove the flatten-policy invariants at the dispatcher boundary, entirely in
+ * C: no PHP surface can observe a value's representation, so the policy's
+ * published-representation guarantees keep direct coverage here. */
+ZEND_API uint32_t zend_hybrid_policy_selftest(void)
+{
+	zend_type str_type = ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
+	union {
+		zend_collection_type desc;
+		char buf[ZEND_TYPE_COLLECTION_SIZE(1)];
+	} probe;
+	zend_type probe_type = ZEND_TYPE_INIT_NONE(0);
+	const zend_collection_info *vec_of_string;
+	zend_string *a = zend_string_init("a", 1, 0);
+	zend_string *v = zend_string_init("v", 1, 0);
+	zend_vec *base, *out;
+	uint32_t result = 0;
+	zval tmp;
+
+	probe.desc.kind = ZEND_COLLECTION_TYPE_VEC;
+	probe.desc.num_types = 1;
+	probe.desc.types[0] = str_type;
+	ZEND_TYPE_SET_COLLECTION(probe_type, &probe.desc);
+	vec_of_string = zend_collection_info_intern(probe_type);
+	ZEND_ASSERT(vec_of_string != NULL);
+
+	/* A retained (non-exclusive) append to an EMPTY vec must publish a FLAT
+	 * value: a hybrid over base_count == 0 would violate the R bound and
+	 * shares nothing. The receiver stays untouched. */
+	base = zend_vec_alloc(0, vec_of_string);
+	ZVAL_STR(&tmp, v);   /* borrowed; the append copies */
+	out = zend_vec_append_value(base, &tmp, /* exclusive */ false);
+	if (out != NULL && out != base
+	 && !ZEND_VEC_IS_HYBRID(out)
+	 && out->count == 1
+	 && base->count == 0) {
+		result |= ZEND_HYBRID_POLICY_SELFTEST_EMPTY_BASE_FLAT;
+	}
+	if (out != NULL && out != base) {
+		zend_vec_destroy(out);
+	}
+	zend_vec_destroy(base);
+
+	/* Positive control: the same retained append to a NON-empty vec publishes
+	 * a HYBRID sharing the receiver as base, with a one-element tail (both
+	 * policy bounds hold at tail == 1 <= base_count). */
+	base = zend_vec_alloc(1, vec_of_string);
+	ZVAL_STR_COPY(&tmp, a);
+	zend_vec_append(base, &tmp);
+	zval_ptr_dtor(&tmp);
+	ZVAL_STR(&tmp, v);
+	out = zend_vec_append_value(base, &tmp, /* exclusive */ false);
+	if (out != NULL
+	 && ZEND_VEC_IS_HYBRID(out)
+	 && ZEND_VEC_HYBRID_BASE_VEC(out) == base
+	 && ZEND_VEC_HYBRID_TAIL_VEC(out)->count == 1
+	 && out->count == 2) {
+		result |= ZEND_HYBRID_POLICY_SELFTEST_RETAINED_HYBRID;
+	}
+	if (out != NULL) {
+		zend_vec_destroy(out);
+	}
+	zend_vec_destroy(base);
+
+	zend_string_release(a);
+	zend_string_release(v);
 	return result;
 }

@@ -24,4 +24,6 @@ hybrid_dtor_balanced       pass
 hybrid_tagged              pass
 hybrid_tail_owned          pass
 named_ownership            pass
+policy_empty_base_flat     pass
+policy_retained_hybrid     pass
 validator                  pass

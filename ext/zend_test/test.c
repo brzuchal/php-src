@@ -810,6 +810,19 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 		add_assoc_bool(return_value, "hybrid_dtor_balanced",
 			(bits & ZEND_HYBRID_SELFTEST_DTOR_BALANCED) != 0);
 	}
+
+	/* 8. Flatten policy. The append dispatcher must never publish a hybrid
+	 *    that violates a policy bound: a retained append to an EMPTY vec stays
+	 *    FLAT (tail > R*base is forbidden at base_count == 0), while the same
+	 *    append to a non-empty vec yields a HYBRID sharing that base. */
+	{
+		uint32_t bits = zend_hybrid_policy_selftest();
+
+		add_assoc_bool(return_value, "policy_empty_base_flat",
+			(bits & ZEND_HYBRID_POLICY_SELFTEST_EMPTY_BASE_FLAT) != 0);
+		add_assoc_bool(return_value, "policy_retained_hybrid",
+			(bits & ZEND_HYBRID_POLICY_SELFTEST_RETAINED_HYBRID) != 0);
+	}
 }
 
 /* Build a collection type wrapping a single element type. Ownership of any

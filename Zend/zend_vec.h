@@ -97,13 +97,6 @@ ZEND_STATIC_ASSERT(offsetof(zend_vec, elements) == offsetof(zend_vec, count) + 8
 # error "hybrid vec storage currently requires a supported 64-bit layout (LP64/LLP64); 32-bit targets are not supported"
 #endif
 
-/* Master gate for producing HYBRID values from PHP surfaces. The mechanism
- * (representation, ownership, transitions, matrix, readers) lands first with
- * the gate OFF so every intermediate commit keeps current public semantics;
- * the flatten-policy commit flips it ON once all observers are
- * representation-aware. C-level selftests construct hybrids regardless. */
-#define ZEND_VEC_HYBRID_ENABLED 0
-
 #define ZEND_VEC_HYBRID_FLAG   (UINT32_C(1) << 31)
 #define ZEND_VEC_CAP_MASK      (~ZEND_VEC_HYBRID_FLAG)          /* 0x7fffffff */
 #define ZEND_VEC_IS_HYBRID(v)  (((v)->capacity & ZEND_VEC_HYBRID_FLAG) != 0)
@@ -481,6 +474,17 @@ ZEND_API uint32_t zend_vec_lifecycle_selftest(void);
 #define ZEND_HYBRID_SELFTEST_ALL               (0x1fu)
 
 ZEND_API uint32_t zend_hybrid_lifecycle_selftest(void);
+
+/* Flatten-policy selftest: the dispatcher's published representations respect
+ * the policy bounds. EMPTY_BASE_FLAT: a retained append to an empty vec stays
+ * flat (R forbids tail > R*base at base_count == 0). RETAINED_HYBRID: the
+ * positive control -- the same append to a non-empty vec publishes a hybrid
+ * sharing the receiver as base with a one-element tail. */
+#define ZEND_HYBRID_POLICY_SELFTEST_EMPTY_BASE_FLAT  (1u << 0)
+#define ZEND_HYBRID_POLICY_SELFTEST_RETAINED_HYBRID  (1u << 1)
+#define ZEND_HYBRID_POLICY_SELFTEST_ALL              (0x3u)
+
+ZEND_API uint32_t zend_hybrid_policy_selftest(void);
 
 /* Release the element type, the element zvals, and the allocation. Reached
  * through rc_dtor_func() when the refcount drops to zero. */
