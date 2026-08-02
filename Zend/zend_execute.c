@@ -3875,7 +3875,11 @@ static ZEND_COLD void zend_collection_method_value_type_error(
 		uint32_t arg_num, const char *arg_name, const zval *value)
 {
 	zend_string *coll = zend_collection_info_to_string(receiver->type);
-	zend_string *elem = zend_type_to_string(ZEND_VEC_ELEMENT_TYPE(receiver));
+	/* Member 0 for vec/set. Use the node-aware member stringifier: a nested member
+	 * type (e.g. vec[vec[int]]) carries a canonical zend_collection_info *, which
+	 * zend_type_to_string() would misread as a compile-time zend_collection_type
+	 * and dereference bogus fields. */
+	zend_string *elem = zend_collection_info_member_to_string(receiver->type, 0);
 	zend_type_error("%s::%s(): Argument #%u ($%s) must be of type %s, %s given",
 		ZSTR_VAL(coll), method, arg_num, arg_name, ZSTR_VAL(elem), zend_zval_value_name(value));
 	zend_string_release(elem);
@@ -4047,7 +4051,10 @@ static ZEND_COLD void zend_collection_tuple_value_type_error(
 		const zend_vec *receiver, zend_long index, const zval *value)
 {
 	zend_string *coll = zend_collection_info_to_string(receiver->type);
-	zend_string *elem = zend_type_to_string(receiver->type->types[index]);
+	/* Positional: member `index` (already range-checked). Node-aware member
+	 * stringifier, so a nested tuple member type stringifies through its canonical
+	 * node instead of being misread as a compile-time descriptor. */
+	zend_string *elem = zend_collection_info_member_to_string(receiver->type, (uint32_t) index);
 	zend_type_error("%s::withAt(): Argument #2 ($value) must be of type %s, %s given",
 		ZSTR_VAL(coll), ZSTR_VAL(elem), zend_zval_value_name(value));
 	zend_string_release(elem);
