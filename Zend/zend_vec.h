@@ -62,22 +62,26 @@ typedef struct _zend_vec {
  *   - LP64 and LLP64/Windows x64 (SIZEOF_SIZE_T == 8): validated. `capacity`
  *     fills the padding that already sat between `count` and the 8-aligned
  *     `elements[]`, so it costs zero bytes.
- *   - x32, i.e. ILP32 on the x86-64 backend (SIZEOF_SIZE_T == 4 && __x86_64__):
- *     validated via the LINUX_X32 collections CI job. Its `type` pointer is
- *     4 bytes, so `capacity` occupies its own header word rather than free
- *     padding; the base/tail overlay and the bit-31 tag are unaffected (see the
- *     asserts below).
+ *   - 32-bit x86, i.e. ILP32 with a 4-byte `type` pointer (SIZEOF_SIZE_T == 4 on
+ *     __i386__ or __x86_64__/x32). The project's 32-bit CI job (named "LINUX_X32"
+ *     but actually i386: it builds -m32 / i686-pc-linux-gnu / :i386 libs) runs the
+ *     full collection corpus here. i386 is the *stricter* layout -- `double`, and
+ *     thus `zval`, is only 4-aligned, so `elements[]` sits at offset 20 and
+ *     `capacity` costs one word rather than being free padding -- so a green i386
+ *     run also covers x32, whose 8-aligned zval matches LP64. The base/tail
+ *     overlay and the bit-31 tag are unaffected either way (see the asserts).
  *
- * Every other ILP32 ABI (classical i386, ARM32, ...) falls back to the always-
- * correct FLAT representation -- identical semantics, only without the retained-
- * append base-sharing win -- until it too passes the corpus. Widen this gate as
- * ABIs are validated; never widen it ahead of a green pipeline. */
+ * Every other ILP32 ABI (ARM32, and 32-bit MSVC, which defines neither macro)
+ * falls back to the always-correct FLAT representation -- identical semantics,
+ * only without the retained-append base-sharing win -- until it too passes the
+ * corpus. Widen this gate as ABIs are validated; never widen it ahead of a green
+ * pipeline. */
 #if SIZEOF_SIZE_T == 8
-# define ZEND_VEC_HYBRID_SUPPORTED 1          /* LP64 and LLP64/Windows x64        */
-#elif SIZEOF_SIZE_T == 4 && defined(__x86_64__)
-# define ZEND_VEC_HYBRID_SUPPORTED 1          /* x32 (ILP32 on x86-64): CI-validated */
+# define ZEND_VEC_HYBRID_SUPPORTED 1          /* LP64 and LLP64/Windows x64             */
+#elif SIZEOF_SIZE_T == 4 && (defined(__i386__) || defined(__x86_64__))
+# define ZEND_VEC_HYBRID_SUPPORTED 1          /* 32-bit x86: i386 (CI-validated) and x32 */
 #else
-# define ZEND_VEC_HYBRID_SUPPORTED 0          /* i386, ARM32, ...: flat until validated */
+# define ZEND_VEC_HYBRID_SUPPORTED 0          /* ARM32, other ILP32: flat until validated */
 #endif
 
 /* ---- Hybrid layout invariants (ABI-independent; asserted on every target) ----

@@ -829,10 +829,10 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 	}
 #else
 	/* Hybrid storage is compiled out on this target -- an ILP32 ABI not yet
-	 * validated (classical i386, ARM32, ...); note x32 DOES run the real path
-	 * above. No hybrid is ever created, so the ownership and policy invariants hold
-	 * vacuously. Report the same rows as passed to keep vec_selftest.phpt
-	 * platform-independent. */
+	 * validated (ARM32, 32-bit MSVC, ...); note 32-bit x86 (i386 and x32) DOES run
+	 * the real path above. No hybrid is ever created, so the ownership and policy
+	 * invariants hold vacuously. Report the same rows as passed to keep
+	 * vec_selftest.phpt platform-independent. */
 	add_assoc_bool(return_value, "hybrid_tagged", 1);
 	add_assoc_bool(return_value, "hybrid_base_shared", 1);
 	add_assoc_bool(return_value, "hybrid_tail_owned", 1);
