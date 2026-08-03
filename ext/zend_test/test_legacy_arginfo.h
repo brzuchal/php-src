@@ -1,5 +1,5 @@
 /* This is a generated file, edit test.stub.php instead.
- * Stub hash: 8d5064ffed5d286f8781fd16140f5204e0790264
+ * Stub hash: c578d1688c2d6f4b82d3bc9dce40738aafe38bd5
  * Has decl header: yes */
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_trigger_bailout, 0, 0, 0)
@@ -118,6 +118,8 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_refcount, 0, 0, 1)
 ZEND_END_ARG_INFO()
 
 #define arginfo_zend_test_vec_selftest arginfo_zend_trigger_bailout
+
+#define arginfo_zend_test_vec_layout arginfo_zend_trigger_bailout
 
 #define arginfo_zend_test_collection_type_selftest arginfo_zend_trigger_bailout
 
@@ -343,6 +345,7 @@ static ZEND_FUNCTION(zend_call_method_if_exists);
 static ZEND_FUNCTION(zend_test_call_with_consumed_args);
 static ZEND_FUNCTION(zend_test_refcount);
 static ZEND_FUNCTION(zend_test_vec_selftest);
+static ZEND_FUNCTION(zend_test_vec_layout);
 static ZEND_FUNCTION(zend_test_collection_type_selftest);
 static ZEND_FUNCTION(zend_test_nested_collection_type_selftest);
 static ZEND_FUNCTION(zend_test_type_code_alias_selftest);
@@ -469,6 +472,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_test_call_with_consumed_args, arginfo_zend_test_call_with_consumed_args)
 	ZEND_FE(zend_test_refcount, arginfo_zend_test_refcount)
 	ZEND_FE(zend_test_vec_selftest, arginfo_zend_test_vec_selftest)
+	ZEND_FE(zend_test_vec_layout, arginfo_zend_test_vec_layout)
 	ZEND_FE(zend_test_collection_type_selftest, arginfo_zend_test_collection_type_selftest)
 	ZEND_FE(zend_test_nested_collection_type_selftest, arginfo_zend_test_nested_collection_type_selftest)
 	ZEND_FE(zend_test_type_code_alias_selftest, arginfo_zend_test_type_code_alias_selftest)

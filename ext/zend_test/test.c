@@ -828,9 +828,11 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 			(bits & ZEND_HYBRID_POLICY_SELFTEST_RETAINED_HYBRID) != 0);
 	}
 #else
-	/* Hybrid storage is compiled out on this target (e.g. ILP32): no hybrid is ever
-	 * created, so the ownership and policy invariants hold vacuously. Report the same
-	 * rows as passed to keep vec_selftest.phpt platform-independent. */
+	/* Hybrid storage is compiled out on this target -- an ILP32 ABI not yet
+	 * validated (classical i386, ARM32, ...); note x32 DOES run the real path
+	 * above. No hybrid is ever created, so the ownership and policy invariants hold
+	 * vacuously. Report the same rows as passed to keep vec_selftest.phpt
+	 * platform-independent. */
 	add_assoc_bool(return_value, "hybrid_tagged", 1);
 	add_assoc_bool(return_value, "hybrid_base_shared", 1);
 	add_assoc_bool(return_value, "hybrid_tail_owned", 1);
@@ -839,6 +841,50 @@ static ZEND_FUNCTION(zend_test_vec_selftest)
 	add_assoc_bool(return_value, "policy_empty_base_flat", 1);
 	add_assoc_bool(return_value, "policy_retained_hybrid", 1);
 #endif
+}
+
+/* Raw runtime layout of the vec header: the exact sizeof/alignof/offsetof and tag
+ * arithmetic the 32-bit-portability work reasons about, plus the ABI-independent
+ * invariants. A CI job on any target -- notably x32 -- thus reports its real
+ * numbers and machine-checks the hybrid layout contract at runtime, complementing
+ * the compile-time static asserts in zend_vec.h. */
+static ZEND_FUNCTION(zend_test_vec_layout)
+{
+	/* Portable alignof(zval): reuse the probe struct declared in zend_vec.h. */
+	size_t al_zval   = offsetof(struct zend_vec_zval_align_probe, zvap_z);
+	size_t sz_zval   = sizeof(zval);
+	size_t off_count = offsetof(zend_vec, count);
+	size_t off_cap   = offsetof(zend_vec, capacity);
+	size_t off_elem  = offsetof(zend_vec, elements);
+
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	array_init(return_value);
+	/* Sizes and alignment (sizeof_zval is 16 on every ABI; alignof is 8, or 4 on
+	 * i386 where the SysV ABI aligns double to 4). */
+	add_assoc_long(return_value, "sizeof_pointer",    (zend_long) sizeof(void *));
+	add_assoc_long(return_value, "sizeof_zval",       (zend_long) sz_zval);
+	add_assoc_long(return_value, "alignof_zval",      (zend_long) al_zval);
+	add_assoc_long(return_value, "sizeof_zend_vec",   (zend_long) sizeof(zend_vec));
+	/* Header offsets and derived allocation sizes. */
+	add_assoc_long(return_value, "offsetof_count",    (zend_long) off_count);
+	add_assoc_long(return_value, "offsetof_capacity", (zend_long) off_cap);
+	add_assoc_long(return_value, "offsetof_elements", (zend_long) off_elem);
+	add_assoc_long(return_value, "header_size",       (zend_long) off_elem);            /* == ZEND_VEC_HEADER_SIZE */
+	add_assoc_long(return_value, "hybrid_alloc_size", (zend_long) (off_elem + 2 * sz_zval));
+	/* Tag arithmetic: capacity is an exact uint32, so these are ABI-independent.
+	 * The flag itself (1u<<31) does not fit a 32-bit zend_long, so expose the bit
+	 * position and the 31-bit mask (both fit everywhere) instead of the raw value. */
+	add_assoc_long(return_value, "hybrid_flag_bit",   31);
+	add_assoc_long(return_value, "cap_mask",          (zend_long) ZEND_VEC_CAP_MASK);
+	add_assoc_long(return_value, "max_capacity",      (zend_long) ZEND_VEC_MAX_CAPACITY);
+	add_assoc_bool(return_value, "hybrid_supported",  ZEND_VEC_HYBRID_SUPPORTED);
+	/* ABI-independent invariants -- the runtime mirror of zend_vec.h's static
+	 * asserts; every one MUST hold on LP64, LLP64 and ILP32 alike. */
+	add_assoc_bool(return_value, "inv_count_before_capacity", off_cap  >= off_count + sizeof(uint32_t));
+	add_assoc_bool(return_value, "inv_capacity_in_header",    off_elem >= off_cap   + sizeof(uint32_t));
+	add_assoc_bool(return_value, "inv_elements_zval_aligned", (off_elem % al_zval) == 0);
+	add_assoc_bool(return_value, "inv_overlay_is_zvals",      sizeof(((zend_vec *) 0)->elements[0]) == sz_zval);
 }
 
 /* Build a collection type wrapping a single element type. Ownership of any

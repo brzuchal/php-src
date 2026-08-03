@@ -344,6 +344,12 @@ namespace {
     /** @return array<string, bool> */
     function zend_test_vec_selftest(): array {}
 
+    /** Raw runtime layout of the vec header (sizeof/alignof/offsetof, tag
+     *  arithmetic) plus the ABI-independent hybrid invariants, so any target --
+     *  notably x32 -- reports its real numbers and machine-checks the contract.
+     *  @return array<string, int> */
+    function zend_test_vec_layout(): array {}
+
     /** @return array<string, bool> */
     function zend_test_collection_type_selftest(): array {}
 

@@ -1,7 +1,12 @@
 --TEST--
 vec hybrid: retained append shares the base (no copy) — constant memory per branch
 --SKIPIF--
-<?php if (PHP_INT_SIZE !== 8) die('skip hybrid vec storage is 64-bit only; a retained append is a flat copy on 32-bit'); ?>
+<?php
+/* zend_test is loaded (see --EXTENSIONS-- below); its layout probe reports this
+ * ABI's compile-time ZEND_VEC_HYBRID_SUPPORTED. Skip precisely where hybrid is a
+ * flat fallback -- not by guessing from PHP_INT_SIZE, which is 8 even on x32. */
+if (!zend_test_vec_layout()['hybrid_supported']) die('skip hybrid vec storage not enabled on this ABI (flat-fallback: a retained append is a flat copy)');
+?>
 --EXTENSIONS--
 zend_test
 --FILE--

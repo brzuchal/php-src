@@ -52,28 +52,53 @@ typedef struct _zend_vec {
 /* offsetof is the only layout contract; do not assume a fixed header size. */
 #define ZEND_VEC_HEADER_SIZE     offsetof(zend_vec, elements)
 
-/* The hybrid representation assumes a 64-bit layout (LP64 and LLP64/Windows x64).
- * On other targets -- notably ILP32, where the `type` pointer is 4 bytes and the
- * header packs differently, and where the hybrid range checks are untested -- the
- * hybrid path is compiled out and collections use the flat representation
- * exclusively: correct, only without the retained-append base-sharing win. */
-#if defined(ZEND_ENABLE_ZVAL_LONG64) && SIZEOF_SIZE_T == 8
-# define ZEND_VEC_HYBRID_SUPPORTED 1
+/* Whether the HYBRID representation is *used* on this target. This is a
+ * deliberately conservative VALIDATION gate, not a correctness gate: the hybrid
+ * layout invariants (asserted unconditionally below) are ABI-independent and hold
+ * on ILP32 exactly as on LP64, so hybrid is *correct* anywhere those asserts pass.
+ * What this macro tracks is which ABIs have actually had the full collection
+ * corpus run against them:
+ *
+ *   - LP64 and LLP64/Windows x64 (SIZEOF_SIZE_T == 8): validated. `capacity`
+ *     fills the padding that already sat between `count` and the 8-aligned
+ *     `elements[]`, so it costs zero bytes.
+ *   - x32, i.e. ILP32 on the x86-64 backend (SIZEOF_SIZE_T == 4 && __x86_64__):
+ *     validated via the LINUX_X32 collections CI job. Its `type` pointer is
+ *     4 bytes, so `capacity` occupies its own header word rather than free
+ *     padding; the base/tail overlay and the bit-31 tag are unaffected (see the
+ *     asserts below).
+ *
+ * Every other ILP32 ABI (classical i386, ARM32, ...) falls back to the always-
+ * correct FLAT representation -- identical semantics, only without the retained-
+ * append base-sharing win -- until it too passes the corpus. Widen this gate as
+ * ABIs are validated; never widen it ahead of a green pipeline. */
+#if SIZEOF_SIZE_T == 8
+# define ZEND_VEC_HYBRID_SUPPORTED 1          /* LP64 and LLP64/Windows x64        */
+#elif SIZEOF_SIZE_T == 4 && defined(__x86_64__)
+# define ZEND_VEC_HYBRID_SUPPORTED 1          /* x32 (ILP32 on x86-64): CI-validated */
 #else
-# define ZEND_VEC_HYBRID_SUPPORTED 0
+# define ZEND_VEC_HYBRID_SUPPORTED 0          /* i386, ARM32, ...: flat until validated */
 #endif
 
-/* `capacity` lies within the header, before the elements payload, on every target,
- * so a builder writing elements never clobbers it and vice versa. */
+/* ---- Hybrid layout invariants (ABI-independent; asserted on every target) ----
+ * These express what the HYBRID overlay and the bit-31 capacity tag actually
+ * require. They hold on LP64, LLP64 and every ILP32 ABI alike, so a build fails
+ * only when an invariant is *truly* violated -- never merely because the target
+ * is 32-bit. (Whether hybrid is *used* on a target is the separate, conservative
+ * decision above.) We assert containment, and never that `capacity` is "free":
+ * on LP64 it fills the padding between `count` and the 8-aligned `elements[]`
+ * (0 added bytes), on ILP32 it occupies its own word (4 bytes on i386, 8 with the
+ * alignment pad on x32/ARM32) -- both correct. The old
+ * `offsetof(elements) == offsetof(count) + 8` shortcut held on LP64 (and on i386
+ * only by coincidence) but is false on x32/ARM32, so it is deliberately gone. */
+
+/* `count` then `capacity` both lie strictly within the header, ahead of the
+ * elements payload: a builder writing elements never clobbers the tag or count,
+ * and vice versa. */
+ZEND_STATIC_ASSERT(offsetof(zend_vec, capacity) >= offsetof(zend_vec, count) + sizeof(uint32_t),
+	"count must precede capacity within the vec header");
 ZEND_STATIC_ASSERT(offsetof(zend_vec, elements) >= offsetof(zend_vec, capacity) + sizeof(uint32_t),
 	"capacity must lie within the vec header, before the elements payload");
-#if ZEND_VEC_HYBRID_SUPPORTED
-/* On LP64/LLP64 `capacity` also occupies the padding that already sat between
- * `count` and the 8-aligned `elements[]`, so it adds ZERO bytes per value and does
- * not move the element base: count@16, capacity@20, elements@24 == count+8. */
-ZEND_STATIC_ASSERT(offsetof(zend_vec, elements) == offsetof(zend_vec, count) + 8,
-	"capacity must fit in the count padding without growing the vec header");
-#endif
 
 /* A collection zval: IS_COLLECTION is the runtime type, IS_VEC_GC is the
  * allocation kind. Every vec is collectable, exactly like an array or object. */
@@ -100,9 +125,9 @@ ZEND_STATIC_ASSERT(offsetof(zend_vec, elements) == offsetof(zend_vec, count) + 8
  * growth paths cap below 2^31. No generic code may read `->capacity` raw --
  * the tag must be impossible to mistake for a slot count, so every read goes
  * through a masked accessor. `capacity` is an exact-width uint32_t, so the
- * tag's position and the mask are identical on every supported platform
- * (LP64, LLP64/Windows x64); the layout static-asserts above reject any
- * platform where the header packs differently. */
+ * tag's position and the mask are identical on every ABI -- LP64, LLP64/Windows
+ * x64 and ILP32 alike; the layout static-asserts above hold on all of them (they
+ * check header containment and element alignment, not a fixed 64-bit shape). */
 #define ZEND_VEC_HYBRID_FLAG   (UINT32_C(1) << 31)
 #define ZEND_VEC_CAP_MASK      (~ZEND_VEC_HYBRID_FLAG)          /* 0x7fffffff */
 #if ZEND_VEC_HYBRID_SUPPORTED
@@ -141,6 +166,17 @@ ZEND_STATIC_ASSERT(sizeof(((zend_vec *) 0)->capacity) * 8 == 32,
  * silently desync the GC walker and the accessors above. */
 ZEND_STATIC_ASSERT(sizeof(((zend_vec *) 0)->elements[0]) == sizeof(zval),
 	"hybrid base/tail overlay requires elements[] to be zvals");
+
+/* ...and that the element base is correctly zval-aligned, so &elements[0] and
+ * &elements[1] are valid zval storage on every ABI (i386's 4-aligned double
+ * included). This is asserted, never left to accidental padding or alignment.
+ * The probe struct yields a portable alignof(zval): the offset a zval receives
+ * when placed after a single char equals its alignment (no _Alignof/__alignof__
+ * dependency, so it holds on every compiler PHP targets). */
+struct zend_vec_zval_align_probe { char zvap_c; zval zvap_z; };
+ZEND_STATIC_ASSERT(
+	offsetof(zend_vec, elements) % offsetof(struct zend_vec_zval_align_probe, zvap_z) == 0,
+	"elements[] must be zval-aligned for the hybrid base/tail overlay");
 
 /* ---- Storage contract ------------------------------------------------------
  * A narrow internal contract so collection operations do not hard-code the
