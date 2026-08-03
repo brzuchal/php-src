@@ -1,24 +1,27 @@
 <?php
+/* Introspect collections through their own native surface (`->count`, `[i]`) so
+ * the file-cache subprocess needs no extension -- zend_test is a shared DLL on
+ * Windows and would not be loaded by the spawned `php` there. This also exercises
+ * the real user-facing API across the cache round trip. */
 function ocl_flat(): int {
     $v = vec[int]{1, 2, 3};
-    return zend_test_vec_count($v);
+    return $v->count;
 }
 
 function ocl_nested(): int {
     $v = vec[vec[string]]{ vec[string]{'a'}, vec[string]{'b', 'c'} };
-    return zend_test_vec_count(zend_test_vec_get($v, 1));
+    return $v[1]->count;
 }
 
 function ocl_empty(): int {
-    return zend_test_vec_count(vec[int]{});
+    return (vec[int]{})->count;
 }
 
 /* A multi-member tuple descriptor: exercises a persisted descriptor with more
  * than one member type, and the positional element check after unserialization. */
 function ocl_tuple(): string {
     $t = tuple[int, string, vec[int]]{1, 'a', vec[int]{2, 3}};
-    return zend_test_vec_get($t, 0) . ',' . zend_test_vec_get($t, 1)
-        . ',' . zend_test_vec_count(zend_test_vec_get($t, 2));
+    return $t[0] . ',' . $t[1] . ',' . $t[2]->count;
 }
 
 function ocl_tuple_bad(): string {
@@ -34,7 +37,7 @@ function ocl_tuple_bad(): string {
  * has been unserialized from SHM. */
 function ocl_set(): int {
     $s = set[int]{1, 2, 2, 3, 1};
-    return zend_test_vec_count($s);
+    return $s->count;
 }
 
 /* Returned so a caller can check that repeated executions of a *persisted*
@@ -49,7 +52,7 @@ class OclC {
     public function pair(): array {
         $a = vec[int]{10};
         $b = vec[OclC]{$this};
-        return [zend_test_vec_get($a, 0), zend_test_vec_count($b)];
+        return [$a[0], $b->count];
     }
 
     public function bad(): string {

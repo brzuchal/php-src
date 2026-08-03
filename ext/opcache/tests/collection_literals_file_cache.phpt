@@ -2,7 +2,6 @@
 OPcache: collection literals survive a file cache round trip
 --EXTENSIONS--
 opcache
-zend_test
 --SKIPIF--
 <?php
 if (!getenv('TEST_PHP_EXECUTABLE')) die('skip TEST_PHP_EXECUTABLE not set');
