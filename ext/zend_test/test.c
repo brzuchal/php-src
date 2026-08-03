@@ -1214,6 +1214,12 @@ static ZEND_FUNCTION(zend_test_collection_key_positional)
 	zend_type tb = ZEND_TYPE_INIT_NONE(0);
 	zend_type m_int = ZEND_TYPE_INIT_MASK(MAY_BE_LONG);
 	zend_type m_str = ZEND_TYPE_INIT_MASK(MAY_BE_STRING);
+	/* Store members through a zend_type * cursor. The descriptor's flexible
+	 * types[] is declared [1], so a direct .types[1] store on a complete stack
+	 * object trips -fsanitize=bounds even though the union reserves the space;
+	 * the pointer form matches how the real code walks desc->types[i]. */
+	zend_type *first_types = first.desc.types;
+	zend_type *second_types = second.desc.types;
 
 	ZEND_PARSE_PARAMETERS_NONE();
 
@@ -1221,13 +1227,13 @@ static ZEND_FUNCTION(zend_test_collection_key_positional)
 	 * difference between the two descriptors. */
 	first.desc.kind = 0;
 	first.desc.num_types = 2;
-	first.desc.types[0] = m_int;
-	first.desc.types[1] = m_str;
+	first_types[0] = m_int;
+	first_types[1] = m_str;
 
 	second.desc.kind = 0;
 	second.desc.num_types = 2;
-	second.desc.types[0] = m_str;
-	second.desc.types[1] = m_int;
+	second_types[0] = m_str;
+	second_types[1] = m_int;
 
 	ZEND_TYPE_SET_COLLECTION(ta, &first.desc);
 	ZEND_TYPE_SET_COLLECTION(tb, &second.desc);
@@ -1415,12 +1421,15 @@ static ZEND_FUNCTION(zend_test_collection_key_unsupported)
 	zend_type plain_int = ZEND_TYPE_INIT_MASK(MAY_BE_LONG);
 	zend_type m_long = ZEND_TYPE_INIT_MASK(MAY_BE_LONG);
 	zend_type m_string = ZEND_TYPE_INIT_MASK(MAY_BE_STRING);
+	/* See zend_test_collection_key_positional: store list members through a
+	 * cursor so the flexible types[] (declared [1]) does not trip bounds UBSan. */
+	zend_type *member_types = members.list.types;
 
 	ZEND_PARSE_PARAMETERS_NONE();
 
 	members.list.num_types = 2;
-	members.list.types[0] = m_long;
-	members.list.types[1] = m_string;
+	member_types[0] = m_long;
+	member_types[1] = m_string;
 	ZEND_TYPE_SET_LIST(union_member, &members.list);
 	ZEND_TYPE_FULL_MASK(union_member) |= _ZEND_TYPE_UNION_BIT;
 
