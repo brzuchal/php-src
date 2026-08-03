@@ -21,7 +21,11 @@ $args = ' -d opcache.enable=1 -d opcache.enable_cli=1'
 // The first run serializes the script -- and its descriptor table -- into the
 // file cache; the second unserializes it and fixes the pointers up. Both must
 // build the same values and report the same diagnostics.
-$cmd = escapeshellarg($php) . $args . ' -r ' . escapeshellarg('require "' . $lib . '"; echo ocl_report();');
+// Single-quote the require path inside the -r code: on Windows the outer
+// escapeshellarg wraps the whole arg in "...", so an inner " (around the path)
+// collides with it and cmd leaks the drive-letter colon as a parse error. Single
+// quotes carry no such hazard, and the path's backslashes stay literal in both.
+$cmd = escapeshellarg($php) . $args . ' -r ' . escapeshellarg("require '" . $lib . "'; echo ocl_report();");
 $cold = shell_exec($cmd);
 $bins = 0;
 foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir,

@@ -17,7 +17,9 @@ t("wt bool idx",   fn() => $v->withAt(true, 9));
 t("wo array idx",  fn() => $v->withoutAt([1]));
 t("wo null idx",   fn() => $v->withoutAt(null));
 
-// out-of-range index: ValueError naming the valid range
+// out-of-range index: ValueError naming the valid range. PHP_INT_MAX is the
+// widest index; its echoed value is 64-bit on LP64 and 32-bit on ILP32, so the
+// "huge" line is matched with %d (see --EXPECTF-- below) rather than a literal.
 t("wt negative",   fn() => $v->withAt(-1, 9));
 t("wt == count",   fn() => $v->withAt(3, 9));
 t("wt huge",       fn() => $v->withAt(PHP_INT_MAX, 9));
@@ -51,14 +53,14 @@ var_dump($v->withoutAt(index: 0)->count === 2);
 // receiver unchanged after every failure
 var_dump($v->count === 3);
 ?>
---EXPECT--
+--EXPECTF--
 wt float idx: TypeError: withAt(): Argument #1 ($index) must be of type int, float given
 wt bool idx: TypeError: withAt(): Argument #1 ($index) must be of type int, true given
 wo array idx: TypeError: withoutAt(): Argument #1 ($index) must be of type int, array given
 wo null idx: TypeError: withoutAt(): Argument #1 ($index) must be of type int, null given
 wt negative: ValueError: vec[int]::withAt(): Argument #1 ($index) must be between 0 and 2, -1 given
 wt == count: ValueError: vec[int]::withAt(): Argument #1 ($index) must be between 0 and 2, 3 given
-wt huge: ValueError: vec[int]::withAt(): Argument #1 ($index) must be between 0 and 2, 9223372036854775807 given
+wt huge: ValueError: vec[int]::withAt(): Argument #1 ($index) must be between 0 and 2, %d given
 wo negative: ValueError: vec[int]::withoutAt(): Argument #1 ($index) must be between 0 and 2, -1 given
 wo == count: ValueError: vec[int]::withoutAt(): Argument #1 ($index) must be between 0 and 2, 3 given
 wt bad value: TypeError: vec[int]::withAt(): Argument #2 ($value) must be of type int, string given

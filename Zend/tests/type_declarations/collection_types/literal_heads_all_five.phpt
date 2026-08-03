@@ -14,7 +14,7 @@ $literals = [
     'vec'   => '$x = vec[int]{1};',
     'map'   => '$x = map[int, string]{1};',
     'set'   => '$x = set[int]{1};',
-    'tuple' => '$x = tuple[int, string]{1, "a"};',
+    'tuple' => "\$x = tuple[int, string]{1, 'a'};",  // single-quoted member: survives Windows cmd quoting
     'shape' => '$x = shape[int]{1};',
 ];
 

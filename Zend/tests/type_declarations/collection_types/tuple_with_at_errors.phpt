@@ -42,7 +42,7 @@ var_dump($t->withAt(index: 1, value: "z")->count === 2);
 // receiver unchanged after every failure
 var_dump($t->count === 2);
 ?>
---EXPECT--
+--EXPECTF--
 pos0 wrong: TypeError: tuple[int,string]::withAt(): Argument #2 ($value) must be of type int, string given
 pos1 wrong: TypeError: tuple[int,string]::withAt(): Argument #2 ($value) must be of type string, int given
 pos0 float: TypeError: tuple[int,string]::withAt(): Argument #2 ($value) must be of type int, float given
@@ -51,7 +51,7 @@ bool idx: TypeError: withAt(): Argument #1 ($index) must be of type int, true gi
 null idx: TypeError: withAt(): Argument #1 ($index) must be of type int, null given
 negative: ValueError: tuple[int,string]::withAt(): Argument #1 ($index) must be between 0 and 1, -1 given
 == arity: ValueError: tuple[int,string]::withAt(): Argument #1 ($index) must be between 0 and 1, 2 given
-huge: ValueError: tuple[int,string]::withAt(): Argument #1 ($index) must be between 0 and 1, 9223372036854775807 given
+huge: ValueError: tuple[int,string]::withAt(): Argument #1 ($index) must be between 0 and 1, %d given
 missing val: ArgumentCountError: withAt() expects exactly 2 arguments, 1 given
 no args: ArgumentCountError: withAt() expects exactly 2 arguments, 0 given
 extra: ArgumentCountError: withAt() expects exactly 2 arguments, 3 given

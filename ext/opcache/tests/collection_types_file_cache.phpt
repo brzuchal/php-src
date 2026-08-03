@@ -23,7 +23,13 @@ $args = ' -d opcache.enable=1 -d opcache.enable_cli=1'
     . ' -d opcache.file_cache_only=1';
 
 // First run serializes the script into the file cache; second unserializes it.
-$cmd = escapeshellarg($php) . $args . ' -r ' . escapeshellarg('require "' . $lib . '"; ' . $script);
+// Run from a file rather than `php -r`: $script embeds double-quoted strings and
+// $lib a drive-letter colon, both of which Windows cmd mangles inside
+// escapeshellarg. A file is read directly by PHP; only its quote-free path passes
+// through the shell. Kept outside $dir so it is not counted as a cache file below.
+$runner = __DIR__ . '/collection_fc_run_' . getmypid() . '.php';
+file_put_contents($runner, "<?php require '$lib'; $script");
+$cmd = escapeshellarg($php) . $args . ' ' . escapeshellarg($runner);
 $cold = shell_exec($cmd);
 $bins = 0;
 foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir,
@@ -41,6 +47,7 @@ foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir,
         FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $f) {
     $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
 }
+@unlink($runner);
 @rmdir($dir);
 ?>
 --EXPECT--
