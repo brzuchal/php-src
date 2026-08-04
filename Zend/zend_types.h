@@ -127,6 +127,28 @@ typedef struct {
 	zend_type types[1];
 } zend_type_list;
 
+/* Runtime kind of a collection type. Grows as further collection types are
+ * added; the descriptor below is generic over all of them. */
+typedef enum {
+	ZEND_COLLECTION_TYPE_VEC   = 0,
+	ZEND_COLLECTION_TYPE_MAP   = 1,
+	ZEND_COLLECTION_TYPE_SET   = 2,
+	ZEND_COLLECTION_TYPE_TUPLE = 3,
+	ZEND_COLLECTION_TYPE_SHAPE = 4,
+} zend_collection_type_kind;
+
+/* Reified parameter of a collection type declaration such as vec[int]. Stored
+ * behind a zend_type whose _ZEND_TYPE_LIST_BIT is set but which is neither a
+ * union nor an intersection (see ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR). The
+ * layout deliberately differs from zend_type_list (a leading kind field), so a
+ * descriptor is never a valid zend_type_list and must not be read as one.
+ * Header-plus-flexible-array, like zend_type_list and zend_attribute. */
+typedef struct _zend_collection_type {
+	uint32_t  kind;        /* zend_collection_type_kind */
+	uint32_t  num_types;   /* >= 1 for a concrete descriptor; 0 for a bare kind */
+	zend_type types[1];
+} zend_collection_type;
+
 #define _ZEND_TYPE_EXTRA_FLAGS_SHIFT 25
 #define _ZEND_TYPE_MASK ((1u << 25) - 1)
 /* Only one of these bits may be set. */
@@ -164,6 +186,21 @@ typedef struct {
 
 #define ZEND_TYPE_HAS_LIST(t) \
 	((((t).type_mask) & _ZEND_TYPE_LIST_BIT) != 0)
+
+/* A list-shaped ptr that is a union or intersection type list, i.e. a real
+ * zend_type_list. This is the only shape that may be read via ZEND_TYPE_LIST().
+ * A collection descriptor also has _ZEND_TYPE_LIST_BIT set but is neither union
+ * nor intersection, so it is excluded here. */
+#define ZEND_TYPE_IS_TYPE_LIST(t) \
+	((((t).type_mask) & _ZEND_TYPE_LIST_BIT) != 0 \
+	 && (((t).type_mask) & (_ZEND_TYPE_UNION_BIT | _ZEND_TYPE_INTERSECTION_BIT)) != 0)
+
+/* A collection type descriptor (e.g. vec[int]): _ZEND_TYPE_LIST_BIT set, but
+ * neither union nor intersection. Read via ZEND_TYPE_COLLECTION(), never
+ * ZEND_TYPE_LIST(). Named to avoid collision with the IS_COLLECTION zval tag. */
+#define ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(t) \
+	((((t).type_mask) & _ZEND_TYPE_LIST_BIT) != 0 \
+	 && (((t).type_mask) & (_ZEND_TYPE_UNION_BIT | _ZEND_TYPE_INTERSECTION_BIT)) == 0)
 
 #define ZEND_TYPE_IS_ITERABLE_FALLBACK(t) \
 	((((t).type_mask) & _ZEND_TYPE_ITERABLE_BIT) != 0)
@@ -213,7 +250,7 @@ typedef struct {
  * be visited. If it's a single type, only the single type is visited. */
 #define ZEND_TYPE_FOREACH(type, type_ptr) do { \
 	const zend_type *_cur, *_end; \
-	if (ZEND_TYPE_HAS_LIST(type)) { \
+	if (ZEND_TYPE_IS_TYPE_LIST(type)) { \
 		zend_type_list *_list = ZEND_TYPE_LIST(type); \
 		_cur = _list->types; \
 		_end = _cur + _list->num_types; \
@@ -228,7 +265,7 @@ typedef struct {
 #define ZEND_TYPE_FOREACH_MUTABLE(type, type_ptr) do { \
 	zend_type *_cur; \
 	const zend_type *_end; \
-	if (ZEND_TYPE_HAS_LIST(type)) { \
+	if (ZEND_TYPE_IS_TYPE_LIST(type)) { \
 		zend_type_list *_list = ZEND_TYPE_LIST(type); \
 		_cur = _list->types; \
 		_end = _cur + _list->num_types; \
@@ -255,6 +292,24 @@ typedef struct {
 #define ZEND_TYPE_SET_LIST(t, list) \
 	ZEND_TYPE_SET_PTR_AND_KIND(t, list, _ZEND_TYPE_LIST_BIT)
 
+/* Read/write a collection descriptor. SET_COLLECTION stores only the list bit
+ * (no union/intersection), which is exactly the ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR
+ * shape; callers must not OR in a union or intersection bit afterwards. */
+#define ZEND_TYPE_COLLECTION(t) \
+	((zend_collection_type *) (t).ptr)
+
+#define ZEND_TYPE_SET_COLLECTION(t, desc) \
+	ZEND_TYPE_SET_PTR_AND_KIND(t, desc, _ZEND_TYPE_LIST_BIT)
+
+/* Byte size of a collection descriptor holding num_types element types. Mirrors
+ * ZEND_TYPE_LIST_SIZE / ZEND_ATTRIBUTE_SIZE. num_types is >= 0: a concrete
+ * descriptor has >= 1 member, a bare collection kind (declaration-side only) has
+ * exactly 0. The `== 0 ? 0` guard is mandatory -- num_types is uint32_t, so an
+ * unguarded `(0u - 1)` would not underflow to a small value but to 0xFFFFFFFF,
+ * a ~64 GiB over-allocation. For 0 the size is the header (types[1] slot spare). */
+#define ZEND_TYPE_COLLECTION_SIZE(num_types) \
+	(sizeof(zend_collection_type) + ((num_types) == 0 ? 0 : ((num_types) - 1)) * sizeof(zend_type))
+
 /* FULL_MASK() includes the MAY_BE_* type mask, as well as additional metadata bits.
  * The PURE_MASK() only includes the MAY_BE_* type mask. */
 #define ZEND_TYPE_FULL_MASK(t) \
@@ -269,8 +324,20 @@ typedef struct {
 #define ZEND_TYPE_PURE_MASK_WITHOUT_NULL(t) \
 	((t).type_mask & _ZEND_TYPE_MAY_BE_MASK & ~_ZEND_TYPE_NULLABLE_BIT)
 
+/* Whether the type accepts values of the given zval type code. Only codes below
+ * _ZEND_TYPE_MAY_BE_MASK are representable as may-be bits; masking first keeps a
+ * runtime tag that sits above the mask (IS_COLLECTION) from aliasing a structural
+ * flag such as _ZEND_TYPE_ITERABLE_BIT, which occupies 1u << IS_COLLECTION. Such
+ * a code is simply not contained in any mask, which is the correct answer. */
+/* `mixed` means every runtime value. Runtime type codes at or above
+ * _ZEND_TYPE_MAY_BE_MASK (currently IS_COLLECTION) have no may-be bit, so a mask
+ * test can never report them as contained; the sites that mean "accepts anything"
+ * must therefore ask this question explicitly instead of relying on the mask. */
+#define ZEND_TYPE_IS_MIXED(t) \
+	(ZEND_TYPE_PURE_MASK(t) == MAY_BE_ANY)
+
 #define ZEND_TYPE_CONTAINS_CODE(t, code) \
-	(((t).type_mask & (1u << (code))) != 0)
+	(((t).type_mask & _ZEND_TYPE_MAY_BE_MASK & (1u << (code))) != 0)
 
 #define ZEND_TYPE_ALLOW_NULL(t) \
 	(((t).type_mask & _ZEND_TYPE_NULLABLE_BIT) != 0)
@@ -657,6 +724,22 @@ struct _zend_ast_ref {
 #define IS_ALIAS_PTR				14
 #define _IS_ERROR					15
 
+/*
+ * Prototype runtime category for first-class collection values.
+ *
+ * The payload is currently an ordinary zend_array and the only implemented
+ * concrete collection kind is vec. The tag is deliberately generic rather than
+ * vec-specific so that further collection kinds can be introduced without
+ * consuming an additional zval runtime tag, of which there are none to spare.
+ * There is no kind discriminator yet, so this tag denotes the category only -
+ * it cannot distinguish one kind from another.
+ *
+ * The value is >= 16 because PHP has no free *real* zval tag below it: 0..11
+ * are real types and 12..15 are internal (IS_INDIRECT, IS_PTR, IS_ALIAS_PTR,
+ * _IS_ERROR).
+ */
+#define IS_COLLECTION						21
+
 /* used for casts */
 #define _IS_BOOL					18
 #define _IS_NUMBER					19
@@ -745,6 +828,11 @@ static zend_always_inline uint8_t zval_get_type(const zval* pz) {
 #define GC_IMMUTABLE                (1<<6) /* can't be changed in place */
 #define GC_PERSISTENT               (1<<7) /* allocated using malloc */
 #define GC_PERSISTENT_LOCAL         (1<<8) /* persistent, but thread-local */
+
+/* GC_TYPE is a 4-bit field and the rc_dtor_func table is indexed by it.
+ * Slots 0..IS_CONSTANT_AST mirror the zval type tags; 12..15 are free for
+ * refcounted payloads that are not zvals of the same tag. */
+#define IS_VEC_GC					12
 
 #define GC_TYPE_MASK				0x0000000f
 #define GC_FLAGS_MASK				0x000003f0
@@ -894,6 +982,8 @@ static zend_always_inline uint32_t zend_gc_delref_ex(zend_refcounted_h *p, uint3
 #define GC_STRING					(IS_STRING       | (GC_NOT_COLLECTABLE << GC_FLAGS_SHIFT))
 #define GC_ARRAY					IS_ARRAY
 #define GC_OBJECT					IS_OBJECT
+/* Collection payloads are not zend_arrays and must not be destroyed as one. */
+#define GC_VEC						IS_VEC_GC
 #define GC_RESOURCE					(IS_RESOURCE     | (GC_NOT_COLLECTABLE << GC_FLAGS_SHIFT))
 #define GC_REFERENCE				(IS_REFERENCE    | (GC_NOT_COLLECTABLE << GC_FLAGS_SHIFT))
 #define GC_CONSTANT_AST				(IS_CONSTANT_AST | (GC_NOT_COLLECTABLE << GC_FLAGS_SHIFT))

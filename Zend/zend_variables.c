@@ -24,6 +24,7 @@
 #include "zend_globals.h"
 #include "zend_constants.h"
 #include "zend_list.h"
+#include "zend_vec.h"
 
 #if ZEND_DEBUG
 static void ZEND_FASTCALL zend_string_destroy(zend_string *str);
@@ -47,12 +48,13 @@ static const zend_rc_dtor_func_t zend_rc_dtor_func[] = {
 	[IS_OBJECT] =       (zend_rc_dtor_func_t)zend_objects_store_del,
 	[IS_RESOURCE] =     (zend_rc_dtor_func_t)zend_list_free,
 	[IS_REFERENCE] =    (zend_rc_dtor_func_t)zend_reference_destroy,
-	[IS_CONSTANT_AST] = (zend_rc_dtor_func_t)zend_ast_ref_destroy
+	[IS_CONSTANT_AST] = (zend_rc_dtor_func_t)zend_ast_ref_destroy,
+	[IS_VEC_GC] =       (zend_rc_dtor_func_t)zend_vec_destroy
 };
 
 ZEND_API void ZEND_FASTCALL rc_dtor_func(zend_refcounted *p)
 {
-	ZEND_ASSERT(GC_TYPE(p) <= IS_CONSTANT_AST);
+	ZEND_ASSERT(GC_TYPE(p) <= IS_VEC_GC);
 	zend_rc_dtor_func[GC_TYPE(p)](p);
 }
 

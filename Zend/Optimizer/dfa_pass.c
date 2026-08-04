@@ -272,7 +272,12 @@ static inline bool can_elide_list_type(
 	 * For union: result==true is success, default is failure. */
 	bool is_intersection = ZEND_TYPE_IS_INTERSECTION(type);
 	ZEND_TYPE_FOREACH(type, single_type) {
-		if (ZEND_TYPE_HAS_LIST(*single_type)) {
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*single_type)) {
+			/* A collection type is never satisfied by a class instance, so the
+			 * check must not be elided on the strength of an inferred class. */
+			return false;
+		}
+		if (ZEND_TYPE_IS_TYPE_LIST(*single_type)) {
 			ZEND_ASSERT(!is_intersection);
 			return can_elide_list_type(script, op_array, use_info, *single_type);
 		}

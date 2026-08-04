@@ -1839,6 +1839,12 @@ static int zend_jit(const zend_op_array *op_array, zend_ssa *ssa, const zend_op 
 						if (PROFITABILITY_CHECKS && (!ssa->ops || !ssa->var_info)) {
 							break;
 						}
+						if (OP1_INFO() & MAY_BE_COLLECTION) {
+							/* Possible native collection: run this DIM op through the VM
+							 * handler (the DIM codegen declines MAY_BE_COLLECTION) instead
+							 * of failing the whole compilation. */
+							break;
+						}
 						if (!zend_jit_supported_binary_op(
 								opline->extended_value, MAY_BE_ANY, OP1_DATA_INFO())) {
 							break;
@@ -1857,6 +1863,11 @@ static int zend_jit(const zend_op_array *op_array, zend_ssa *ssa, const zend_op 
 							break;
 						}
 						if (PROFITABILITY_CHECKS && (!ssa->ops || !ssa->var_info)) {
+							break;
+						}
+						if (OP1_INFO() & MAY_BE_COLLECTION) {
+							/* Possible native collection: run this DIM op through the VM
+							 * handler instead of failing the whole compilation. */
 							break;
 						}
 						if (!zend_jit_assign_dim(&ctx, opline,
@@ -2391,6 +2402,11 @@ static int zend_jit(const zend_op_array *op_array, zend_ssa *ssa, const zend_op 
 						if (PROFITABILITY_CHECKS && (!ssa->ops || !ssa->var_info)) {
 							break;
 						}
+						if (OP1_INFO() & MAY_BE_COLLECTION) {
+							/* Possible native collection: run this DIM op through the VM
+							 * handler instead of failing the whole compilation. */
+							break;
+						}
 						if (!zend_jit_fetch_dim_read(&ctx, opline, ssa, ssa_op,
 								OP1_INFO(), OP1_REG_ADDR(), 0,
 								OP2_INFO(), OP2_REG_ADDR(), OP2_RANGE(),
@@ -2408,6 +2424,11 @@ static int zend_jit(const zend_op_array *op_array, zend_ssa *ssa, const zend_op 
 						if (opline->op1_type != IS_CV) {
 							break;
 						}
+						if (OP1_INFO() & MAY_BE_COLLECTION) {
+							/* Possible native collection: run this DIM op through the VM
+							 * handler instead of failing the whole compilation. */
+							break;
+						}
 						if (!zend_jit_fetch_dim(&ctx, opline,
 								OP1_INFO(), OP1_REG_ADDR(),
 								OP2_INFO(), (opline->op2_type != IS_UNUSED) ? OP2_REG_ADDR() : 0,
@@ -2422,6 +2443,11 @@ static int zend_jit(const zend_op_array *op_array, zend_ssa *ssa, const zend_op 
 							break;
 						}
 						if (PROFITABILITY_CHECKS && (!ssa->ops || !ssa->var_info)) {
+							break;
+						}
+						if (OP1_INFO() & MAY_BE_COLLECTION) {
+							/* Possible native collection: run this DIM op through the VM
+							 * handler instead of failing the whole compilation. */
 							break;
 						}
 						if ((opline->result_type & IS_TMP_VAR)
@@ -2645,6 +2671,17 @@ static int zend_jit(const zend_op_array *op_array, zend_ssa *ssa, const zend_op 
 						} else {
 							op1_info = OP1_INFO();
 							if (!(op1_info & MAY_BE_OBJECT)) {
+								break;
+							}
+							/* A native collection can occupy any slot a non-object value
+							 * can. The object fast path cannot dispatch its intrinsic
+							 * methods and would raise "method call on non-object", so when
+							 * the receiver is not restricted to object|null, defer this
+							 * call to the interpreter, which handles the IS_COLLECTION
+							 * branch of ZEND_INIT_METHOD_CALL. Object and ?object receivers
+							 * keep the JIT fast path; collection intrinsic calls are slower
+							 * under function JIT, which is acceptable. */
+							if (op1_info & (MAY_BE_COLLECTION | (MAY_BE_ANY & ~(MAY_BE_OBJECT | MAY_BE_NULL)))) {
 								break;
 							}
 							op1_addr = OP1_REG_ADDR();

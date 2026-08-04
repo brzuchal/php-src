@@ -88,6 +88,7 @@ PHPAPI zend_class_entry *reflection_type_ptr;
 PHPAPI zend_class_entry *reflection_named_type_ptr;
 PHPAPI zend_class_entry *reflection_intersection_type_ptr;
 PHPAPI zend_class_entry *reflection_union_type_ptr;
+PHPAPI zend_class_entry *reflection_collection_type_ptr;
 PHPAPI zend_class_entry *reflection_class_ptr;
 PHPAPI zend_class_entry *reflection_object_ptr;
 PHPAPI zend_class_entry *reflection_method_ptr;
@@ -1440,7 +1441,8 @@ static void reflection_parameter_factory(zend_function *fptr, zval *closure_obje
 typedef enum {
 	NAMED_TYPE = 0,
 	UNION_TYPE = 1,
-	INTERSECTION_TYPE = 2
+	INTERSECTION_TYPE = 2,
+	COLLECTION_TYPE = 3
 } reflection_type_kind;
 
 /* For backwards compatibility reasons, we need to return T|null style unions
@@ -1450,7 +1452,13 @@ typedef enum {
 static reflection_type_kind get_type_kind(zend_type type) {
 	uint32_t type_mask_without_null = ZEND_TYPE_PURE_MASK_WITHOUT_NULL(type);
 
-	if (ZEND_TYPE_HAS_LIST(type)) {
+	/* A collection descriptor is list-shaped but is neither a union nor an
+	 * intersection; it must never be read as a zend_type_list. */
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
+		return COLLECTION_TYPE;
+	}
+
+	if (ZEND_TYPE_IS_TYPE_LIST(type)) {
 		if (ZEND_TYPE_IS_INTERSECTION(type)) {
 			return INTERSECTION_TYPE;
 		}
@@ -1468,7 +1476,7 @@ static reflection_type_kind get_type_kind(zend_type type) {
 		}
 		return NAMED_TYPE;
 	}
-	if (type_mask_without_null == MAY_BE_BOOL || ZEND_TYPE_PURE_MASK(type) == MAY_BE_ANY) {
+	if (type_mask_without_null == MAY_BE_BOOL || ZEND_TYPE_IS_MIXED(type)) {
 		return NAMED_TYPE;
 	}
 	/* Check that only one bit is set. */
@@ -1482,7 +1490,7 @@ static reflection_type_kind get_type_kind(zend_type type) {
 static void reflection_type_factory(zend_type type, zval *object, bool legacy_behavior)
 {
 	reflection_type_kind type_kind = get_type_kind(type);
-	bool is_mixed = ZEND_TYPE_PURE_MASK(type) == MAY_BE_ANY;
+	bool is_mixed = ZEND_TYPE_IS_MIXED(type);
 	bool is_only_null = (ZEND_TYPE_PURE_MASK(type) == MAY_BE_NULL && !ZEND_TYPE_IS_COMPLEX(type));
 
 	switch (type_kind) {
@@ -1491,6 +1499,9 @@ static void reflection_type_factory(zend_type type, zval *object, bool legacy_be
 			break;
 		case UNION_TYPE:
 			object_init_ex(object, reflection_union_type_ptr);
+			break;
+		case COLLECTION_TYPE:
+			object_init_ex(object, reflection_collection_type_ptr);
 			break;
 		case NAMED_TYPE:
 			object_init_ex(object, reflection_named_type_ptr);
@@ -2722,6 +2733,16 @@ ZEND_METHOD(ReflectionParameter, getClass)
 			}
 		}
 		zend_reflection_class_factory(ce, return_value);
+	} else if (ZEND_TYPE_IS_ITERABLE_FALLBACK(param->arg_info->type)) {
+		/* An `iterable` parameter reports Traversable from the (deprecated)
+		 * getClass(), as it did before iterable types carried the collection-era
+		 * provenance bit. This covers the decomposed `Traversable|array` form that
+		 * keeps the iterable provenance bit -- e.g. an internal function's `iterable`
+		 * argument -- for which the ZEND_TYPE_HAS_NAME branch above does not fire. A
+		 * genuine Traversable|array union without the provenance bit still resolves
+		 * through HAS_NAME, and a collection descriptor never sets the iterable bit,
+		 * so both are unaffected. */
+		zend_reflection_class_factory(zend_ce_traversable, return_value);
 	}
 }
 /* }}} */
@@ -2764,8 +2785,11 @@ ZEND_METHOD(ReflectionParameter, isArray)
 	ZEND_PARSE_PARAMETERS_NONE();
 	GET_REFLECTION_OBJECT_PTR(param);
 
-	/* BC For iterable */
-	if (ZEND_TYPE_IS_ITERABLE_FALLBACK(param->arg_info->type)) {
+	/* BC For iterable (the standalone named type only; a union carrying the
+	 * iterable provenance bit, e.g. iterable|null, falls through to the mask test
+	 * exactly as a decomposed Traversable|array|null union would). */
+	if (ZEND_TYPE_IS_ITERABLE_FALLBACK(param->arg_info->type)
+			&& !ZEND_TYPE_IS_TYPE_LIST(param->arg_info->type)) {
 		RETURN_FALSE;
 	}
 
@@ -3023,7 +3047,11 @@ ZEND_METHOD(ReflectionType, allowsNull)
 
 /* For BC with iterable for named types */
 static zend_string *zend_named_reflection_type_to_string(zend_type type) {
-	if (ZEND_TYPE_IS_ITERABLE_FALLBACK(type)) {
+	/* The `iterable` BC name applies only to the standalone (named) iterable type.
+	 * A genuine union that carries the iterable provenance bit -- e.g. iterable|null
+	 * -- has the list shape and renders as a normal union ("Traversable|array|null")
+	 * instead. */
+	if (ZEND_TYPE_IS_ITERABLE_FALLBACK(type) && !ZEND_TYPE_IS_TYPE_LIST(type)) {
 		if (ZEND_TYPE_FULL_MASK(type) & MAY_BE_NULL) {
 			return ZSTR_INIT_LITERAL("?iterable", false);
 		}
@@ -3107,7 +3135,7 @@ ZEND_METHOD(ReflectionUnionType, getTypes)
 	GET_REFLECTION_OBJECT_PTR(param);
 
 	array_init(return_value);
-	if (ZEND_TYPE_HAS_LIST(param->type)) {
+	if (ZEND_TYPE_IS_TYPE_LIST(param->type)) {
 		const zend_type *list_type;
 		ZEND_TYPE_LIST_FOREACH(ZEND_TYPE_LIST(param->type), list_type) {
 			append_type(return_value, *list_type);
@@ -3163,13 +3191,49 @@ ZEND_METHOD(ReflectionIntersectionType, getTypes)
 	ZEND_PARSE_PARAMETERS_NONE();
 	GET_REFLECTION_OBJECT_PTR(param);
 
-	ZEND_ASSERT(ZEND_TYPE_HAS_LIST(param->type));
+	ZEND_ASSERT(ZEND_TYPE_IS_TYPE_LIST(param->type));
 
 	array_init(return_value);
 	ZEND_TYPE_LIST_FOREACH(ZEND_TYPE_LIST(param->type), const zend_type *list_type) {
 		append_type(return_value, *list_type);
 	} ZEND_TYPE_LIST_FOREACH_END();
 }
+
+/* {{{ Returns the source-level name of the collection kind, e.g. "vec" */
+ZEND_METHOD(ReflectionCollectionType, getCollectionName)
+{
+	reflection_object *intern;
+	type_reference *param;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(param);
+
+	ZEND_ASSERT(ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(param->type));
+	const char *name = zend_collection_type_kind_name(
+		ZEND_TYPE_COLLECTION(param->type)->kind);
+
+	RETURN_STRING(name ? name : "collection");
+}
+/* }}} */
+
+/* {{{ Returns the parameter types of the collection type */
+ZEND_METHOD(ReflectionCollectionType, getTypes)
+{
+	reflection_object *intern;
+	type_reference *param;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(param);
+
+	ZEND_ASSERT(ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(param->type));
+	const zend_collection_type *desc = ZEND_TYPE_COLLECTION(param->type);
+
+	array_init(return_value);
+	for (uint32_t i = 0; i < desc->num_types; i++) {
+		append_type(return_value, desc->types[i]);
+	}
+}
+/* }}} */
 /* }}} */
 
 /* {{{ Constructor. Throws an Exception in case the given method does not exist */
@@ -8096,6 +8160,7 @@ PHP_MINIT_FUNCTION(reflection) /* {{{ */
 	reflection_union_type_ptr->default_object_handlers = &reflection_object_handlers;
 
 	reflection_intersection_type_ptr = register_class_ReflectionIntersectionType(reflection_type_ptr);
+	reflection_collection_type_ptr = register_class_ReflectionCollectionType(reflection_type_ptr);
 	reflection_intersection_type_ptr->create_object = reflection_objects_new;
 	reflection_intersection_type_ptr->default_object_handlers = &reflection_object_handlers;
 

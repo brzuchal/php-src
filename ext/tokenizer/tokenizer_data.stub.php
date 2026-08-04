@@ -19,6 +19,31 @@ const T_DNUMBER = UNKNOWN;
 const T_STRING = UNKNOWN;
 /**
  * @var int
+ * @cvalue T_VEC_LBRACKET
+ */
+const T_VEC_LBRACKET = UNKNOWN;
+/**
+ * @var int
+ * @cvalue T_MAP_LBRACKET
+ */
+const T_MAP_LBRACKET = UNKNOWN;
+/**
+ * @var int
+ * @cvalue T_SET_LBRACKET
+ */
+const T_SET_LBRACKET = UNKNOWN;
+/**
+ * @var int
+ * @cvalue T_TUPLE_LBRACKET
+ */
+const T_TUPLE_LBRACKET = UNKNOWN;
+/**
+ * @var int
+ * @cvalue T_SHAPE_LBRACKET
+ */
+const T_SHAPE_LBRACKET = UNKNOWN;
+/**
+ * @var int
  * @cvalue T_NAME_FULLY_QUALIFIED
  */
 const T_NAME_FULLY_QUALIFIED = UNKNOWN;

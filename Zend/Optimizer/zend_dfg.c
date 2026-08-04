@@ -189,6 +189,16 @@ add_op1_def:
 				zend_bitset_incl(use, var_num);
 			}
 			break;
+		case ZEND_ADD_COLLECTION_ELEMENT:
+			/* The result is the builder payload, threaded from INIT_COLLECTION and
+			 * modified in place, so it is a use as well as a def (mirrors
+			 * ADD_ARRAY_ELEMENT). Collection literals have no by-reference elements,
+			 * so there is no op1_def; fall out after registering the result use. */
+			var_num = EX_VAR_TO_NUM(opline->result.var);
+			if (!zend_bitset_in(def, var_num)) {
+				zend_bitset_incl(use, var_num);
+			}
+			break;
 		case ZEND_ADD_ARRAY_ELEMENT:
 			var_num = EX_VAR_TO_NUM(opline->result.var);
 			if (!zend_bitset_in(def, var_num)) {

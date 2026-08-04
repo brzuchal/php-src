@@ -89,6 +89,11 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %token <ast> T_LNUMBER   "integer"
 %token <ast> T_DNUMBER   "floating-point number"
 %token <ast> T_STRING    "identifier"
+%token T_VEC_LBRACKET   "vec["
+%token T_MAP_LBRACKET   "map["
+%token T_SET_LBRACKET   "set["
+%token T_TUPLE_LBRACKET "tuple["
+%token T_SHAPE_LBRACKET "shape["
 %token <ast> T_NAME_FULLY_QUALIFIED "fully qualified name"
 %token <ast> T_NAME_RELATIVE "namespace-relative name"
 %token <ast> T_NAME_QUALIFIED "namespaced name"
@@ -278,6 +283,8 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %type <ast> lexical_var_list encaps_list
 %type <ast> array_pair non_empty_array_pair_list array_pair_list possible_array_pair
 %type <ast> isset_variable type return_type type_expr type_without_static
+%type <ast> collection_type collection_type_args
+%type <ast> collection_literal collection_literal_elements non_empty_collection_literal_elements
 %type <ast> identifier type_expr_without_static union_type_without_static_element union_type_without_static intersection_type_without_static
 %type <ast> inline_function union_type_element union_type intersection_type
 %type <ast> attributed_statement attributed_top_statement attributed_class_statement attributed_parameter
@@ -873,6 +880,38 @@ type_without_static:
 		T_ARRAY		{ $$ = zend_ast_create_ex(ZEND_AST_TYPE, IS_ARRAY); }
 	|	T_CALLABLE	{ $$ = zend_ast_create_ex(ZEND_AST_TYPE, IS_CALLABLE); }
 	|	name		{ $$ = $1; }
+	|	collection_type { $$ = $1; }
+;
+
+/* A collection type. The head token determines the kind; the AST records the
+ * kind as an attribute so that nothing downstream depends on how the parser
+ * recognised it. */
+collection_type:
+		T_VEC_LBRACKET collection_type_args ']'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_VEC, $2); }
+	|	T_VEC_LBRACKET ']'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_VEC, zend_ast_create_list(0, ZEND_AST_TYPE_COLLECTION_ARGS)); }
+	|	T_MAP_LBRACKET collection_type_args ']'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_MAP, $2); }
+	|	T_SET_LBRACKET collection_type_args ']'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_SET, $2); }
+	|	T_SET_LBRACKET ']'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_SET, zend_ast_create_list(0, ZEND_AST_TYPE_COLLECTION_ARGS)); }
+	|	T_TUPLE_LBRACKET collection_type_args ']'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_TUPLE, $2); }
+	|	T_TUPLE_LBRACKET ']'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_TUPLE, zend_ast_create_list(0, ZEND_AST_TYPE_COLLECTION_ARGS)); }
+	|	T_SHAPE_LBRACKET collection_type_args ']'
+			{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_COLLECTION, ZEND_COLLECTION_TYPE_SHAPE, $2); }
+;
+
+/* Parameter list of a collection type. The head name is resolved to a
+ * collection kind at compile time, so no keyword is reserved here. */
+collection_type_args:
+		type_expr
+			{ $$ = zend_ast_create_list(1, ZEND_AST_TYPE_COLLECTION_ARGS, $1); }
+	|	collection_type_args ',' type_expr
+			{ $$ = zend_ast_list_add($1, $3); }
 ;
 
 union_type_without_static_element:
@@ -1390,6 +1429,41 @@ expr:
 	|	attributes T_STATIC inline_function
 			{ $$ = zend_ast_with_attributes($3, $1); ((zend_ast_decl *) $$)->flags |= ZEND_ACC_STATIC; }
 	|	match { $$ = $1; }
+	|	collection_literal { $$ = $1; }
+;
+
+/* A collection literal, e.g. vec[int]{1, 2}. Same head tokens and same
+ * parameter list as the type production, so the head stays adjacent to '[' and
+ * no identifier is reserved. The five heads differ only in the kind constant
+ * they record; every kind but vec is rejected by the compiler, in one place,
+ * together with the identical rejection for type declarations. */
+collection_literal:
+		T_VEC_LBRACKET collection_type_args ']' '{' collection_literal_elements '}'
+			{ $$ = zend_ast_create_ex(ZEND_AST_COLLECTION, ZEND_COLLECTION_TYPE_VEC, $2, $5); }
+	|	T_MAP_LBRACKET collection_type_args ']' '{' collection_literal_elements '}'
+			{ $$ = zend_ast_create_ex(ZEND_AST_COLLECTION, ZEND_COLLECTION_TYPE_MAP, $2, $5); }
+	|	T_SET_LBRACKET collection_type_args ']' '{' collection_literal_elements '}'
+			{ $$ = zend_ast_create_ex(ZEND_AST_COLLECTION, ZEND_COLLECTION_TYPE_SET, $2, $5); }
+	|	T_TUPLE_LBRACKET collection_type_args ']' '{' collection_literal_elements '}'
+			{ $$ = zend_ast_create_ex(ZEND_AST_COLLECTION, ZEND_COLLECTION_TYPE_TUPLE, $2, $5); }
+	|	T_SHAPE_LBRACKET collection_type_args ']' '{' collection_literal_elements '}'
+			{ $$ = zend_ast_create_ex(ZEND_AST_COLLECTION, ZEND_COLLECTION_TYPE_SHAPE, $2, $5); }
+;
+
+/* Elements are plain expressions: no keys, no by-reference elements and no
+ * unpacking, so this is deliberately not array_pair_list. */
+collection_literal_elements:
+		%empty
+			{ $$ = zend_ast_create_list(0, ZEND_AST_COLLECTION_ELEMENTS); }
+	|	non_empty_collection_literal_elements possible_comma
+			{ $$ = $1; }
+;
+
+non_empty_collection_literal_elements:
+		expr
+			{ $$ = zend_ast_create_list(1, ZEND_AST_COLLECTION_ELEMENTS, $1); }
+	|	non_empty_collection_literal_elements ',' expr
+			{ $$ = zend_ast_list_add($1, $3); }
 ;
 
 

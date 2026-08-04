@@ -3472,6 +3472,17 @@ PHP_FUNCTION(pg_copy_from)
 		Z_PARAM_STRING(pg_null_as, pg_null_as_len)
 	ZEND_PARSE_PARAMETERS_END();
 
+	/* F2: Z_PARAM_ITERABLE now accepts native collections (is_iterable() is true),
+	 * but pg_copy_from() declares array|Traversable and must keep rejecting them --
+	 * a collection would otherwise fall to the get_iterator path below and
+	 * dereference a non-object. Reject here with the same TypeError the parameter
+	 * gate produced before F2. */
+	if (UNEXPECTED(Z_TYPE_P(pg_rows) == IS_COLLECTION)) {
+		zend_argument_type_error(3, "must be of type Traversable|array, %s given",
+			zend_zval_value_name(pg_rows));
+		RETURN_THROWS();
+	}
+
 	link = Z_PGSQL_LINK_P(pgsql_link);
 	CHECK_PGSQL_LINK(link);
 	pgsql = link->conn;

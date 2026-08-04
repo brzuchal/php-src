@@ -676,6 +676,15 @@ void pgsqlCopyFromArray_internal(INTERNAL_FUNCTION_PARAMETERS)
 		Z_PARAM_STRING_OR_NULL(pg_fields, pg_fields_len)
 	ZEND_PARSE_PARAMETERS_END();
 
+	/* F2: same as pg_copy_from -- Z_PARAM_ITERABLE now accepts collections, but
+	 * copyFromArray declares array|Traversable and must keep rejecting them before
+	 * the get_iterator path below dereferences a non-object. */
+	if (UNEXPECTED(Z_TYPE_P(pg_rows) == IS_COLLECTION)) {
+		zend_argument_type_error(2, "must be of type Traversable|array, %s given",
+			zend_zval_value_name(pg_rows));
+		RETURN_THROWS();
+	}
+
 	dbh = Z_PDO_DBH_P(ZEND_THIS);
 	PDO_CONSTRUCT_CHECK;
 	PDO_DBH_CLEAR_ERR();

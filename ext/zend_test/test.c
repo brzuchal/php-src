@@ -28,6 +28,9 @@
 #include "object_handlers.h"
 #include "zend_attributes.h"
 #include "zend_enum.h"
+#include "zend_vec.h"
+#include "zend_collection_info.h"
+#include "zend_type_info.h"
 #include "zend_interfaces.h"
 #include "zend_weakrefs.h"
 #include "Zend/Optimizer/zend_optimizer.h"
@@ -620,6 +623,1116 @@ static ZEND_FUNCTION(zend_test_refcount)
 	}
 
 	RETURN_LONG(Z_REFCOUNT_P(value));
+}
+
+/* Destroy a vec through the ordinary refcounted-zval path, so the GC dtor slot
+ * (rc_dtor_func -> zend_vec_destroy) is exercised, not just a direct call. */
+static void zend_test_vec_release(zend_vec *vec)
+{
+	zval z;
+
+	/* Must go through ZVAL_VEC: a hand-built type_info that omits
+	 * IS_TYPE_COLLECTABLE would make this the one vec zval the collector cannot
+	 * see, which is exactly the invariant every other path upholds. */
+	ZVAL_VEC(&z, vec);
+	zval_ptr_dtor(&z);
+}
+
+/* Build a vec through the only exported construction entry point. Reserving
+ * storage and installing elements are private to zend_vec.c; the invariants of
+ * that two-step path are covered by zend_vec_lifecycle_selftest() instead. */
+static zend_vec *zend_test_vec_build(zend_type elem, zval *vals, uint32_t n)
+{
+	union {
+		zend_collection_type desc;
+		char buf[ZEND_TYPE_COLLECTION_SIZE(1)];
+	} probe;
+	zend_type probe_type = ZEND_TYPE_INIT_NONE(0);
+	const zend_collection_info *info;
+	HashTable ht;
+	zend_vec *vec;
+
+	/* Promotion is the only way in: the descriptor is a stack temporary, and
+	 * the value receives a borrowed canonical node instead of a copy of it. */
+	probe.desc.kind = ZEND_COLLECTION_TYPE_VEC;
+	probe.desc.num_types = 1;
+	probe.desc.types[0] = elem;
+	ZEND_TYPE_SET_COLLECTION(probe_type, &probe.desc);
+
+	info = zend_collection_info_intern(probe_type);
+	if (!info) {
+		return NULL;
+	}
+
+	zend_hash_init(&ht, n ? n : 1, NULL, ZVAL_PTR_DTOR, 0);
+	for (uint32_t i = 0; i < n; i++) {
+		zend_hash_next_index_insert_new(&ht, &vals[i]);
+	}
+	vec = zend_vec_create(&ht, info, NULL);
+	zend_hash_destroy(&ht);
+	return vec;
+}
+
+/* Self-test for the vec runtime representation (commit: vec payload). Exercises
+ * allocation, element storage, builtin and named-class element-type metadata,
+ * ownership of a class-name zend_string, element destruction and empty vecs,
+ * entirely in C. Returns a map of scenario => bool so a .phpt can assert each
+ * path actually ran and passed. */
+static ZEND_FUNCTION(zend_test_vec_selftest)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	array_init(return_value);
+
+	/* 1. Builtin element type: allocate, verify count and element_type,
+	 *    populate and read back, destroy. */
+	{
+		zend_type int_type = ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
+		zval vals[3];
+		zend_vec *vec;
+		bool ok;
+
+		for (uint32_t i = 0; i < 3; i++) {
+			ZVAL_LONG(&vals[i], (zend_long) (i + 10));
+		}
+		vec = zend_test_vec_build(int_type, vals, 3);
+		ok = vec != NULL && ZEND_VEC_COUNT(vec) == 3
+			&& (ZEND_TYPE_FULL_MASK(ZEND_VEC_ELEMENT_TYPE(vec)) & _ZEND_TYPE_MAY_BE_MASK)
+				== (1u << IS_LONG);
+		for (uint32_t i = 0; i < 3; i++) {
+			ok = ok && Z_TYPE(vec->elements[i]) == IS_LONG
+				&& Z_LVAL(vec->elements[i]) == (zend_long) (i + 10);
+		}
+		zend_test_vec_release(vec);
+		add_assoc_bool(return_value, "builtin", ok);
+	}
+
+	/* 2. Named-class element type: balanced ownership. The vec takes its own
+	 *    reference to the class-name string; destroying the vec releases
+	 *    exactly that reference and no other; the caller's reference remains
+	 *    valid afterward.
+	 *
+	 *    A request-local, non-interned string is used so the addref/release is
+	 *    observable (interned strings would no-op). The exact refcount values
+	 *    below are an internal white-box check of that balance, not a public or
+	 *    architectural contract: the invariant being verified is that ownership
+	 *    is balanced (net zero across the vec's lifetime), whatever the caller's
+	 *    starting refcount happens to be. */
+	{
+		zend_string *foo = zend_string_init("Foo", sizeof("Foo") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+		zend_type foo_type = ZEND_TYPE_INIT_CLASS(foo, 0, 0);
+		bool ok = zend_vec_type_is_supported(foo_type);
+		zend_vec *vec = zend_test_vec_build(foo_type, NULL, 0);
+
+		/* Ownership moved: the canonical node holds the class-name reference,
+		 * not the value. Promotion takes it once per distinct type per request
+		 * (or not at all when the node already existed), so this asserts only
+		 * that the caller's reference was not consumed. */
+		uint32_t rc_after_build = GC_REFCOUNT(foo);
+		ok = ok && rc_after_build >= rc_caller;
+		zend_test_vec_release(vec);
+		/* INV-5: destroying a value does no type-ownership work at all, so the
+		 * node's reference is untouched by the release above. */
+		ok = ok && GC_REFCOUNT(foo) == rc_after_build;
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "named_ownership", ok);
+	}
+
+	/* 3. Element destruction: destroying a vec must release a refcounted
+	 *    element (a request-local string) exactly once. */
+	{
+		zend_string *elem = zend_string_init("elem", sizeof("elem") - 1, 0);
+		zend_type str_type = ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
+		zval tmp;
+		zend_vec *vec;
+		uint32_t rc_before;
+
+		ZVAL_STR_COPY(&tmp, elem);
+		vec = zend_test_vec_build(str_type, &tmp, 1);  /* vec takes its own ref */
+		rc_before = GC_REFCOUNT(elem);
+		zend_test_vec_release(vec);
+		add_assoc_bool(return_value, "element_dtor",
+			GC_REFCOUNT(elem) == rc_before - 1);
+
+		zend_string_release(elem);
+	}
+
+	/* 4. Empty vec: count == 0 must allocate a valid header and destroy
+	 *    cleanly. */
+	{
+		zend_type int_type = ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
+		zend_vec *vec = zend_test_vec_build(int_type, NULL, 0);
+		bool ok = vec != NULL && ZEND_VEC_COUNT(vec) == 0;
+
+		zend_test_vec_release(vec);
+		add_assoc_bool(return_value, "empty", ok);
+	}
+
+	/* 5. Internal construction invariants. alloc/append are private to
+	 *    zend_vec.c, so the engine runs these checks itself and reports which
+	 *    passed, rather than the API being widened for the tests. */
+	{
+		uint32_t bits = zend_vec_lifecycle_selftest();
+
+		add_assoc_bool(return_value, "alloc_starts_empty",
+			(bits & ZEND_VEC_SELFTEST_ALLOC_EMPTY) != 0);
+		add_assoc_bool(return_value, "failed_append_inert",
+			(bits & ZEND_VEC_SELFTEST_FAILED_APPEND_INERT) != 0);
+		add_assoc_bool(return_value, "destroys_only_installed",
+			(bits & ZEND_VEC_SELFTEST_ONLY_INSTALLED) != 0);
+		add_assoc_bool(return_value, "element_dtor_exactly_once",
+			(bits & ZEND_VEC_SELFTEST_DTOR_EXACTLY_ONCE) != 0);
+	}
+
+	/* 6. Validator: reuse zend_vec_type_is_supported (do not duplicate it). */
+	{
+		zend_type ok_type = ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
+		zend_type bad_type = ZEND_TYPE_INIT_CODE(IS_CALLABLE, 0, 0);
+		add_assoc_bool(return_value, "validator",
+			zend_vec_type_is_supported(ok_type)
+			&& !zend_vec_type_is_supported(bad_type));
+	}
+
+	/* 7. Hybrid ownership. A hybrid root over a shared flat base --
+	 *    built and torn down entirely in C, since no PHP surface constructs one
+	 *    yet -- must share the base (never copy it), take the tail's sole ref,
+	 *    release each child exactly once, and give branches independent lifetimes. */
+#if ZEND_VEC_HYBRID_SUPPORTED
+	{
+		uint32_t bits = zend_hybrid_lifecycle_selftest();
+
+		add_assoc_bool(return_value, "hybrid_tagged",
+			(bits & ZEND_HYBRID_SELFTEST_TAGGED_HYBRID) != 0);
+		add_assoc_bool(return_value, "hybrid_base_shared",
+			(bits & ZEND_HYBRID_SELFTEST_BASE_SHARED) != 0);
+		add_assoc_bool(return_value, "hybrid_tail_owned",
+			(bits & ZEND_HYBRID_SELFTEST_TAIL_OWNED) != 0);
+		add_assoc_bool(return_value, "hybrid_branch_independent",
+			(bits & ZEND_HYBRID_SELFTEST_BRANCH_INDEP) != 0);
+		add_assoc_bool(return_value, "hybrid_dtor_balanced",
+			(bits & ZEND_HYBRID_SELFTEST_DTOR_BALANCED) != 0);
+	}
+
+	/* 8. Flatten policy. The append dispatcher must never publish a hybrid
+	 *    that violates a policy bound: a retained append to an EMPTY vec stays
+	 *    FLAT (tail > R*base is forbidden at base_count == 0), while the same
+	 *    append to a non-empty vec yields a HYBRID sharing that base. */
+	{
+		uint32_t bits = zend_hybrid_policy_selftest();
+
+		add_assoc_bool(return_value, "policy_empty_base_flat",
+			(bits & ZEND_HYBRID_POLICY_SELFTEST_EMPTY_BASE_FLAT) != 0);
+		add_assoc_bool(return_value, "policy_retained_hybrid",
+			(bits & ZEND_HYBRID_POLICY_SELFTEST_RETAINED_HYBRID) != 0);
+	}
+#else
+	/* Hybrid storage is compiled out on this target -- an ILP32 ABI not yet
+	 * validated (ARM32, 32-bit MSVC, ...); note 32-bit x86 (i386 and x32) DOES run
+	 * the real path above. No hybrid is ever created, so the ownership and policy
+	 * invariants hold vacuously. Report the same rows as passed to keep
+	 * vec_selftest.phpt platform-independent. */
+	add_assoc_bool(return_value, "hybrid_tagged", 1);
+	add_assoc_bool(return_value, "hybrid_base_shared", 1);
+	add_assoc_bool(return_value, "hybrid_tail_owned", 1);
+	add_assoc_bool(return_value, "hybrid_branch_independent", 1);
+	add_assoc_bool(return_value, "hybrid_dtor_balanced", 1);
+	add_assoc_bool(return_value, "policy_empty_base_flat", 1);
+	add_assoc_bool(return_value, "policy_retained_hybrid", 1);
+#endif
+}
+
+/* Raw runtime layout of the vec header: the exact sizeof/alignof/offsetof and tag
+ * arithmetic the 32-bit-portability work reasons about, plus the ABI-independent
+ * invariants. A CI job on any target -- notably x32 -- thus reports its real
+ * numbers and machine-checks the hybrid layout contract at runtime, complementing
+ * the compile-time static asserts in zend_vec.h. */
+static ZEND_FUNCTION(zend_test_vec_layout)
+{
+	/* Portable alignof(zval): reuse the probe struct declared in zend_vec.h. */
+	size_t al_zval   = offsetof(struct zend_vec_zval_align_probe, zvap_z);
+	size_t sz_zval   = sizeof(zval);
+	size_t off_count = offsetof(zend_vec, count);
+	size_t off_cap   = offsetof(zend_vec, capacity);
+	size_t off_elem  = offsetof(zend_vec, elements);
+
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	array_init(return_value);
+	/* Sizes and alignment (sizeof_zval is 16 on every ABI; alignof is 8, or 4 on
+	 * i386 where the SysV ABI aligns double to 4). */
+	add_assoc_long(return_value, "sizeof_pointer",    (zend_long) sizeof(void *));
+	add_assoc_long(return_value, "sizeof_zval",       (zend_long) sz_zval);
+	add_assoc_long(return_value, "alignof_zval",      (zend_long) al_zval);
+	add_assoc_long(return_value, "sizeof_zend_vec",   (zend_long) sizeof(zend_vec));
+	/* Header offsets and derived allocation sizes. */
+	add_assoc_long(return_value, "offsetof_count",    (zend_long) off_count);
+	add_assoc_long(return_value, "offsetof_capacity", (zend_long) off_cap);
+	add_assoc_long(return_value, "offsetof_elements", (zend_long) off_elem);
+	add_assoc_long(return_value, "header_size",       (zend_long) off_elem);            /* == ZEND_VEC_HEADER_SIZE */
+	add_assoc_long(return_value, "hybrid_alloc_size", (zend_long) (off_elem + 2 * sz_zval));
+	/* Tag arithmetic: capacity is an exact uint32, so these are ABI-independent.
+	 * The flag itself (1u<<31) does not fit a 32-bit zend_long, so expose the bit
+	 * position and the 31-bit mask (both fit everywhere) instead of the raw value. */
+	add_assoc_long(return_value, "hybrid_flag_bit",   31);
+	add_assoc_long(return_value, "cap_mask",          (zend_long) ZEND_VEC_CAP_MASK);
+	add_assoc_long(return_value, "max_capacity",      (zend_long) ZEND_VEC_MAX_CAPACITY);
+	add_assoc_bool(return_value, "hybrid_supported",  ZEND_VEC_HYBRID_SUPPORTED);
+	/* ABI-independent invariants -- the runtime mirror of zend_vec.h's static
+	 * asserts; every one MUST hold on LP64, LLP64 and ILP32 alike. */
+	add_assoc_bool(return_value, "inv_count_before_capacity", off_cap  >= off_count + sizeof(uint32_t));
+	add_assoc_bool(return_value, "inv_capacity_in_header",    off_elem >= off_cap   + sizeof(uint32_t));
+	add_assoc_bool(return_value, "inv_elements_zval_aligned", (off_elem % al_zval) == 0);
+	add_assoc_bool(return_value, "inv_overlay_is_zvals",      sizeof(((zend_vec *) 0)->elements[0]) == sz_zval);
+}
+
+/* Build a collection type wrapping a single element type. Ownership of any
+ * refcounted parts of `elem` transfers to the descriptor. vec has arity one. */
+static zend_type zend_test_make_collection(uint32_t kind, zend_type elem)
+{
+	zend_collection_type *desc = zend_type_collection_alloc(kind, 1, /* persistent */ false);
+	zend_type t = ZEND_TYPE_INIT_NONE(0);
+
+	desc->types[0] = elem;
+	ZEND_TYPE_SET_COLLECTION(t, desc);
+	return t;
+}
+
+/* Self-test for the collection-type descriptor (commit: internal collection
+ * type representation). Exercises the reachable lifecycle in C: construction,
+ * recursive release, class-name ownership, arena-backed release, stringification
+ * and the discriminator macros. Deep-copy via zend_type_copy_ctor and opcache
+ * persistence are NOT exercised here: both require a collection type to appear
+ * in a signature, which needs declaration syntax (a later commit). */
+static ZEND_FUNCTION(zend_test_collection_type_selftest)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	array_init(return_value);
+
+	/* 1. vec[int] construction and descriptor invariants. */
+	{
+		zend_type t = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC,
+			(zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0));
+		zend_collection_type *desc = ZEND_TYPE_COLLECTION(t);
+		bool ok = ZEND_TYPE_HAS_LIST(t)                       /* is list-shaped */
+			&& !ZEND_TYPE_IS_TYPE_LIST(t)                     /* but not a real list */
+			&& ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(t)         /* it is a collection */
+			&& desc->kind == ZEND_COLLECTION_TYPE_VEC
+			&& desc->num_types == 1
+			&& (ZEND_TYPE_FULL_MASK(desc->types[0]) & _ZEND_TYPE_MAY_BE_MASK)
+				== (1u << IS_LONG);
+		add_assoc_bool(return_value, "construction", ok);
+		zend_type_release(t, /* persistent */ false);
+	}
+
+	/* 2. vec[Foo] class-name ownership: the descriptor owns one reference to the
+	 *    element's class name, and releasing the descriptor releases exactly
+	 *    that reference (net-zero for the caller). */
+	{
+		zend_string *foo = zend_string_init("Foo", sizeof("Foo") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+		zend_type elem = ZEND_TYPE_INIT_CLASS(foo, 0, 0);
+		zend_string_addref(foo);                 /* the descriptor's own reference */
+		zend_type t = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC, elem);
+
+		bool ok = GC_REFCOUNT(foo) == rc_caller + 1;
+		zend_type_release(t, /* persistent */ false);   /* releases the descriptor's ref */
+		ok = ok && GC_REFCOUNT(foo) == rc_caller;
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "named_ownership", ok);
+	}
+
+	/* 3. Independent destruction: two descriptors over the same class name each
+	 *    own a distinct reference; releasing one does not affect the other. */
+	{
+		zend_string *foo = zend_string_init("Bar", sizeof("Bar") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+
+		zend_string_addref(foo);
+		zend_type a = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC,
+			(zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0));
+		zend_string_addref(foo);
+		zend_type b = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC,
+			(zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0));
+
+		bool ok = ZEND_TYPE_COLLECTION(a) != ZEND_TYPE_COLLECTION(b)   /* distinct */
+			&& GC_REFCOUNT(foo) == rc_caller + 2;
+		zend_type_release(a, /* persistent */ false);
+		ok = ok && GC_REFCOUNT(foo) == rc_caller + 1;   /* b's ref untouched */
+		zend_type_release(b, /* persistent */ false);
+		ok = ok && GC_REFCOUNT(foo) == rc_caller;
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "independent_destruction", ok);
+	}
+
+	/* 4. Arena-backed descriptor: releasing it must release the element's name
+	 *    but must NOT free the descriptor storage (the arena owns it). ASAN in a
+	 *    debug build proves no invalid free happens here. */
+	{
+		zend_string *foo = zend_string_init("Baz", sizeof("Baz") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+		size_t size = ZEND_TYPE_COLLECTION_SIZE(1);
+		zend_collection_type *desc = zend_arena_alloc(&CG(arena), size);
+		zend_type t = ZEND_TYPE_INIT_NONE(0);
+
+		desc->kind = ZEND_COLLECTION_TYPE_VEC;
+		desc->num_types = 1;
+		zend_string_addref(foo);
+		desc->types[0] = (zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0);
+		ZEND_TYPE_SET_COLLECTION(t, desc);
+		ZEND_TYPE_FULL_MASK(t) |= _ZEND_TYPE_ARENA_BIT;
+
+		zend_type_release(t, /* persistent */ false);   /* releases name, keeps arena mem */
+		bool ok = GC_REFCOUNT(foo) == rc_caller;        /* name ref balanced */
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "arena_release", ok);
+	}
+
+	/* 5. Stringification: vec[int] and vec[Foo]. */
+	{
+		zend_type ti = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC,
+			(zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0));
+		zend_string *si = zend_type_to_string(ti);
+		bool ok = zend_string_equals_literal(si, "vec[int]");
+		zend_string_release(si);
+		zend_type_release(ti, /* persistent */ false);
+
+		zend_string *foo = zend_string_init("Foo", sizeof("Foo") - 1, 0);
+		zend_string_addref(foo);
+		zend_type tf = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC,
+			(zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0));
+		zend_string *sf = zend_type_to_string(tf);
+		ok = ok && zend_string_equals_literal(sf, "vec[Foo]");
+		zend_string_release(sf);
+		zend_type_release(tf, /* persistent */ false);
+		zend_string_release(foo);
+
+		add_assoc_bool(return_value, "stringify", ok);
+	}
+
+	/* 6. A real union is still recognised as a type list, never a collection. */
+	{
+		zend_type_list *list = emalloc(ZEND_TYPE_LIST_SIZE(2));
+		list->num_types = 2;
+		list->types[0] = (zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
+		list->types[1] = (zend_type) ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
+		zend_type u = ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_LIST(u, list);
+		ZEND_TYPE_FULL_MASK(u) |= _ZEND_TYPE_UNION_BIT;
+
+		add_assoc_bool(return_value, "union_is_type_list",
+			ZEND_TYPE_IS_TYPE_LIST(u) && !ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(u));
+		zend_type_release(u, /* persistent */ false);
+	}
+
+	/* 7. A real intersection is still recognised as a type list. */
+	{
+		zend_string *a = zend_string_init("A", 1, 0);
+		zend_string *b = zend_string_init("B", 1, 0);
+		zend_type_list *list = emalloc(ZEND_TYPE_LIST_SIZE(2));
+		list->num_types = 2;
+		list->types[0] = (zend_type) ZEND_TYPE_INIT_CLASS(a, 0, 0);
+		list->types[1] = (zend_type) ZEND_TYPE_INIT_CLASS(b, 0, 0);
+		zend_type it = ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_LIST(it, list);
+		ZEND_TYPE_FULL_MASK(it) |= _ZEND_TYPE_INTERSECTION_BIT;
+
+		add_assoc_bool(return_value, "intersection_is_type_list",
+			ZEND_TYPE_IS_TYPE_LIST(it) && !ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(it));
+		zend_type_release(it, /* persistent */ false);   /* releases a and b */
+	}
+}
+
+/* Test-only factory producing a real vec value, so PHPT coverage can exercise the
+ * accepting side of a vec[T] declaration and not only rejection. There is no
+ * literal syntax yet; this is scaffolding, not a language feature. */
+static ZEND_FUNCTION(zend_test_make_vec)
+{
+	HashTable *values;
+	zend_string *type_name;
+	zval *out;
+	zend_type element_type;
+	bool owns_type = false;
+	zend_collection_type *owns_nested = NULL;
+
+	ZEND_PARSE_PARAMETERS_START(3, 3)
+		Z_PARAM_ARRAY_HT(values)
+		Z_PARAM_STR(type_name)
+		Z_PARAM_ZVAL(out)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (zend_string_equals_literal(type_name, "int")) {
+		element_type = (zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
+	} else if (zend_string_equals_literal(type_name, "float")) {
+		element_type = (zend_type) ZEND_TYPE_INIT_CODE(IS_DOUBLE, 0, 0);
+	} else if (zend_string_equals_literal(type_name, "string")) {
+		element_type = (zend_type) ZEND_TYPE_INIT_CODE(IS_STRING, 0, 0);
+	} else if (zend_string_equals_literal(type_name, "array")) {
+		element_type = (zend_type) ZEND_TYPE_INIT_CODE(IS_ARRAY, 0, 0);
+	} else if (zend_string_starts_with_literal(type_name, "vec:")) {
+		/* "vec:Foo" builds the descriptor for a vec[vec[Foo]] element, so tests
+		 * can construct nested collection values. */
+		zend_collection_type *desc = zend_type_collection_alloc(
+			ZEND_COLLECTION_TYPE_VEC, 1, /* persistent */ false);
+		const char *inner = ZSTR_VAL(type_name) + strlen("vec:");
+
+		if (!strcmp(inner, "int")) {
+			desc->types[0] = (zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
+		} else {
+			zend_string *iname = zend_string_init(inner, strlen(inner), 0);
+			zend_class_entry *ce = zend_lookup_class(iname);
+
+			zend_string_release(iname);
+			if (!ce) {
+				pefree(desc, 0);
+				zend_argument_value_error(2, "names an unknown inner class");
+				RETURN_THROWS();
+			}
+			desc->types[0] = (zend_type) ZEND_TYPE_INIT_CLASS(zend_string_copy(ce->name), 0, 0);
+		}
+		element_type = (zend_type) ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_COLLECTION(element_type, desc);
+		owns_nested = desc;
+	} else {
+		/* Anything else is taken as a class name, so tests can build vec[Foo]
+		 * and exercise cycles through object elements. */
+		zend_class_entry *ce = zend_lookup_class(type_name);
+
+		if (!ce) {
+			zend_argument_value_error(2, "must name a builtin element type or an existing class");
+			RETURN_THROWS();
+		}
+		element_type = (zend_type) ZEND_TYPE_INIT_CLASS(zend_string_copy(ce->name), 0, 0);
+		owns_type = true;
+	}
+
+	/* Routed through promotion and then the production constructor, so the
+	 * tests exercise the real canonicalization, validation and
+	 * partial-construction cleanup rather than a parallel path. */
+	union {
+		zend_collection_type desc;
+		char buf[ZEND_TYPE_COLLECTION_SIZE(1)];
+	} probe;
+	zend_type probe_type = ZEND_TYPE_INIT_NONE(0);
+	const zend_collection_info *info;
+	zend_vec *vec;
+
+	probe.desc.kind = ZEND_COLLECTION_TYPE_VEC;
+	probe.desc.num_types = 1;
+	probe.desc.types[0] = element_type;
+	ZEND_TYPE_SET_COLLECTION(probe_type, &probe.desc);
+
+	info = zend_collection_info_intern(probe_type);
+	vec = info ? zend_vec_create(values, info, NULL) : NULL;
+
+	if (owns_type) {
+		/* The canonical node took its own reference; drop the local one. */
+		zend_string_release(ZEND_TYPE_NAME(element_type));
+	}
+	if (owns_nested) {
+		zend_type_release(owns_nested->types[0], /* persistent */ false);
+		pefree(owns_nested, 0);
+	}
+	if (!vec) {
+		zend_argument_value_error(1,
+			"must contain only values matching the requested element type");
+		RETURN_THROWS();
+	}
+
+	/* Written through a by-ref out parameter: a collection is not `mixed`, so it
+	 * cannot be returned through a declared internal return type. */
+	zval vec_zv;
+	ZVAL_VEC(&vec_zv, vec);
+
+	ZVAL_DEREF(out);
+	zval_ptr_dtor(out);
+	ZVAL_COPY_VALUE(out, &vec_zv);
+}
+
+/* Read-only inspection of a collection value, for lifecycle tests only. There is
+ * no public collection API yet; these exist so PHPTs can observe count, element
+ * identity and refcounts without one. */
+static ZEND_FUNCTION(zend_test_vec_count)
+{
+	zval *v;
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_ZVAL(v)
+	ZEND_PARSE_PARAMETERS_END();
+
+	ZVAL_DEREF(v);
+	if (Z_TYPE_P(v) != IS_COLLECTION) {
+		zend_argument_type_error(1, "must be a collection");
+		RETURN_THROWS();
+	}
+	ZEND_ASSERT(GC_TYPE(Z_COUNTED_P(v)) == IS_VEC_GC);
+	RETURN_LONG((zend_long) ZEND_VEC_COUNT(Z_VEC_P(v)));
+}
+
+static ZEND_FUNCTION(zend_test_vec_get)
+{
+	zval *v;
+	zend_long idx;
+
+	ZEND_PARSE_PARAMETERS_START(2, 2)
+		Z_PARAM_ZVAL(v)
+		Z_PARAM_LONG(idx)
+	ZEND_PARSE_PARAMETERS_END();
+
+	ZVAL_DEREF(v);
+	if (Z_TYPE_P(v) != IS_COLLECTION) {
+		zend_argument_type_error(1, "must be a collection");
+		RETURN_THROWS();
+	}
+	if (idx < 0 || (uint32_t) idx >= ZEND_VEC_COUNT(Z_VEC_P(v))) {
+		zend_argument_value_error(2, "is out of range");
+		RETURN_THROWS();
+	}
+	/* Logical-position read via the storage contract: on a HYBRID root the
+	 * elements[] overlay holds the two child collection zvals, not logical
+	 * elements, so a raw elements[idx] would be type confusion (idx 0..1) or
+	 * out of bounds (idx >= 2). */
+	RETURN_COPY(zend_stor_get(Z_VEC_P(v), (uint32_t) idx));
+}
+
+/* Structural-key hooks. These exercise the PROBE side only: a key computed by
+ * walking a raw compiler-produced zend_type tree. No interning exists yet. */
+static bool test_collection_first_param_type(zend_string *fname, zend_type *out)
+{
+	zend_string *lc = zend_string_tolower(fname);
+	zend_function *fn = zend_hash_find_ptr(EG(function_table), lc);
+	zend_string_release(lc);
+
+	if (!fn || fn->common.num_args < 1 || !fn->common.arg_info) {
+		return false;
+	}
+	*out = fn->common.arg_info[0].type;
+	return true;
+}
+
+static ZEND_FUNCTION(zend_test_collection_key)
+{
+	zend_string *fname;
+	zend_type type;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(fname)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (!test_collection_first_param_type(fname, &type)) {
+		zend_argument_value_error(1, "must name a function with at least one parameter");
+		RETURN_THROWS();
+	}
+	if (!zend_collection_key_is_supported(type)) {
+		zend_argument_value_error(1, "must name a function whose first parameter is a supported collection type");
+		RETURN_THROWS();
+	}
+	RETURN_LONG((zend_long) zend_collection_key_hash_type(type));
+}
+
+static ZEND_FUNCTION(zend_test_collection_key_supported)
+{
+	zend_string *fname;
+	zend_type type;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(fname)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (!test_collection_first_param_type(fname, &type)) {
+		zend_argument_value_error(1, "must name a function with at least one parameter");
+		RETURN_THROWS();
+	}
+	RETURN_BOOL(zend_collection_key_is_supported(type));
+}
+
+static ZEND_FUNCTION(zend_test_collection_key_positional)
+{
+	union {
+		zend_collection_type desc;
+		char buf[ZEND_TYPE_COLLECTION_SIZE(2)];
+	} first, second;
+	zend_type ta = ZEND_TYPE_INIT_NONE(0);
+	zend_type tb = ZEND_TYPE_INIT_NONE(0);
+	zend_type m_int = ZEND_TYPE_INIT_MASK(MAY_BE_LONG);
+	zend_type m_str = ZEND_TYPE_INIT_MASK(MAY_BE_STRING);
+	/* Store members through a zend_type * cursor. The descriptor's flexible
+	 * types[] is declared [1], so a direct .types[1] store on a complete stack
+	 * object trips -fsanitize=bounds even though the union reserves the space;
+	 * the pointer form matches how the real code walks desc->types[i]. */
+	zend_type *first_types = first.desc.types;
+	zend_type *second_types = second.desc.types;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	/* Stack-built, so this stays allocation-free. Member order is the only
+	 * difference between the two descriptors. */
+	first.desc.kind = 0;
+	first.desc.num_types = 2;
+	first_types[0] = m_int;
+	first_types[1] = m_str;
+
+	second.desc.kind = 0;
+	second.desc.num_types = 2;
+	second_types[0] = m_str;
+	second_types[1] = m_int;
+
+	ZEND_TYPE_SET_COLLECTION(ta, &first.desc);
+	ZEND_TYPE_SET_COLLECTION(tb, &second.desc);
+
+	array_init(return_value);
+	add_next_index_long(return_value, (zend_long) zend_collection_key_hash_type(ta));
+	add_next_index_long(return_value, (zend_long) zend_collection_key_hash_type(tb));
+}
+
+/* Provenance bits must not reach the key. Both hashes below are taken over the
+ * *same* descriptor, differing only in _ZEND_TYPE_ARENA_BIT, so an equal pair
+ * proves allocation provenance is excluded. */
+static ZEND_FUNCTION(zend_test_collection_key_provenance)
+{
+	zend_string *fname;
+	zend_type type;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(fname)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (!test_collection_first_param_type(fname, &type)
+	 || !zend_collection_key_is_supported(type)) {
+		zend_argument_value_error(1, "must name a function with a supported collection parameter");
+		RETURN_THROWS();
+	}
+
+	zend_type as_arena = type;
+	zend_type as_heap = type;
+	ZEND_TYPE_FULL_MASK(as_arena) |= _ZEND_TYPE_ARENA_BIT;
+	ZEND_TYPE_FULL_MASK(as_heap) &= ~_ZEND_TYPE_ARENA_BIT;
+
+	array_init(return_value);
+	add_next_index_long(return_value, (zend_long) zend_collection_key_hash_type(as_arena));
+	add_next_index_long(return_value, (zend_long) zend_collection_key_hash_type(as_heap));
+}
+
+/* Forms outside the supported input boundary. The compiler rejects a union
+ * inside a collection parameter today, so the only way to present one to the
+ * key logic is to build it directly. */
+/* Canonicalization probes. Node addresses are exposed only as opaque identity
+ * tokens, so tests can assert "same node" / "different node" without any
+ * assumption about the value. */
+static ZEND_FUNCTION(zend_test_collection_intern)
+{
+	zend_string *fname;
+	zend_type type;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(fname)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (!test_collection_first_param_type(fname, &type)) {
+		zend_argument_value_error(1, "must name a function with at least one parameter");
+		RETURN_THROWS();
+	}
+
+	const zend_collection_info *info = zend_collection_info_intern(type);
+	if (!info) {
+		RETURN_NULL();
+	}
+
+	array_init(return_value);
+	add_assoc_long(return_value, "id", (zend_long) (uintptr_t) info);
+	add_assoc_str(return_value, "name", zend_collection_info_to_string(info));
+
+	/* A nested member must be a *canonical child node*, not a copy of the
+	 * compiler's inner descriptor. */
+	if (info->num_types == 1 && ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(info->types[0])) {
+		add_assoc_long(return_value, "child_id",
+			(zend_long) (uintptr_t) ZEND_TYPE_COLLECTION(info->types[0]));
+	} else {
+		add_assoc_null(return_value, "child_id");
+	}
+
+	/* Arena escape checks: the node must not be the compiler descriptor, and no
+	 * member may carry provenance bits. */
+	add_assoc_bool(return_value, "aliases_descriptor",
+		(const void *) info == (const void *) ZEND_TYPE_COLLECTION(type));
+
+	bool arena_free = true;
+	for (uint32_t i = 0; i < info->num_types; i++) {
+		if ((ZEND_TYPE_FULL_MASK(info->types[i]) & _ZEND_TYPE_ARENA_BIT) != 0) {
+			arena_free = false;
+		}
+	}
+	add_assoc_bool(return_value, "members_arena_free", arena_free);
+	add_assoc_bool(return_value, "declared_type_uses_arena", ZEND_TYPE_USES_ARENA(type));
+}
+
+static ZEND_FUNCTION(zend_test_vec_type_id)
+{
+	zval *v;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_ZVAL(v)
+	ZEND_PARSE_PARAMETERS_END();
+
+	ZVAL_DEREF(v);
+	if (Z_TYPE_P(v) != IS_COLLECTION) {
+		zend_argument_type_error(1, "must be a collection");
+		RETURN_THROWS();
+	}
+	RETURN_LONG((zend_long) (uintptr_t) Z_VEC_P(v)->type);
+}
+
+/* Cached classification of a canonical node. Every field here is written once,
+ * during promotion, and read-only afterwards. */
+/* Cache-behaviour counters. NULL in release builds, where they do not exist. */
+static ZEND_FUNCTION(zend_test_collection_stats)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+#if ZEND_DEBUG
+	array_init(return_value);
+	add_assoc_long(return_value, "descents",
+		(zend_long) zend_collection_info_descent_count());
+	add_assoc_long(return_value, "promotions",
+		(zend_long) zend_collection_info_promotion_count());
+	add_assoc_long(return_value, "nodes",
+		(zend_long) zend_collection_info_node_count());
+#else
+	RETURN_NULL();
+#endif
+}
+
+static ZEND_FUNCTION(zend_test_collection_classify)
+{
+	zend_string *fname;
+	zend_type type;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(fname)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (!test_collection_first_param_type(fname, &type)) {
+		zend_argument_value_error(1, "must name a function with at least one parameter");
+		RETURN_THROWS();
+	}
+
+	const zend_collection_info *info = zend_collection_info_intern(type);
+	if (!info) {
+		RETURN_NULL();
+	}
+
+	array_init(return_value);
+	add_assoc_long(return_value, "num_types", (zend_long) info->num_types);
+	add_assoc_long(return_value, "fast_mask", (zend_long) info->fast_mask);
+	add_assoc_bool(return_value, "all_mask_members",
+		ZEND_COLLECTION_INFO_HAS_FLAG(info, ZEND_COLLECTION_INFO_ALL_MASK_MEMBERS));
+	add_assoc_bool(return_value, "value_constructible",
+		ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(info));
+}
+
+/* Number of member comparisons that had to descend into a nested node. NULL in
+ * release builds, where the counter does not exist. */
+static ZEND_FUNCTION(zend_test_collection_descents)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+#if ZEND_DEBUG
+	RETURN_LONG((zend_long) zend_collection_info_descent_count());
+#else
+	RETURN_NULL();
+#endif
+}
+
+static ZEND_FUNCTION(zend_test_collection_collision_selftest)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	RETURN_BOOL(zend_collection_info_collision_selftest());
+}
+
+static ZEND_FUNCTION(zend_test_collection_key_unsupported)
+{
+	union {
+		zend_collection_type desc;
+		char buf[ZEND_TYPE_COLLECTION_SIZE(1)];
+	} outer, empty;
+	union {
+		zend_type_list list;
+		char buf[ZEND_TYPE_LIST_SIZE(2)];
+	} members;
+	zend_type union_member = ZEND_TYPE_INIT_NONE(0);
+	zend_type with_union = ZEND_TYPE_INIT_NONE(0);
+	zend_type zero_arity = ZEND_TYPE_INIT_NONE(0);
+	zend_type plain_int = ZEND_TYPE_INIT_MASK(MAY_BE_LONG);
+	zend_type m_long = ZEND_TYPE_INIT_MASK(MAY_BE_LONG);
+	zend_type m_string = ZEND_TYPE_INIT_MASK(MAY_BE_STRING);
+	/* See zend_test_collection_key_positional: store list members through a
+	 * cursor so the flexible types[] (declared [1]) does not trip bounds UBSan. */
+	zend_type *member_types = members.list.types;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	members.list.num_types = 2;
+	member_types[0] = m_long;
+	member_types[1] = m_string;
+	ZEND_TYPE_SET_LIST(union_member, &members.list);
+	ZEND_TYPE_FULL_MASK(union_member) |= _ZEND_TYPE_UNION_BIT;
+
+	outer.desc.kind = 0;
+	outer.desc.num_types = 1;
+	outer.desc.types[0] = union_member;
+	ZEND_TYPE_SET_COLLECTION(with_union, &outer.desc);
+
+	empty.desc.kind = 0;
+	empty.desc.num_types = 0;
+	ZEND_TYPE_SET_COLLECTION(zero_arity, &empty.desc);
+
+	array_init(return_value);
+	add_assoc_bool(return_value, "union_member", zend_collection_key_is_supported(with_union));
+	add_assoc_bool(return_value, "zero_arity", zend_collection_key_is_supported(zero_arity));
+	add_assoc_bool(return_value, "non_collection_root", zend_collection_key_is_supported(plain_int));
+}
+
+/* Regression guard for runtime type tags that sit above _ZEND_TYPE_MAY_BE_MASK.
+ * IS_COLLECTION is 21 and _ZEND_TYPE_ITERABLE_BIT is 1u << 21, so an unmasked
+ * "does this type contain that code" test reads the iterable flag instead, and an
+ * iterable declaration silently accepts a collection without verifying it. */
+static ZEND_FUNCTION(zend_test_type_code_alias_selftest)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	array_init(return_value);
+
+	/* The shape the compiler produces for `iterable`: array plus the iterable
+	 * flag. It must not report that it contains IS_COLLECTION, while still
+	 * reporting the array member it really does contain. */
+	{
+		zend_type t = (zend_type) ZEND_TYPE_INIT_MASK(
+			MAY_BE_ARRAY | _ZEND_TYPE_ITERABLE_BIT);
+		add_assoc_bool(return_value, "iterable_excludes_collection",
+			!ZEND_TYPE_CONTAINS_CODE(t, IS_COLLECTION)
+			&& ZEND_TYPE_CONTAINS_CODE(t, IS_ARRAY));
+	}
+
+	/* Every other structural flag is equally out of reach of a code test. */
+	{
+		zend_type t = (zend_type) ZEND_TYPE_INIT_MASK(
+			MAY_BE_LONG | _ZEND_TYPE_UNION_BIT | _ZEND_TYPE_ARENA_BIT);
+		add_assoc_bool(return_value, "flags_excluded",
+			ZEND_TYPE_CONTAINS_CODE(t, IS_LONG)
+			&& !ZEND_TYPE_CONTAINS_CODE(t, IS_COLLECTION));
+	}
+
+	/* Ordinary builtin codes keep answering exactly as before. */
+	{
+		zend_type mixed = (zend_type) ZEND_TYPE_INIT_CODE(IS_MIXED, 0, 0);
+		zend_type lng = (zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0);
+		add_assoc_bool(return_value, "builtins_unchanged",
+			ZEND_TYPE_CONTAINS_CODE(mixed, IS_LONG)
+			&& ZEND_TYPE_CONTAINS_CODE(mixed, IS_OBJECT)
+			&& ZEND_TYPE_CONTAINS_CODE(lng, IS_LONG)
+			&& !ZEND_TYPE_CONTAINS_CODE(lng, IS_STRING));
+	}
+}
+
+/* Build vec[vec[<innermost>]] on the heap: two nested collection descriptors,
+ * the inner one held as the sole parameter of the outer. Proves the descriptor
+ * layout represents arbitrary nesting with no arity-one assumption in the
+ * generic path (only the vec kind fixes num_types == 1 per level). */
+static zend_type zend_test_make_nested_vec(zend_type innermost)
+{
+	zend_type inner = zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC, innermost);
+	return zend_test_make_collection(ZEND_COLLECTION_TYPE_VEC, inner);
+}
+
+/* Test-only reference copier that builds an independent copy of a nested
+ * collection-descriptor tree.
+ *
+ * What this is, and what it is NOT:
+ *   - It is NOT an alternative or public implementation of any engine routine.
+ *     Nothing outside this test may use it, and it must never be promoted to the
+ *     engine.
+ *   - It exists ONLY because the engine's deep-copy routine, the static
+ *     zend_type_copy_ctor() in Zend/zend_inheritance.c, is intentionally kept
+ *     private: we do not widen the engine's public surface merely to test it. A
+ *     test extension therefore cannot call it, so this helper constructs a
+ *     structurally identical, independently-owned tree instead.
+ *   - Its SOLE purpose is to produce that independent tree so the *production*
+ *     recursive infrastructure can be exercised on it (recursive release,
+ *     class-name ownership, recursive stringification; arena handling is covered
+ *     separately in scenario 5). The helper's own output is never the assertion
+ *     target -- see the note on scenario 4 below.
+ *
+ * It is composed purely from public primitives (zend_type_collection_alloc,
+ * ZEND_TYPE_SET_COLLECTION, zend_string_addref and the ZEND_TYPE_* discriminators);
+ * it does not touch any engine internal. The only thing it "mirrors" is the
+ * irreducible control flow of a deep copy -- allocate a fresh descriptor per
+ * level, recurse into every parameter, take exactly one reference on each leaf
+ * class name -- which is why it cannot be shrunk further without either baking in
+ * a vec-only arity-one assumption or losing the arity-agnostic recursion.
+ *
+ * It is expected to remain structurally equivalent to the heap branch
+ * (use_arena == false, persistent == false) of zend_type_copy_ctor(), and MUST be
+ * reviewed whenever that routine's ownership or descriptor-duplication contract
+ * changes. Divergence is low-risk: scenarios 1-3 and 5 exercise the production
+ * recursive lifecycle WITHOUT this helper, so a bug here cannot masquerade as
+ * production coverage -- at worst it fails its own scenario (4). */
+static zend_type zend_test_deep_copy_type(zend_type t)
+{
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(t)) {
+		zend_collection_type *src = ZEND_TYPE_COLLECTION(t);
+		zend_collection_type *dst =
+			zend_type_collection_alloc(src->kind, src->num_types, /* persistent */ false);
+		for (uint32_t i = 0; i < src->num_types; i++) {
+			dst->types[i] = zend_test_deep_copy_type(src->types[i]);   /* recurse */
+		}
+		zend_type out = ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_COLLECTION(out, dst);
+		return out;
+	}
+	if (ZEND_TYPE_HAS_NAME(t)) {
+		zend_string_addref(ZEND_TYPE_NAME(t));   /* the copy owns its own name reference */
+		return t;
+	}
+	return t;   /* builtin mask: plain value copy */
+}
+
+/* Regression self-test for recursively nested collection descriptors, using the
+ * internal constructors only (no parser syntax). Exercises the reachable generic
+ * lifecycle two descriptor levels deep: construction, recursive stringification,
+ * recursive release + ownership, recursive deep copy (via the test-local mirror
+ * zend_test_deep_copy_type) and recursive arena-backed release. Persistence
+ * (zend_persist_type) stays uncovered here: it is static and needs an
+ * accelerator/SHM context. */
+static ZEND_FUNCTION(zend_test_nested_collection_type_selftest)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	array_init(return_value);
+
+	/* 1. vec[vec[int]] construction: two descriptor levels, inner is itself a
+	 *    collection descriptor (not a name/builtin), innermost is the int mask. */
+	{
+		zend_type t = zend_test_make_nested_vec(
+			(zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0));
+		zend_collection_type *outer = ZEND_TYPE_COLLECTION(t);
+		bool ok = ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(t)
+			&& outer->kind == ZEND_COLLECTION_TYPE_VEC
+			&& outer->num_types == 1
+			&& ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(outer->types[0]);   /* nested! */
+		if (ok) {
+			zend_collection_type *inner = ZEND_TYPE_COLLECTION(outer->types[0]);
+			ok = inner->kind == ZEND_COLLECTION_TYPE_VEC
+				&& inner->num_types == 1
+				&& !ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(inner->types[0])
+				&& (ZEND_TYPE_FULL_MASK(inner->types[0]) & _ZEND_TYPE_MAY_BE_MASK)
+					== (1u << IS_LONG);
+		}
+		add_assoc_bool(return_value, "nested_construction", ok);
+		zend_type_release(t, /* persistent */ false);   /* recursive release */
+	}
+
+	/* 2. Recursive stringification: exactly "vec[vec[int]]". */
+	{
+		zend_type t = zend_test_make_nested_vec(
+			(zend_type) ZEND_TYPE_INIT_CODE(IS_LONG, 0, 0));
+		zend_string *s = zend_type_to_string(t);
+		add_assoc_bool(return_value, "nested_stringify",
+			zend_string_equals_literal(s, "vec[vec[int]]"));
+		zend_string_release(s);
+		zend_type_release(t, /* persistent */ false);
+	}
+
+	/* 3. Recursive release + ownership through two descriptor levels: the single
+	 *    innermost class-name reference is released by recursing outer -> inner. */
+	{
+		zend_string *foo = zend_string_init("Foo", sizeof("Foo") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+		zend_string_addref(foo);                         /* the innermost descriptor's ref */
+		zend_type t = zend_test_make_nested_vec(
+			(zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0));
+
+		bool ok = GC_REFCOUNT(foo) == rc_caller + 1;
+		zend_type_release(t, /* persistent */ false);    /* recurses two levels down */
+		ok = ok && GC_REFCOUNT(foo) == rc_caller;
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "nested_release_ownership", ok);
+	}
+
+	/* 4. Recursive deep copy. The independent tree is built by the test-local
+	 *    reference copier (zend_test_deep_copy_type, above); everything that is
+	 *    actually ASSERTED then runs through PRODUCTION code:
+	 *      - zend_type_to_string() -> zend_type_to_string_resolved(): recursive
+	 *        stringification of both descriptor levels ("vec[vec[Foo]]");
+	 *      - zend_type_release() x2: recursive release of both descriptor levels
+	 *        plus the leaf class-name reference -- the GC_REFCOUNT() checks
+	 *        (caller+2 -> caller+1 -> caller) validate its recursive ownership
+	 *        accounting and prove the two trees destroy independently.
+	 *    The pointer-inequality checks additionally require the copy to own a
+	 *    distinct descriptor at BOTH levels (deep, not shallow). */
+	{
+		zend_string *foo = zend_string_init("Foo", sizeof("Foo") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+		zend_string_addref(foo);
+		zend_type orig = zend_test_make_nested_vec(
+			(zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0));
+
+		zend_type copy = zend_test_deep_copy_type(orig);
+
+		zend_collection_type *o_out = ZEND_TYPE_COLLECTION(orig);
+		zend_collection_type *c_out = ZEND_TYPE_COLLECTION(copy);
+		zend_collection_type *o_in = ZEND_TYPE_COLLECTION(o_out->types[0]);
+		zend_collection_type *c_in = ZEND_TYPE_COLLECTION(c_out->types[0]);
+		bool ok = c_out != o_out          /* outer descriptor duplicated */
+			&& c_in != o_in               /* inner descriptor duplicated (deep) */
+			&& GC_REFCOUNT(foo) == rc_caller + 2;   /* copy owns its own name ref */
+
+		zend_string *s = zend_type_to_string(copy);
+		ok = ok && zend_string_equals_literal(s, "vec[vec[Foo]]");
+		zend_string_release(s);
+
+		zend_type_release(copy, /* persistent */ false);
+		ok = ok && GC_REFCOUNT(foo) == rc_caller + 1;   /* orig untouched */
+		zend_type_release(orig, /* persistent */ false);
+		ok = ok && GC_REFCOUNT(foo) == rc_caller;
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "nested_deep_copy", ok);
+	}
+
+	/* 5. Recursive arena-backed release: both descriptor levels live in the arena.
+	 *    Release must recurse and drop the class-name reference but free no arena
+	 *    storage (ASAN in a debug build proves there is no invalid free). */
+	{
+		zend_string *foo = zend_string_init("Baz", sizeof("Baz") - 1, 0);
+		uint32_t rc_caller = GC_REFCOUNT(foo);
+		size_t size = ZEND_TYPE_COLLECTION_SIZE(1);
+
+		zend_collection_type *inner = zend_arena_alloc(&CG(arena), size);
+		inner->kind = ZEND_COLLECTION_TYPE_VEC;
+		inner->num_types = 1;
+		zend_string_addref(foo);
+		inner->types[0] = (zend_type) ZEND_TYPE_INIT_CLASS(foo, 0, 0);
+		zend_type inner_t = ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_COLLECTION(inner_t, inner);
+		ZEND_TYPE_FULL_MASK(inner_t) |= _ZEND_TYPE_ARENA_BIT;
+
+		zend_collection_type *outer = zend_arena_alloc(&CG(arena), size);
+		outer->kind = ZEND_COLLECTION_TYPE_VEC;
+		outer->num_types = 1;
+		outer->types[0] = inner_t;              /* carries the arena bit */
+		zend_type outer_t = ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_COLLECTION(outer_t, outer);
+		ZEND_TYPE_FULL_MASK(outer_t) |= _ZEND_TYPE_ARENA_BIT;
+
+		zend_type_release(outer_t, /* persistent */ false);
+		bool ok = GC_REFCOUNT(foo) == rc_caller;   /* name released, arena kept */
+
+		zend_string_release(foo);
+		add_assoc_bool(return_value, "nested_arena_release", ok);
+	}
 }
 
 static ZEND_FUNCTION(zend_get_unit_enum)

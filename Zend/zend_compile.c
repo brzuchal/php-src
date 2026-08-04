@@ -1450,14 +1450,107 @@ static zend_string *add_intersection_type(zend_string *str,
 	return str;
 }
 
+/* The collection kinds the language accepts in a type declaration. The head name
+ * is matched here rather than reserved in the grammar, so `vec` remains an
+ * ordinary identifier everywhere else. Adding map/tuple/shape is a table entry. */
+typedef struct {
+	const char *name;
+	size_t      name_len;
+	uint32_t    kind;
+	uint32_t    num_types;   /* required arity, or 0 for variable */
+	bool        runtime_ready;
+} zend_collection_type_info;
+
+/* num_types 0 means "variable arity, at least one". runtime_ready marks kinds
+ * whose value representation exists; the parser accepts the whole family, and
+ * the compiler rejects the rest with a clear diagnostic. */
+static const zend_collection_type_info collection_type_infos[] = {
+	{ZEND_STRL("vec"),   ZEND_COLLECTION_TYPE_VEC,   1, true},
+	{ZEND_STRL("map"),   ZEND_COLLECTION_TYPE_MAP,   2, false},
+	{ZEND_STRL("set"),   ZEND_COLLECTION_TYPE_SET,   1, true},
+	{ZEND_STRL("tuple"), ZEND_COLLECTION_TYPE_TUPLE, 0, true},
+	{ZEND_STRL("shape"), ZEND_COLLECTION_TYPE_SHAPE, 0, false},
+	{NULL, 0, 0, 0, false}
+};
+
+static const zend_collection_type_info *zend_collection_type_by_kind(uint32_t kind) {
+	for (const zend_collection_type_info *info = collection_type_infos; info->name; info++) {
+		if (info->kind == kind) {
+			return info;
+		}
+	}
+	return NULL;
+}
+
+ZEND_API const char *zend_collection_type_kind_name(uint32_t kind) {
+	for (const zend_collection_type_info *info = collection_type_infos; info->name; info++) {
+		if (info->kind == kind) {
+			return info->name;
+		}
+	}
+	return NULL;
+}
+
+/* Reverse of zend_collection_type_kind_name(): the source-level kind name back
+ * to its kind. The one source of truth for both directions, so the serializer
+ * and unserializer cannot disagree on a name. */
+ZEND_API bool zend_collection_kind_by_name(const char *name, size_t name_len, uint32_t *kind) {
+	for (const zend_collection_type_info *info = collection_type_infos; info->name; info++) {
+		if (info->name_len == name_len && memcmp(info->name, name, name_len) == 0) {
+			*kind = info->kind;
+			return true;
+		}
+	}
+	return false;
+}
+
 zend_string *zend_type_to_string_resolved(const zend_type type, const zend_class_entry *scope) {
 	zend_string *str = NULL;
+
+	/* Collection type, e.g. vec[int]. Reuse the recursive stringifier for the
+	 * element type(s) rather than re-implementing builtin/class formatting. */
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
+		const zend_collection_type *desc = ZEND_TYPE_COLLECTION(type);
+		const char *kind_name = zend_collection_type_kind_name(desc->kind);
+
+		if (kind_name == NULL) {
+			return ZSTR_INIT_LITERAL("collection[?]", 0);
+		}
+
+		/* Descriptor-erased kind (num_types == 0): render the Candidate B spelling
+		 * `vec[]` / `?vec[]`, matching the source syntax and distinguishing it from
+		 * a concrete `vec[int]`. */
+		if (desc->num_types == 0) {
+			return ZEND_TYPE_ALLOW_NULL(type)
+				? zend_strpprintf(0, "?%s[]", kind_name)
+				: zend_strpprintf(0, "%s[]", kind_name);
+		}
+
+		zend_string *inner = NULL;
+		for (uint32_t i = 0; i < desc->num_types; i++) {
+			zend_string *elem = zend_type_to_string_resolved(desc->types[i], scope);
+			if (inner == NULL) {
+				inner = elem;
+			} else {
+				zend_string *joined = zend_strpprintf(0, "%s,%s", ZSTR_VAL(inner), ZSTR_VAL(elem));
+				zend_string_release(inner);
+				zend_string_release(elem);
+				inner = joined;
+			}
+		}
+
+		zend_string *result = ZEND_TYPE_ALLOW_NULL(type)
+			? zend_strpprintf(0, "?%s[%s]", kind_name, ZSTR_VAL(inner))
+			: zend_strpprintf(0, "%s[%s]", kind_name, ZSTR_VAL(inner));
+		zend_string_release(inner);
+		return result;
+	}
 
 	/* Pure intersection type */
 	if (ZEND_TYPE_IS_INTERSECTION(type)) {
 		ZEND_ASSERT(!ZEND_TYPE_IS_UNION(type));
 		str = add_intersection_type(str, ZEND_TYPE_LIST(type), /* is_bracketed */ false);
-	} else if (ZEND_TYPE_HAS_LIST(type)) {
+	} else if (ZEND_TYPE_IS_TYPE_LIST(type)) {
 		/* A union type might not be a list */
 		const zend_type *list_type;
 		ZEND_TYPE_LIST_FOREACH(ZEND_TYPE_LIST(type), list_type) {
@@ -2696,7 +2789,7 @@ static void zend_emit_return_type_check(
 			}
 		}
 
-		if (expr && ZEND_TYPE_PURE_MASK(type) == MAY_BE_ANY) {
+		if (expr && ZEND_TYPE_IS_MIXED(type)) {
 			/* we don't need run-time check for mixed return type */
 			return;
 		}
@@ -7719,6 +7812,80 @@ static void zend_is_type_list_redundant_by_single_type(const zend_type_list *typ
 
 static zend_type zend_compile_typename(zend_ast *ast);
 
+static zend_type zend_compile_typename(zend_ast *ast);
+
+/* Compile a parameterized collection descriptor such as the vec[int] in either
+ * a type declaration or a literal. Parameters are compiled through the ordinary
+ * type compiler, so nesting (vec[vec[int]]), nullable parameters and class
+ * parameters all work without special cases.
+ *
+ * Declarations and literals share this one path deliberately: a literal's
+ * descriptor must mean exactly what the identically spelled declaration means,
+ * and two compilers would be two chances for them to drift apart. */
+static zend_type zend_compile_collection_descriptor(uint32_t kind, zend_ast *args_ast)
+{
+	/* The kind is decided lexically and recorded on the node, so this is
+	 * independent of how the parser recognised the head. Adjacency between the
+	 * head and '[' is required: the soft `name '[' args ']'` production is
+	 * deliberately absent, so `vec [int]`, `\Ns\vec[int]` and `Foo[int]` are
+	 * syntax errors rather than compile errors. See
+	 * implementation-notes/parser-architecture-decision.md. */
+	const zend_ast_list *args = zend_ast_get_list(args_ast);
+	const zend_collection_type_info *info = zend_collection_type_by_kind(kind);
+
+	ZEND_ASSERT(info != NULL && "collection AST carries an unknown kind");
+
+	/* Empty descriptor list -- vec[], set[], tuple[] -- is a bare (existential,
+	 * descriptor-erased) collection-kind type: num_types == 0, matched by kind
+	 * alone, accepting any concrete descriptor of that kind (any arity for a
+	 * tuple). The grammar admits the empty list only for the runtime-ready kinds,
+	 * so map[]/shape[] are parse errors and never reach here. Distinct from
+	 * vec[mixed] and from an empty collection value; declaration-side only, and
+	 * never interned (bare descriptors do not canonicalise). */
+	if (args->children == 0) {
+		ZEND_ASSERT(info->runtime_ready
+			&& "empty descriptor reached a non-runtime-ready kind");
+		zend_collection_type *desc = zend_arena_alloc(&CG(arena),
+			ZEND_TYPE_COLLECTION_SIZE(0));
+		desc->kind = info->kind;
+		desc->num_types = 0;
+
+		zend_type type = ZEND_TYPE_INIT_NONE(0);
+		ZEND_TYPE_SET_COLLECTION(type, desc);
+		ZEND_TYPE_FULL_MASK(type) |= _ZEND_TYPE_ARENA_BIT;
+		return type;
+	}
+
+	if (info->num_types != 0 && args->children != info->num_types) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Collection type %s expects %u parameter%s, %u given",
+			info->name, info->num_types, info->num_types == 1 ? "" : "s",
+			args->children);
+	}
+	if (!info->runtime_ready) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Collection type %s is not implemented yet", info->name);
+	}
+
+	zend_collection_type *desc = zend_arena_alloc(&CG(arena),
+		ZEND_TYPE_COLLECTION_SIZE(args->children));
+	desc->kind = info->kind;
+	desc->num_types = args->children;
+	for (uint32_t i = 0; i < args->children; i++) {
+		desc->types[i] = zend_compile_typename(args->child[i]);
+	}
+
+	zend_type type = ZEND_TYPE_INIT_NONE(0);
+	ZEND_TYPE_SET_COLLECTION(type, desc);
+	ZEND_TYPE_FULL_MASK(type) |= _ZEND_TYPE_ARENA_BIT;
+	return type;
+}
+
+static zend_type zend_compile_collection_typename(zend_ast *ast)
+{
+	return zend_compile_collection_descriptor(ast->attr, ast->child[0]);
+}
+
 static zend_type zend_compile_typename_ex(
 		zend_ast *ast, bool force_allow_null, bool *forced_allow_null) /* {{{ */
 {
@@ -7730,11 +7897,14 @@ static zend_type zend_compile_typename_ex(
 		ast->attr &= ~ZEND_TYPE_NULLABLE;
 	}
 
-	if (ast->kind == ZEND_AST_TYPE_UNION) {
+	if (ast->kind == ZEND_AST_TYPE_COLLECTION) {
+		type = zend_compile_collection_typename(ast);
+	} else if (ast->kind == ZEND_AST_TYPE_UNION) {
 		const zend_ast_list *list = zend_ast_get_list(ast);
 		zend_type_list *type_list;
 		bool is_composite = false;
 		bool has_only_iterable_class = true;
+		bool has_iterable_keyword = false;
 		ALLOCA_FLAG(use_heap)
 
 		type_list = do_alloca(ZEND_TYPE_LIST_SIZE(list->children), use_heap);
@@ -7776,6 +7946,12 @@ static zend_type zend_compile_typename_ex(
 				continue;
 			}
 
+			if (type_ast->kind == ZEND_AST_TYPE_COLLECTION) {
+				zend_error_noreturn(E_COMPILE_ERROR,
+					"Collection type cannot be part of a union type; "
+					"write ?vec[...] for a nullable collection");
+			}
+
 			single_type = zend_compile_single_typename(type_ast);
 			uint32_t single_type_mask = ZEND_TYPE_PURE_MASK(single_type);
 
@@ -7784,6 +7960,11 @@ static zend_type zend_compile_typename_ex(
 			}
 			if (ZEND_TYPE_IS_COMPLEX(single_type) && !ZEND_TYPE_IS_ITERABLE_FALLBACK(single_type)) {
 				has_only_iterable_class = false;
+			}
+			if (ZEND_TYPE_IS_ITERABLE_FALLBACK(single_type)) {
+				/* Provenance of the `iterable` keyword; preserved onto the union
+				 * below so `iterable|null` stays the same type as `?iterable`. */
+				has_iterable_keyword = true;
 			}
 
 			uint32_t type_mask_overlap = ZEND_TYPE_PURE_MASK(type) & single_type_mask;
@@ -7826,6 +8007,27 @@ static zend_type zend_compile_typename_ex(
 			}
 		}
 
+		/* Provenance of the `iterable` keyword: a source union that contains
+		 * `iterable` keeps _ZEND_TYPE_ITERABLE_BIT on its container (set after the
+		 * arena copy below), so runtime checks, inheritance and the optimizer accept
+		 * native collections for *every* such union -- iterable|null, iterable|int,
+		 * iterable|Foo, ... -- not just the nullable one. An explicit
+		 * array|Traversable[...] union carries no keyword provenance and never sets
+		 * the bit. The bit is provenance, not a property of an equivalent union.
+		 *
+		 * Where the union collapsed to a single Traversable name (iterable|null,
+		 * iterable|int, iterable|false, ...), re-expand it to a one-element type
+		 * list so it stays a *genuine union*: get_type_kind() and Reflection see the
+		 * list shape (which takes precedence over the fallback bit), so it remains a
+		 * ReflectionUnionType rendering "Traversable|array|...". Unions that already
+		 * have a second class member (iterable|Foo) are lists already. */
+		if (has_iterable_keyword
+				&& type_list->num_types == 0 && ZEND_TYPE_HAS_NAME(type)) {
+			type_list->num_types = 1;
+			type_list->types[0] = type;
+			ZEND_TYPE_FULL_MASK(type_list->types[0]) &= ~_ZEND_TYPE_MAY_BE_MASK;
+		}
+
 		if (type_list->num_types) {
 			zend_type_list *list = zend_arena_alloc(
 				&CG(arena), ZEND_TYPE_LIST_SIZE(type_list->num_types));
@@ -7837,6 +8039,10 @@ static zend_type zend_compile_typename_ex(
 		}
 
 		free_alloca(type_list, use_heap);
+
+		if (has_iterable_keyword) {
+			ZEND_TYPE_FULL_MASK(type) |= _ZEND_TYPE_ITERABLE_BIT;
+		}
 
 		uint32_t type_mask = ZEND_TYPE_FULL_MASK(type);
 		if ((type_mask & MAY_BE_OBJECT) &&
@@ -7859,6 +8065,10 @@ static zend_type zend_compile_typename_ex(
 
 		for (uint32_t i = 0; i < list->children; i++) {
 			zend_ast *type_ast = list->child[i];
+			if (type_ast->kind == ZEND_AST_TYPE_COLLECTION) {
+				zend_error_noreturn(E_COMPILE_ERROR,
+					"Collection type cannot be part of an intersection type");
+			}
 			zend_type single_type = zend_compile_single_typename(type_ast);
 
 			/* An intersection of union types cannot exist so invalidate it
@@ -10748,7 +10958,9 @@ static void zend_compile_binary_op(znode *result, zend_ast *ast) /* {{{ */
 					opline->extended_value =
 						(opcode == ZEND_IS_IDENTICAL) ?
 							(1 << Z_TYPE(left_node.u.constant)) :
-							(MAY_BE_ANY - (1 << Z_TYPE(left_node.u.constant)));
+							/* A complement mask means "not this scalar"; flag it open-world
+							 * so out-of-MAY_BE_ANY values (collections) match "!==". */
+							((MAY_BE_ANY - (1 << Z_TYPE(left_node.u.constant))) | MAY_BE_COLLECTION);
 					return;
 				}
 			} else if (right_node.op_type == IS_CONST) {
@@ -10757,7 +10969,9 @@ static void zend_compile_binary_op(znode *result, zend_ast *ast) /* {{{ */
 					opline->extended_value =
 						(opcode == ZEND_IS_IDENTICAL) ?
 							(1 << Z_TYPE(right_node.u.constant)) :
-							(MAY_BE_ANY - (1 << Z_TYPE(right_node.u.constant)));
+							/* A complement mask means "not this scalar"; flag it open-world
+							 * so out-of-MAY_BE_ANY values (collections) match "!==". */
+							((MAY_BE_ANY - (1 << Z_TYPE(right_node.u.constant))) | MAY_BE_COLLECTION);
 					return;
 				}
 			}
@@ -11519,6 +11733,99 @@ static void zend_compile_array(znode *result, zend_ast *ast) /* {{{ */
 }
 /* }}} */
 
+/* Compile a collection literal such as vec[int]{1, 2}.
+ *
+ * The elements are compiled into an ordinary packed array first, and the
+ * collection is built from that completed array by a single opcode. That is
+ * what gives the literal ordinary PHP evaluation semantics for free: elements
+ * are evaluated left to right by the existing array opcodes, and if one of them
+ * throws, the partly built *array* is released by the live range the existing
+ * def/use analysis already emits for it. No partly built collection value can
+ * exist, because construction is one step at the end (INV-16, L2).
+ *
+ * The alternative -- appending into a collection as elements are evaluated --
+ * would need a mutable, partially populated, observable value, which is exactly
+ * what the immutable representation is designed not to have. */
+static void zend_compile_collection_literal(znode *result, const zend_ast *ast)
+{
+	const zend_ast_list *args = zend_ast_get_list(ast->child[0]);
+	const zend_ast_list *elements = zend_ast_get_list(ast->child[1]);
+	zend_op *opline;
+	znode array;
+	uint32_t index;
+
+	/* tuple binds element i to member i, so the element count must equal the
+	 * declared arity exactly. Both are statically known, so this is a compile
+	 * error, and it is kind-specific: vec and set place no element-count
+	 * constraint. Checked before the descriptor is registered or any element is
+	 * emitted, so a wrong arity fails cleanly. */
+	if (ast->attr == ZEND_COLLECTION_TYPE_TUPLE
+	 && elements->children != args->children) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Collection type tuple expects %u element%s, %u given",
+			args->children, args->children == 1 ? "" : "s", elements->children);
+	}
+
+	/* Compiled through the declaration path, so vec[int]{...} means exactly
+	 * what the type vec[int] means: same arity check, same rejection of the
+	 * kinds without a value representation, same nested and class parameters.
+	 * Handed to the op_array immediately, so a compile error while compiling
+	 * the elements below cannot strand the class names it holds. */
+	index = zend_op_array_add_collection_type(CG(active_op_array),
+		zend_compile_collection_descriptor(ast->attr, ast->child[0]));
+
+	/* vec, tuple and set use the direct builder: INIT_COLLECTION allocates an exact-size empty
+	 * payload, ADD_COLLECTION_ELEMENT stores each evaluated element (no HashTable), and
+	 * FINISH_COLLECTION validates every slot after all elements have run and publishes the
+	 * result. The payload is an ordinary owned TMP threaded from INIT through FINISH, so a
+	 * mid-list exception unwinds it exactly like the array TMP. vec validates every slot
+	 * against its one member type; tuple validates slot i against member i (arity fixed by
+	 * the descriptor and already checked above); set validates every slot against its one
+	 * member type and then deduplicates in place at FINISH, lowering the published count below
+	 * the allocated capacity (the exact-size payload is its own dedup scratch -- no array). */
+	if (ast->attr == ZEND_COLLECTION_TYPE_VEC
+			|| ast->attr == ZEND_COLLECTION_TYPE_TUPLE
+			|| ast->attr == ZEND_COLLECTION_TYPE_SET) {
+		znode payload;
+
+		opline = zend_emit_op_tmp(&payload, ZEND_INIT_COLLECTION, NULL, NULL);
+		opline->op1.num = elements->children;   /* exact element count */
+		opline->extended_value = index;          /* descriptor side-table index */
+
+		for (uint32_t i = 0; i < elements->children; i++) {
+			znode value;
+
+			zend_compile_expr(&value, elements->child[i]);
+			opline = zend_emit_op(NULL, ZEND_ADD_COLLECTION_ELEMENT, &value, NULL);
+			SET_NODE(opline->result, &payload);
+		}
+
+		opline = zend_emit_op_tmp(result, ZEND_FINISH_COLLECTION, &payload, NULL);
+		opline->extended_value = index;          /* descriptor: for the not-constructible message */
+		return;
+	}
+
+	if (elements->children == 0) {
+		zend_emit_op_tmp(&array, ZEND_INIT_ARRAY, NULL, NULL);
+	} else {
+		for (uint32_t i = 0; i < elements->children; i++) {
+			znode value;
+
+			zend_compile_expr(&value, elements->child[i]);
+			if (i == 0) {
+				opline = zend_emit_op_tmp(&array, ZEND_INIT_ARRAY, &value, NULL);
+				opline->extended_value = elements->children << ZEND_ARRAY_SIZE_SHIFT;
+			} else {
+				opline = zend_emit_op(NULL, ZEND_ADD_ARRAY_ELEMENT, &value, NULL);
+				SET_NODE(opline->result, &array);
+			}
+		}
+	}
+
+	opline = zend_emit_op_tmp(result, ZEND_CONSTRUCT_COLLECTION, &array, NULL);
+	opline->extended_value = index;
+}
+
 static void zend_emit_fetch_constant(znode *result, zend_string *resolved_name, bool unqualified_in_namespace)
 {
 	zend_op *opline = zend_emit_op_tmp(result, ZEND_FETCH_CONSTANT, NULL, NULL);
@@ -12109,6 +12416,17 @@ static void zend_compile_const_expr(zend_ast **ast_ptr, void *context) /* {{{ */
 		return;
 	}
 
+	/* D-10. A collection literal builds a request-bound value: its type node is
+	 * owned by the request intern tier, so a folded constant could not survive
+	 * into SHM or into another request. Rejecting it here rather than only by
+	 * omission from zend_is_allowed_in_const_expr() buys a diagnostic that says
+	 * what is wrong, and keeps the invariant stated where it is enforced. The
+	 * omission stays as the backstop. */
+	if (ast->kind == ZEND_AST_COLLECTION) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Collection literals are not allowed in constant expressions");
+	}
+
 	if (!zend_is_allowed_in_const_expr(ast->kind)) {
 		zend_error_noreturn(E_COMPILE_ERROR, "Constant expression contains invalid operations");
 	}
@@ -12442,6 +12760,9 @@ static void zend_compile_expr_inner(znode *result, zend_ast *ast) /* {{{ */
 			return;
 		case ZEND_AST_ARRAY:
 			zend_compile_array(result, ast);
+			return;
+		case ZEND_AST_COLLECTION:
+			zend_compile_collection_literal(result, ast);
 			return;
 		case ZEND_AST_CONST:
 			zend_compile_const(result, ast);

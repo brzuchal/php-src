@@ -341,6 +341,65 @@ namespace {
 
     function zend_test_refcount(mixed $value): int {}
 
+    /** @return array<string, bool> */
+    function zend_test_vec_selftest(): array {}
+
+    /** Raw runtime layout of the vec header (sizeof/alignof/offsetof, tag
+     *  arithmetic) plus the ABI-independent hybrid invariants, so any target --
+     *  notably x32 -- reports its real numbers and machine-checks the contract.
+     *  @return array<string, int> */
+    function zend_test_vec_layout(): array {}
+
+    /** @return array<string, bool> */
+    function zend_test_collection_type_selftest(): array {}
+
+    /** @return array<string, bool> */
+    function zend_test_nested_collection_type_selftest(): array {}
+
+    /** @return array<string, bool> */
+    function zend_test_type_code_alias_selftest(): array {}
+
+    /** Test-only vec factory; no return type, a collection is not `mixed`. */
+    function zend_test_make_vec(array $values, string $element_type, mixed &$out): void {}
+
+    function zend_test_vec_count(mixed $vec): int {}
+
+    function zend_test_vec_get(mixed $vec, int $index): mixed {}
+
+    /** Structural key of the first parameter's collection descriptor. */
+    function zend_test_collection_key(string $function): int {}
+
+    function zend_test_collection_key_supported(string $function): bool {}
+
+    /**
+     * Keys of two synthetic two-member descriptors that differ only in member
+     * order, to prove positional folding. Stack-built; no arity-2 kind has
+     * syntax yet.
+     * @return array<int, int>
+     */
+    function zend_test_collection_key_positional(): array {}
+
+    /** @return array<int, int> */
+    function zend_test_collection_key_provenance(string $function): array {}
+
+    /** @return array<string, bool> */
+    function zend_test_collection_key_unsupported(): array {}
+
+    /** @return array<string, mixed>|null */
+    function zend_test_collection_intern(string $function): ?array {}
+
+    function zend_test_vec_type_id(mixed $vec): int {}
+
+    function zend_test_collection_collision_selftest(): bool {}
+
+    /** @return array<string, mixed>|null */
+    function zend_test_collection_classify(string $function): ?array {}
+
+    function zend_test_collection_descents(): ?int {}
+
+    /** @return array<string, int>|null */
+    function zend_test_collection_stats(): ?array {}
+
     function zend_test_zend_ini_parse_quantity(string $str): int {}
     function zend_test_zend_ini_parse_uquantity(string $str): int {}
 

@@ -2066,6 +2066,26 @@ static ZEND_COLD void zend_ast_export_type(smart_str *str, zend_ast *ast, int in
 		}
 		return;
 	}
+	if (ast->kind == ZEND_AST_TYPE_COLLECTION) {
+		/* One child, the parameter list; the head is not stored as a name node,
+		 * because the kind is recorded in `attr` so that the AST does not depend
+		 * on how the parser spelled the head. */
+		const zend_ast_list *args = zend_ast_get_list(ast->child[0]);
+		if (ast->attr & ZEND_TYPE_NULLABLE) {
+			smart_str_appendc(str, '?');
+		}
+		smart_str_appends(str,
+			zend_collection_type_kind_name(ast->attr & ~ZEND_TYPE_NULLABLE));
+		smart_str_appendc(str, '[');
+		for (uint32_t i = 0; i < args->children; i++) {
+			if (i != 0) {
+				smart_str_appendc(str, ',');
+			}
+			zend_ast_export_type(str, args->child[i], indent);
+		}
+		smart_str_appendc(str, ']');
+		return;
+	}
 	if (ast->attr & ZEND_TYPE_NULLABLE) {
 		smart_str_appendc(str, '?');
 	}
@@ -2298,6 +2318,24 @@ simple_list:
 			zend_ast_export_list(str, zend_ast_get_list(ast), true, 20, indent);
 			smart_str_appendc(str, ']');
 			break;
+		case ZEND_AST_COLLECTION:
+		{
+			/* Head and parameters exactly as for the type -- the head comes from
+			 * the kind in `attr`, not from a name node -- then the elements. */
+			const zend_ast_list *args = zend_ast_get_list(ast->child[0]);
+			smart_str_appends(str, zend_collection_type_kind_name(ast->attr));
+			smart_str_appendc(str, '[');
+			for (uint32_t i = 0; i < args->children; i++) {
+				if (i != 0) {
+					smart_str_appendc(str, ',');
+				}
+				zend_ast_export_type(str, args->child[i], indent);
+			}
+			smart_str_appends(str, "]{");
+			zend_ast_export_list(str, zend_ast_get_list(ast->child[1]), true, 20, indent);
+			smart_str_appendc(str, '}');
+			break;
+		}
 		case ZEND_AST_ENCAPS_LIST:
 			smart_str_appendc(str, '"');
 			zend_ast_export_encaps_list(str, '"', zend_ast_get_list(ast), indent);

@@ -412,11 +412,16 @@ typedef struct _zend_oparray_context {
 /* op_array uses strict mode types                        |     |     |     */
 #define ZEND_ACC_STRICT_TYPES            (1U << 31) /*    |  X  |     |     */
 /*                                                        |     |     |     */
-/* Function Flags 2 (fn_flags2) (unused: 1-31)            |     |     |     */
+/* Function Flags 2 (fn_flags2) (unused: 2-31)            |     |     |     */
 /* ============================                           |     |     |     */
 /*                                                        |     |     |     */
 /* Function forbids dynamic calls                         |     |     |     */
 #define ZEND_ACC2_FORBID_DYN_CALLS       (1 << 0)  /*     |  X  |     |     */
+/*                                                        |     |     |     */
+/* Internal function is a native-collection intrinsic     |     |     |     */
+/* method: its receiver travels in the call frame header  |     |     |     */
+/* (Z_PTR(This)), never as $this or a public argument.    |     |     |     */
+#define ZEND_ACC2_COLLECTION_RECEIVER    (1 << 1)  /*     |  X  |     |     */
 
 #define ZEND_ACC_PPP_MASK  (ZEND_ACC_PUBLIC | ZEND_ACC_PROTECTED | ZEND_ACC_PRIVATE)
 #define ZEND_ACC_PPP_SET_MASK  (ZEND_ACC_PUBLIC_SET | ZEND_ACC_PROTECTED_SET | ZEND_ACC_PRIVATE_SET)
@@ -575,6 +580,27 @@ struct _zend_op_array {
 	/* Functions that are declared dynamically are stored here and
 	 * referenced by index from opcodes. */
 	zend_op_array **dynamic_func_defs;
+
+	/* Compiled descriptors for the collection literals in this op_array, one
+	 * entry per literal site, referenced by index from the construction
+	 * opcode.
+	 *
+	 * Not op_array->literals, because a zend_type is not a zval. And not an
+	 * index *into* the literals array either: compact_literals.c physically
+	 * relocates literals and rewrites the operands naming them, so any
+	 * literal-based index is unstable across optimization. No pass renumbers
+	 * this table. Dead-code elimination may leave an entry orphaned; that is
+	 * harmless and it stays orphaned, because compacting would reintroduce
+	 * exactly the renumbering hazard this table exists to avoid.
+	 *
+	 * Ownership is arg_info's, rule for rule: freed by destroy_op_array() only
+	 * when the op_array owns it, *shared* rather than copied when a closure or
+	 * a trait method duplicates the op_array, memdup'd into SHM by
+	 * zend_persist_op_array(). Entries are compile-time zend_collection_type
+	 * descriptors; a runtime zend_collection_info node is never stored here,
+	 * in SHM or in the file cache (INV-9). */
+	uint32_t last_collection_type;
+	zend_type *collection_types;
 
 	void *reserved[ZEND_MAX_RESERVED_RESOURCES];
 };
@@ -971,6 +997,22 @@ ZEND_API void zend_destroy_file_handle(zend_file_handle *file_handle);
 ZEND_API void zend_cleanup_mutable_class_data(zend_class_entry *ce);
 ZEND_API void zend_cleanup_internal_class_data(zend_class_entry *ce);
 ZEND_API void zend_type_release(zend_type type, bool persistent);
+/* Append a compiled collection descriptor to op_array->collection_types and
+ * return its index, which is what the construction opcode stores. The op_array
+ * takes ownership of `type` on the same terms as an arg_info type. Engine
+ * internal: only the compiler appends, and only while the op_array is still
+ * mutable. */
+uint32_t zend_op_array_add_collection_type(zend_op_array *op_array, zend_type type);
+/* Allocate a collection type descriptor with `num_types` (> 0) uninitialised
+ * element-type slots. The caller fills types[0..num_types) and installs the
+ * descriptor with ZEND_TYPE_SET_COLLECTION. */
+ZEND_API zend_collection_type *zend_type_collection_alloc(uint32_t kind, uint32_t num_types, bool persistent);
+/* Source-level name of a collection kind ("vec"), or NULL if unknown. */
+ZEND_API const char *zend_collection_type_kind_name(uint32_t kind);
+/* The reverse: resolve a kind name ("vec") to its kind. False if unknown. */
+ZEND_API bool zend_collection_kind_by_name(const char *name, size_t name_len, uint32_t *kind);
+/* Structural (invariant) identity of two types, recursing into descriptors. */
+ZEND_API bool zend_type_structurally_equals(zend_type a, zend_type b);
 ZEND_API zend_string *zend_create_member_string(const zend_string *class_name, const zend_string *member_name);
 
 

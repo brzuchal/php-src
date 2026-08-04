@@ -122,6 +122,17 @@ static ZEND_COLD void ZEND_FASTCALL zend_jit_invalid_method_call_tmp(zval *objec
 	zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
 }
 
+/* DO_FCALL teardown for a directly-owned native-collection intrinsic receiver.
+ * The interpreter releases it in its DO_FCALL handler; the JIT must mirror that
+ * so a JIT-compiled DO_FCALL over a (deoptimised) collection call does not leak
+ * the header receiver. Self-gating: a no-op for every ordinary internal call. */
+static void ZEND_FASTCALL zend_jit_release_collection_receiver(zend_execute_data *call)
+{
+	if (UNEXPECTED(zend_call_owns_collection_receiver(call))) {
+		zend_collection_call_release_receiver(call);
+	}
+}
+
 static void ZEND_FASTCALL zend_jit_unref_helper(zval *zv)
 {
 	zend_reference *ref;
@@ -1375,6 +1386,30 @@ static void ZEND_FASTCALL zend_jit_fetch_dim_obj_is_helper(zval *container, zval
 	}
 }
 
+/* Cold-path DIM read over a native collection that reached the JIT's generic
+ * "not array/string/object" branch: the operand carried no MAY_BE_COLLECTION (an
+ * open-world container such as an untyped parameter), so the opcode was compiled
+ * with the array fast path plus this runtime dispatch. Keeps VM semantics in
+ * lockstep with zend_collection_read_dimension(): strict-int offsets, and a
+ * TypeError/ValueError miss for $v[i] (the _r flavour) vs a silent null for
+ * $v[i] ?? d (the _is flavour). An undefined offset was already warned about by
+ * the emitted code; map it to null like the VM does, without a second warning. */
+static void ZEND_FASTCALL zend_jit_fetch_dim_collection_r_helper(zval *container, zval *dim, zval *result)
+{
+	if (UNEXPECTED(Z_TYPE_P(dim) == IS_UNDEF)) {
+		dim = &EG(uninitialized_zval);
+	}
+	zend_collection_read_dimension(result, container, dim, BP_VAR_R);
+}
+
+static void ZEND_FASTCALL zend_jit_fetch_dim_collection_is_helper(zval *container, zval *dim, zval *result)
+{
+	if (UNEXPECTED(Z_TYPE_P(dim) == IS_UNDEF)) {
+		dim = &EG(uninitialized_zval);
+	}
+	zend_collection_read_dimension(result, container, dim, BP_VAR_IS);
+}
+
 static zend_never_inline void zend_assign_to_string_offset(zval *str, zval *dim, zval *value, zval *result)
 {
 	uint8_t c;
@@ -1600,6 +1635,16 @@ static zend_always_inline void ZEND_FASTCALL zend_jit_fetch_dim_obj_helper(zval 
 		} else {
 			ZVAL_UNDEF(result);
 		}
+	} else if (UNEXPECTED(Z_TYPE_P(object_ptr) == IS_COLLECTION)) {
+		/* Writable dimension fetch (W / RW / UNSET) over an immutable collection: no
+		 * writable slot exists, so reject with the VM's zend_fetch_dimension_address()
+		 * wording instead of the scalar-container error below. */
+		if (type == BP_VAR_UNSET) {
+			zend_throw_error(NULL, "Cannot unset an offset of an immutable collection");
+		} else {
+			zend_throw_error(NULL, "Cannot modify an immutable collection");
+		}
+		ZVAL_UNDEF(result);
 	} else {
 		if (type == BP_VAR_UNSET) {
 			zend_throw_error(NULL, "Cannot unset offset in a non-array variable");
@@ -1908,6 +1953,10 @@ isset_str_offset:
 				goto isset_str_offset;
 			}
 		}
+	} else if (UNEXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+		/* Open-world container (no MAY_BE_COLLECTION on the operand) that is a native
+		 * collection at runtime: same total, never-throwing policy as the VM. */
+		return zend_collection_isset_dimension(container, offset);
 	}
 	return 0;
 }
@@ -2660,6 +2709,27 @@ static void ZEND_FASTCALL zend_jit_nan_coerced_to_type_warning(void)
 static void ZEND_FASTCALL zend_jit_invalid_property_read(zval *container, const char *property_name)
 {
 	zend_error(E_WARNING, "Attempt to read property \"%s\" on %s", property_name, zend_zval_value_name(container));
+}
+
+/* Cold-path intrinsic collection read for function-JIT, kept in lockstep with the
+ * VM FETCH_OBJ_R handler: a known name ($c->count / $c->isEmpty) yields its value,
+ * an unknown name is an Error (the intrinsic set is closed). Without this, the
+ * function-JIT non-object cold path would shadow the VM branch and return null. */
+static void ZEND_FASTCALL zend_jit_collection_read_intrinsic(zval *container, zend_string *name, zval *result)
+{
+	if (zend_collection_read_intrinsic_property(container, name, result) == FAILURE) {
+		zend_throw_error(NULL, "Undefined intrinsic property \"%s\" on collection", ZSTR_VAL(name));
+		ZVAL_UNDEF(result);
+	}
+}
+
+/* Cold-path intrinsic collection read in isset()/?? context: a known name yields
+ * its value, an unknown name yields null without throwing. */
+static void ZEND_FASTCALL zend_jit_collection_read_intrinsic_is(zval *container, zend_string *name, zval *result)
+{
+	if (zend_collection_read_intrinsic_property(container, name, result) == FAILURE) {
+		ZVAL_NULL(result);
+	}
 }
 
 static void ZEND_FASTCALL zend_jit_invalid_property_write(zval *container, const char *property_name)

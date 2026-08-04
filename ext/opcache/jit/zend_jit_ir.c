@@ -8254,7 +8254,9 @@ static int zend_jit_type_check(zend_jit_ctx *jit, const zend_op *opline, uint32_
 
 	if (op1_info & (MAY_BE_ANY|MAY_BE_REF)) {
 		mask = opline->extended_value;
-		if (!(op1_info & MAY_BE_GUARD) && !(op1_info & (MAY_BE_ANY - mask))) {
+		/* Use ~mask, not MAY_BE_ANY - mask: extended_value may carry the
+		 * out-of-domain MAY_BE_COLLECTION flag, which would underflow the subtraction. */
+		if (!(op1_info & MAY_BE_GUARD) && !(op1_info & (MAY_BE_ANY & ~mask))) {
 			jit_FREE_OP(jit, opline->op1_type, opline->op1, op1_info, opline);
 			if (exit_addr) {
 				if (smart_branch_opcode == ZEND_JMPNZ) {
@@ -8287,7 +8289,10 @@ static int zend_jit_type_check(zend_jit_ctx *jit, const zend_op *opline, uint32_
 			bool invert = false;
 			uint8_t type;
 
-			switch (mask) {
+			/* Match on the MAY_BE_ANY-domain bits only; a complement mask may also
+			 * carry MAY_BE_COLLECTION, and its "Z_TYPE != X" invert lowering is
+			 * already open-world correct for collections. */
+			switch (mask & MAY_BE_ANY) {
 				case MAY_BE_NULL:   type = IS_NULL;   break;
 				case MAY_BE_FALSE:  type = IS_FALSE;  break;
 				case MAY_BE_TRUE:   type = IS_TRUE;   break;
@@ -10648,6 +10653,11 @@ static int zend_jit_do_fcall(zend_jit_ctx *jit, const zend_op *opline, const zen
 			jit_OBJ_RELEASE(jit, ir_LOAD_A(jit_CALL(rx, This.value.obj)));
 
 			ir_MERGE_WITH_EMPTY_FALSE(if_release_this);
+
+			// JIT: release a directly-owned native-collection intrinsic receiver
+			// from the frame header (mirrors the interpreter DO_FCALL teardown so
+			// a deoptimised collection call under JIT does not leak it).
+			ir_CALL_1(IR_VOID, ir_CONST_FC_FUNC(zend_jit_release_collection_receiver), rx);
 		}
 
 
@@ -11571,7 +11581,7 @@ static int zend_jit_free(zend_jit_ctx *jit, const zend_op *opline, uint32_t op1_
 			jit_SET_EX_OPLINE(jit, opline);
 		}
 		if (opline->opcode == ZEND_FE_FREE && (op1_info & (MAY_BE_OBJECT|MAY_BE_REF))) {
-			ir_ref ref, if_array, if_exists, end_inputs = IR_UNUSED;
+			ir_ref ref, if_array, if_collection, if_exists, end_inputs = IR_UNUSED;
 
 			if (op1_info & MAY_BE_ARRAY) {
 				if_array = jit_if_Z_TYPE(jit, op1_addr, IS_ARRAY);
@@ -11579,6 +11589,14 @@ static int zend_jit_free(zend_jit_ctx *jit, const zend_op *opline, uint32_t op1_
 				ir_END_list(end_inputs);
 				ir_IF_FALSE(if_array);
 			}
+			/* A collection keeps its foreach position in u2.fe_pos, which aliases
+			 * fe_iter_idx, and owns no EG(ht_iterators) slot; like an array it must
+			 * not reach zend_hash_iterator_del(). Mirror the VM FE_FREE handler,
+			 * keyed on the runtime zval type. */
+			if_collection = jit_if_Z_TYPE(jit, op1_addr, IS_COLLECTION);
+			ir_IF_TRUE(if_collection);
+			ir_END_list(end_inputs);
+			ir_IF_FALSE(if_collection);
 			ref = ir_LOAD_U32(ir_ADD_OFFSET(jit_FP(jit), opline->op1.var + offsetof(zval, u2.fe_iter_idx)));
 			if_exists = ir_IF(ir_EQ(ref, ir_CONST_U32(-1)));
 			ir_IF_TRUE(if_exists);
@@ -12557,6 +12575,16 @@ static int zend_jit_fetch_dim_read(zend_jit_ctx       *jit,
 	ir_ref end_inputs = IR_UNUSED;
 	ir_ref not_found_inputs = IR_UNUSED;
 
+	/* Native immutable collections have no JIT DIM path: the array-only IR
+	 * helpers would misread the packed zend_vec. When the container may be a
+	 * collection, decline to compile this opcode so it runs the VM DIM handler
+	 * (strict-int reads for vec/tuple; a hard error for every write form).
+	 * Ordinary array/string/object access carries no MAY_BE_COLLECTION bit and
+	 * is unaffected. */
+	if (op1_info & MAY_BE_COLLECTION) {
+		return 0;
+	}
+
 	orig_op1_addr = OP1_ADDR();
 
 	if (opline->opcode != ZEND_FETCH_DIM_IS
@@ -12808,6 +12836,7 @@ static int zend_jit_fetch_dim_read(zend_jit_ctx       *jit,
 
 		if ((op1_info & ((MAY_BE_ANY|MAY_BE_UNDEF)-(MAY_BE_ARRAY|MAY_BE_OBJECT|may_be_string)))
 		 && (!exit_addr || !(op1_info & (MAY_BE_ARRAY|MAY_BE_OBJECT|may_be_string)))) {
+			ir_ref if_collection, arg2;
 
 			if (if_type) {
 				ir_IF_FALSE_cold(if_type);
@@ -12828,6 +12857,33 @@ static int zend_jit_fetch_dim_read(zend_jit_ctx       *jit,
 								  false, true, false);
 				}
 			}
+
+			/* A native collection reaches this generic branch only when the operand
+			 * carried no MAY_BE_COLLECTION (an open-world container such as an untyped
+			 * parameter -- with the bit set, compilation is declined above). Dispatch on
+			 * the runtime type so the read keeps VM semantics instead of falling through
+			 * to the invalid-access warning and yielding null. */
+			if_collection = jit_if_Z_TYPE(jit, op1_addr, IS_COLLECTION);
+			ir_IF_TRUE(if_collection);
+			jit_SET_EX_OPLINE(jit, opline);
+			if (opline->op2_type == IS_CONST && Z_EXTRA_P(RT_CONSTANT(opline, opline->op2)) == ZEND_EXTRA_VALUE) {
+				/* a folded numeric-string constant: pass the original string key, so the
+				 * strict-int check rejects it exactly like the VM does */
+				ZEND_ASSERT(Z_MODE(op2_addr) == IS_CONST_ZVAL);
+				arg2 = ir_CONST_ADDR(Z_ZV(op2_addr)+1);
+			} else {
+				arg2 = jit_ZVAL_ADDR(jit, op2_addr);
+			}
+			if (opline->opcode != ZEND_FETCH_DIM_IS) {
+				may_throw = 1;
+				ir_CALL_3(IR_VOID, ir_CONST_FC_FUNC(zend_jit_fetch_dim_collection_r_helper),
+					jit_ZVAL_ADDR(jit, op1_addr), arg2, jit_ZVAL_ADDR(jit, res_addr));
+			} else {
+				ir_CALL_3(IR_VOID, ir_CONST_FC_FUNC(zend_jit_fetch_dim_collection_is_helper),
+					jit_ZVAL_ADDR(jit, op1_addr), arg2, jit_ZVAL_ADDR(jit, res_addr));
+			}
+			ir_END_list(end_inputs);
+			ir_IF_FALSE(if_collection);
 
 			if (opline->opcode != ZEND_FETCH_DIM_IS) {
 				ir_ref ref;
@@ -13017,6 +13073,16 @@ static int zend_jit_fetch_dim(zend_jit_ctx   *jit,
 	ir_ref end_inputs = IR_UNUSED;
 	ir_ref ref, if_type = IR_UNUSED, ht_ref;
 
+	/* Native immutable collections have no JIT DIM path: the array-only IR
+	 * helpers would misread the packed zend_vec. When the container may be a
+	 * collection, decline to compile this opcode so it runs the VM DIM handler
+	 * (strict-int reads for vec/tuple; a hard error for every write form).
+	 * Ordinary array/string/object access carries no MAY_BE_COLLECTION bit and
+	 * is unaffected. */
+	if (op1_info & MAY_BE_COLLECTION) {
+		return 0;
+	}
+
 	if (opline->opcode == ZEND_FETCH_DIM_RW) {
 		jit_SET_EX_OPLINE(jit, opline);
 	}
@@ -13197,6 +13263,15 @@ static int zend_jit_isset_isempty_dim(zend_jit_ctx   *jit,
 	ir_ref if_type = IR_UNUSED;
 	ir_ref false_inputs = IR_UNUSED, end_inputs = IR_UNUSED;
 	ir_refs *true_inputs;
+
+	/* Native immutable collections have no JIT DIM path: the array-only IR
+	 * helpers would misread the packed zend_vec. When the container may be a
+	 * collection, decline to compile this opcode so it runs the VM DIM handler
+	 * (strict-int isset/empty for vec/tuple). Ordinary array/string/object
+	 * access carries no MAY_BE_COLLECTION bit and is unaffected. */
+	if (op1_info & MAY_BE_COLLECTION) {
+		return 0;
+	}
 
 	ir_refs_init(true_inputs, 8);
 
@@ -13391,6 +13466,15 @@ static int zend_jit_assign_dim(zend_jit_ctx  *jit,
 	ir_ref if_type = IR_UNUSED;
 	ir_ref end_inputs = IR_UNUSED, ht_ref;
 
+	/* Native immutable collections have no JIT DIM path: the array-only IR
+	 * helpers would misread the packed zend_vec. When the container may be a
+	 * collection, decline to compile this opcode so it runs the VM DIM handler,
+	 * which rejects the write with a hard error. Ordinary array/string/object
+	 * access carries no MAY_BE_COLLECTION bit and is unaffected. */
+	if (op1_info & MAY_BE_COLLECTION) {
+		return 0;
+	}
+
 	if (op3_addr != op3_def_addr && op3_def_addr) {
 		if (!zend_jit_update_regs(jit, (opline+1)->op1.var, op3_addr, op3_def_addr, val_info)) {
 			return 0;
@@ -13570,6 +13654,16 @@ static int zend_jit_assign_dim_op(zend_jit_ctx   *jit,
 	ir_ref if_type = IS_UNUSED;
 	ir_ref end_inputs = IR_UNUSED, ht_ref;
 	bool emit_fast_path = true;
+
+	/* Native immutable collections have no JIT DIM path: the array-only IR
+	 * helpers would misread the packed zend_vec. When the container may be a
+	 * collection, decline to compile this opcode so it runs the VM DIM handler,
+	 * which rejects the compound write with a hard error. Ordinary
+	 * array/string/object access carries no MAY_BE_COLLECTION bit and is
+	 * unaffected. */
+	if (op1_info & MAY_BE_COLLECTION) {
+		return 0;
+	}
 
 	ZEND_ASSERT(opline->result_type == IS_UNUSED);
 
@@ -14345,11 +14439,33 @@ static int zend_jit_fetch_obj(zend_jit_ctx         *jit,
 							op1_ref, ir_CONST_ADDR(Z_STRVAL_P(member)));
 						jit_set_Z_TYPE_INFO(jit, res_addr, _IS_ERROR);
 					} else {
+						/* A collection's intrinsic read is served here on the cold
+						 * (non-object) path, mirroring the VM FETCH_OBJ_R handler so
+						 * function-JIT does not shadow it; the object fast path above
+						 * is untouched. Reached only when op1 is not an object. */
+						ir_ref if_coll = jit_if_Z_TYPE(jit, op1_addr, IS_COLLECTION);
+						ir_IF_TRUE(if_coll);
+						/* Use the (already dereferenced) op1_addr, not op1_ref: for a
+						 * MAY_BE_UNDEF operand op1_ref is the original, non-deref'd
+						 * address (a reference wrapper), which the helper would misread
+						 * as a zend_vec. The guard above proved op1_addr is a collection. */
+						ir_CALL_3(IR_VOID, ir_CONST_FC_FUNC(zend_jit_collection_read_intrinsic),
+							jit_ZVAL_ADDR(jit, op1_addr), ir_CONST_ADDR(Z_STR_P(member)), jit_ZVAL_ADDR(jit, res_addr));
+						ir_END_list(end_inputs);
+						ir_IF_FALSE(if_coll);
 						ir_CALL_2(IR_VOID, ir_CONST_FC_FUNC(zend_jit_invalid_property_read),
 							op1_ref, ir_CONST_ADDR(Z_STRVAL_P(member)));
 						jit_set_Z_TYPE_INFO(jit, res_addr, IS_NULL);
 					}
 				} else {
+					/* FETCH_OBJ_IS (?? / null-coalesce read): a collection yields
+					 * its intrinsic value; an unknown name yields null, no throw. */
+					ir_ref if_coll = jit_if_Z_TYPE(jit, op1_addr, IS_COLLECTION);
+					ir_IF_TRUE(if_coll);
+					ir_CALL_3(IR_VOID, ir_CONST_FC_FUNC(zend_jit_collection_read_intrinsic_is),
+						jit_ZVAL_ADDR(jit, op1_addr), ir_CONST_ADDR(Z_STR_P(member)), jit_ZVAL_ADDR(jit, res_addr));
+					ir_END_list(end_inputs);
+					ir_IF_FALSE(if_coll);
 					jit_set_Z_TYPE_INFO(jit, res_addr, IS_NULL);
 				}
 				ir_END_list(end_inputs);

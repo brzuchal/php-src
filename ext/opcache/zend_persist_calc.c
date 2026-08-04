@@ -197,7 +197,15 @@ static void zend_persist_attributes_calc(HashTable *attributes)
 
 static void zend_persist_type_calc(zend_type *type)
 {
-	if (ZEND_TYPE_HAS_LIST(*type)) {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*type)) {
+		zend_collection_type *desc = ZEND_TYPE_COLLECTION(*type);
+		ADD_SIZE(ZEND_TYPE_COLLECTION_SIZE(desc->num_types));
+		for (uint32_t i = 0; i < desc->num_types; i++) {
+			zend_persist_type_calc(&desc->types[i]);
+		}
+		return;
+	}
+	if (ZEND_TYPE_IS_TYPE_LIST(*type)) {
 		ADD_SIZE(ZEND_TYPE_LIST_SIZE(ZEND_TYPE_LIST(*type)->num_types));
 	}
 
@@ -307,6 +315,13 @@ static void zend_persist_op_array_calc_ex(zend_op_array *op_array)
 			if (arg_info[i].doc_comment) {
 				ADD_INTERNED_STRING(arg_info[i].doc_comment);
 			}
+		}
+	}
+
+	if (op_array->collection_types) {
+		ADD_SIZE(sizeof(zend_type) * op_array->last_collection_type);
+		for (uint32_t i = 0; i < op_array->last_collection_type; i++) {
+			zend_persist_type_calc(&op_array->collection_types[i]);
 		}
 	}
 

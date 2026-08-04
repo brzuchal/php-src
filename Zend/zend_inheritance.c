@@ -87,8 +87,33 @@ static void zend_type_list_copy_ctor(
 	} ZEND_TYPE_LIST_FOREACH_END();
 }
 
+static void zend_type_collection_copy_ctor(
+	zend_type *const parent_type,
+	bool use_arena,
+	bool persistent
+) {
+	const zend_collection_type *const old_desc = ZEND_TYPE_COLLECTION(*parent_type);
+	size_t size = ZEND_TYPE_COLLECTION_SIZE(old_desc->num_types);
+	zend_collection_type *new_desc = use_arena
+		? zend_arena_alloc(&CG(arena), size) : pemalloc(size, persistent);
+
+	memcpy(new_desc, old_desc, size);
+	ZEND_TYPE_SET_COLLECTION(*parent_type, new_desc);
+	if (use_arena) {
+		ZEND_TYPE_FULL_MASK(*parent_type) |= _ZEND_TYPE_ARENA_BIT;
+	}
+
+	for (uint32_t i = 0; i < new_desc->num_types; i++) {
+		zend_type_copy_ctor(&new_desc->types[i], use_arena, persistent);
+	}
+}
+
+/* Keep the heap-copy semantics in sync with the test-only reference helper
+ * zend_test_deep_copy_type() in ext/zend_test/test.c. */
 static void zend_type_copy_ctor(zend_type *const type, bool use_arena, bool persistent) {
-	if (ZEND_TYPE_HAS_LIST(*type)) {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*type)) {
+		zend_type_collection_copy_ctor(type, use_arena, persistent);
+	} else if (ZEND_TYPE_IS_TYPE_LIST(*type)) {
 		zend_type_list_copy_ctor(type, use_arena, persistent);
 	} else if (ZEND_TYPE_HAS_NAME(*type)) {
 		zend_string_addref(ZEND_TYPE_NAME(*type));
@@ -589,7 +614,14 @@ static zend_string *get_class_from_type(const zend_class_entry *scope, const zen
 static void register_unresolved_classes(zend_class_entry *scope, const zend_type type) {
 	const zend_type *single_type;
 	ZEND_TYPE_FOREACH(type, single_type) {
-		if (ZEND_TYPE_HAS_LIST(*single_type)) {
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*single_type)) {
+			const zend_collection_type *desc = ZEND_TYPE_COLLECTION(*single_type);
+			for (uint32_t i = 0; i < desc->num_types; i++) {
+				register_unresolved_classes(scope, desc->types[i]);
+			}
+			continue;
+		}
+		if (ZEND_TYPE_IS_TYPE_LIST(*single_type)) {
 			register_unresolved_classes(scope, *single_type);
 			continue;
 		}
@@ -673,10 +705,53 @@ static inheritance_status zend_perform_covariant_type_check(
 	ZEND_ASSERT(ZEND_TYPE_IS_SET(fe_type) && ZEND_TYPE_IS_SET(proto_type));
 
 	/* Apart from void, everything is trivially covariant to the mixed type.
-	 * Handle this case separately to ensure it never requires class loading. */
-	if (ZEND_TYPE_PURE_MASK(proto_type) == MAY_BE_ANY &&
+	 * Handle this case separately to ensure it never requires class loading.
+	 * This is deliberately tested before the collection rule below, so that a
+	 * collection narrowing a mixed prototype stays compatible. */
+	if (ZEND_TYPE_IS_MIXED(proto_type) &&
 			!ZEND_TYPE_CONTAINS_CODE(fe_type, IS_VOID)) {
 		return INHERITANCE_SUCCESS;
+	}
+
+	/* Collection types are otherwise invariant: a concrete descriptor is
+	 * compatible only with a structurally identical descriptor, and never with
+	 * any other type shape. Two exceptions: (1) a *bare* (member-less) prototype
+	 * is the top of its kind, so any collection of the same kind -- bare or
+	 * concrete -- narrows it (fe <: proto); (2) every collection descriptor
+	 * (concrete or erased) is a subtype of the standalone `iterable` type,
+	 * matching the F2 runtime acceptance. Both yield covariant return narrowing
+	 * and, via the swapped call for parameters, contravariant parameter widening;
+	 * the reverse directions stay errors. Checked before the class loop, which
+	 * treats an unrecognised shape as trivially compatible. */
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(fe_type)
+	 || ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(proto_type)) {
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(fe_type)
+		 && ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(proto_type)) {
+			const zend_collection_type *proto_desc = ZEND_TYPE_COLLECTION(proto_type);
+			if (proto_desc->num_types == 0) {
+				const zend_collection_type *fe_desc = ZEND_TYPE_COLLECTION(fe_type);
+				/* fe must not widen nullability relative to the bare prototype. */
+				bool null_ok = !ZEND_TYPE_ALLOW_NULL(fe_type)
+					|| ZEND_TYPE_ALLOW_NULL(proto_type);
+				return (fe_desc->kind == proto_desc->kind && null_ok)
+					? INHERITANCE_SUCCESS : INHERITANCE_ERROR;
+			}
+		}
+		/* OQ-1: fe is a collection descriptor and proto is the standalone
+		 * `iterable` type -> fe <: iterable, keyed on the same iterable-fallback
+		 * bit the runtime value check uses, so acceptance and inheritance describe
+		 * the same subtype relation. The reverse (fe iterable, proto collection)
+		 * is not a collection descriptor on the fe side and falls through to the
+		 * structural-equality error below. */
+		if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(fe_type)
+		 && ZEND_TYPE_IS_ITERABLE_FALLBACK(proto_type)) {
+			/* fe must not widen nullability relative to the iterable prototype. */
+			bool null_ok = !ZEND_TYPE_ALLOW_NULL(fe_type)
+				|| ZEND_TYPE_ALLOW_NULL(proto_type);
+			return null_ok ? INHERITANCE_SUCCESS : INHERITANCE_ERROR;
+		}
+		return zend_type_structurally_equals(fe_type, proto_type)
+			? INHERITANCE_SUCCESS : INHERITANCE_ERROR;
 	}
 
 	/* Builtin types may be removed, but not added */
@@ -761,7 +836,7 @@ static inheritance_status zend_do_perform_arg_type_hint_check(
 		zend_class_entry *fe_scope, const zend_arg_info *fe_arg_info,
 		zend_class_entry *proto_scope, const zend_arg_info *proto_arg_info) /* {{{ */
 {
-	if (!ZEND_TYPE_IS_SET(fe_arg_info->type) || ZEND_TYPE_PURE_MASK(fe_arg_info->type) == MAY_BE_ANY) {
+	if (!ZEND_TYPE_IS_SET(fe_arg_info->type) || ZEND_TYPE_IS_MIXED(fe_arg_info->type)) {
 		/* Child with no type or mixed type is always compatible */
 		return INHERITANCE_SUCCESS;
 	}

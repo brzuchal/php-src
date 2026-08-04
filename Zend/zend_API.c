@@ -20,6 +20,8 @@
 
 #include "zend.h"
 #include "zend_compile.h"
+#include "zend_vec.h"
+#include "zend_collection_info.h"
 #include "zend_execute.h"
 #include "zend_API.h"
 #include "zend_hash.h"
@@ -125,6 +127,10 @@ ZEND_API const char *zend_get_type_by_const(int type) /* {{{ */
 			return "mixed";
 		case _IS_NUMBER:
 			return "int|float";
+		case IS_COLLECTION:
+			/* The kind and its parameters are not recoverable from a bare type
+			 * code; callers wanting vec[int] use zend_type_to_string(). */
+			return "collection";
 		default: ZEND_UNREACHABLE();
 	}
 }
@@ -147,6 +153,29 @@ ZEND_API const char *zend_zval_value_name(const zval *arg)
 	}
 
 	return zend_get_type_by_const(Z_TYPE_P(arg));
+}
+
+/* Format the runtime collection descriptor of a value as its full type name,
+ * e.g. "vec[int]". Returns NULL for any value that is not a collection, where
+ * the coarse zend_zval_value_name()/zend_zval_type_name() spelling is already
+ * exact; callers release a non-NULL result.
+ *
+ * The name is produced by the shared type stringifier rather than formatted
+ * here, so the kind[...] spelling has exactly one definition and stays correct
+ * across kinds. It reads the value's canonical node directly and iterates its
+ * members, so a single-member vec[int] and a multi-member tuple[int,string] or
+ * set[int] all render the same way, with no per-kind branch here. */
+ZEND_API zend_string *zend_zval_collection_type_name(const zval *arg)
+{
+	ZVAL_DEREF(arg);
+
+	if (Z_TYPE_P(arg) != IS_COLLECTION) {
+		return NULL;
+	}
+
+	/* Rendered from the value's canonical node, so nested types print in full
+	 * ("vec[vec[int]]") without rebuilding a descriptor. */
+	return zend_collection_info_to_string(Z_VEC_P(arg)->type);
 }
 
 ZEND_API const char *zend_zval_type_name(const zval *arg)
@@ -190,6 +219,12 @@ ZEND_API zend_string *zend_zval_get_legacy_type(const zval *arg) /* {{{ */
 			} else {
 				return ZSTR_KNOWN(ZEND_STR_CLOSED_RESOURCE);
 			}
+		case IS_COLLECTION:
+			/* The coarse category only, "collection". The parameterised name
+			 * (vec[int], tuple[int,string]) is not recoverable from a bare type
+			 * code and is deliberately not produced here; var_dump and the type
+			 * diagnostics render it through zend_zval_collection_type_name(). */
+			return ZSTR_KNOWN(ZEND_STR_COLLECTION);
 		default:
 			return NULL;
 	}
@@ -1511,7 +1546,7 @@ ZEND_API zend_result zend_update_class_constant(zend_class_constant *c, const ze
 {
 	ZEND_ASSERT(Z_TYPE(c->value) == IS_CONSTANT_AST);
 
-	if (EXPECTED(!ZEND_TYPE_IS_SET(c->type) || ZEND_TYPE_PURE_MASK(c->type) == MAY_BE_ANY)) {
+	if (EXPECTED(!ZEND_TYPE_IS_SET(c->type) || ZEND_TYPE_IS_MIXED(c->type))) {
 		return zval_update_constant_ex(&c->value, scope);
 	}
 
@@ -2944,6 +2979,29 @@ ZEND_API void zend_add_magic_method(zend_class_entry *ce, zend_function *fptr, c
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arg_info_toString, 0, 0, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
+/* Recursively intern the class names reachable from a single type node. A node
+ * may be a class name, a collection descriptor whose parameters are themselves
+ * arbitrary types (e.g. vec[vec[Foo]]), or a nested type list, so this descends
+ * through the ordinary discriminators rather than assuming a name/builtin leaf. */
+static void zend_normalize_internal_type_names(zend_type *single_type) {
+	if (ZEND_TYPE_HAS_NAME(*single_type)) {
+		zend_string *name = zend_new_interned_string(ZEND_TYPE_NAME(*single_type));
+		zend_alloc_ce_cache(name);
+		ZEND_TYPE_SET_PTR(*single_type, name);
+	} else if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*single_type)) {
+		zend_collection_type *desc = ZEND_TYPE_COLLECTION(*single_type);
+		for (uint32_t i = 0; i < desc->num_types; i++) {
+			zend_normalize_internal_type_names(&desc->types[i]);
+		}
+	} else if (ZEND_TYPE_IS_TYPE_LIST(*single_type)) {
+		zend_type *inner;
+		ZEND_TYPE_FOREACH_MUTABLE(*single_type, inner) {
+			ZEND_ASSERT(!ZEND_TYPE_HAS_LITERAL_NAME(*inner));
+			zend_normalize_internal_type_names(inner);
+		} ZEND_TYPE_FOREACH_END();
+	}
+}
+
 static zend_always_inline void zend_normalize_internal_type(zend_type *type) {
 	ZEND_ASSERT(!ZEND_TYPE_HAS_LITERAL_NAME(*type));
 	if (ZEND_TYPE_PURE_MASK(*type) != MAY_BE_ANY) {
@@ -2955,7 +3013,14 @@ static zend_always_inline void zend_normalize_internal_type(zend_type *type) {
 			zend_string *name = zend_new_interned_string(ZEND_TYPE_NAME(*current));
 			zend_alloc_ce_cache(name);
 			ZEND_TYPE_SET_PTR(*current, name);
-		} else if (ZEND_TYPE_HAS_LIST(*current)) {
+		} else if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*current)) {
+			/* Recurse so class names in nested descriptors (vec[vec[Foo]]) and
+			 * type-list parameters are interned too, not just immediate names. */
+			zend_collection_type *desc = ZEND_TYPE_COLLECTION(*current);
+			for (uint32_t i = 0; i < desc->num_types; i++) {
+				zend_normalize_internal_type_names(&desc->types[i]);
+			}
+		} else if (ZEND_TYPE_IS_TYPE_LIST(*current)) {
 			zend_type *inner;
 			ZEND_TYPE_FOREACH_MUTABLE(*current, inner) {
 				ZEND_ASSERT(!ZEND_TYPE_HAS_LITERAL_NAME(*inner) && !ZEND_TYPE_HAS_LIST(*inner));
@@ -3014,15 +3079,24 @@ static void zend_convert_internal_arg_info_type(zend_type *type, bool persistent
 		}
 	}
 	if (ZEND_TYPE_IS_ITERABLE_FALLBACK(*type)) {
-		/* Warning generated an extension load warning which is emitted for every test
-		   zend_error(E_CORE_WARNING, "iterable type is now a compile time alias for array|Traversable,"
-		   " regenerate the argument info via the php-src gen_stub build script");
-		   */
-		zend_type legacy_iterable = ZEND_TYPE_INIT_CLASS_MASK(
-			ZSTR_KNOWN(ZEND_STR_TRAVERSABLE),
-			(type->type_mask | MAY_BE_ARRAY)
-		);
-		*type = legacy_iterable;
+		/* `iterable` is a compile-time alias for Traversable|array. Materialise
+		 * it as a genuine union: a one-member type list holding Traversable,
+		 * with MAY_BE_ARRAY expressing the array member on the container mask.
+		 * The list shape makes Reflection report ReflectionUnionType(
+		 * "Traversable|array") — matching the historical projection — while
+		 * _ZEND_TYPE_ITERABLE_BIT stays on the container so the runtime type
+		 * check keeps accepting native collections. This mirrors the userland
+		 * `iterable|...` representation produced by the compiler.
+		 *
+		 * Old extensions compiled before `iterable` became an alias reach this
+		 * path with no regenerated arginfo; they are converted the same way. */
+		uint32_t null_bit = ZEND_TYPE_FULL_MASK(*type) & MAY_BE_NULL;
+		zend_type_list *list = pemalloc(ZEND_TYPE_LIST_SIZE(1), persistent);
+		list->num_types = 1;
+		list->types[0] = (zend_type) ZEND_TYPE_INIT_CLASS(
+			ZSTR_KNOWN(ZEND_STR_TRAVERSABLE), 0, 0);
+		*type = (zend_type) ZEND_TYPE_INIT_UNION(list,
+			MAY_BE_ARRAY | null_bit | _ZEND_TYPE_ITERABLE_BIT);
 	}
 }
 
@@ -5283,6 +5357,11 @@ ZEND_API bool zend_is_iterable(const zval *iterable) /* {{{ */
 			return 1;
 		case IS_OBJECT:
 			return zend_class_implements_interface(Z_OBJCE_P(iterable), zend_ce_traversable);
+		case IS_COLLECTION:
+			/* F2: native collections satisfy the language-level iterable contract
+			 * (is_iterable() and the `iterable` type) while remaining non-objects
+			 * that do not implement Traversable. */
+			return 1;
 		default:
 			return 0;
 	}

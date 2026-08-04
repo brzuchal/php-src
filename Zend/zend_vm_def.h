@@ -2102,6 +2102,29 @@ ZEND_VM_HOT_OBJ_HANDLER(82, ZEND_FETCH_OBJ_R, CONST|TMPVAR|UNUSED|THIS|CV, CONST
 			if (OP1_TYPE == IS_CV && UNEXPECTED(Z_TYPE_P(container) == IS_UNDEF)) {
 				ZVAL_UNDEFINED_OP1();
 			}
+			if (EXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+				/* Intrinsic readonly collection properties ($c->count, $c->isEmpty),
+				 * dispatched by runtime type before any object deref. The intrinsic
+				 * set is closed, so an unknown name is an Error, not a warn+null. */
+				zend_string *name, *tmp_name;
+				if (OP2_TYPE == IS_CONST) {
+					name = Z_STR_P(GET_OP2_ZVAL_PTR(BP_VAR_R));
+				} else {
+					name = zval_try_get_tmp_string(GET_OP2_ZVAL_PTR(BP_VAR_R), &tmp_name);
+					if (UNEXPECTED(!name)) {
+						ZVAL_UNDEF(EX_VAR(opline->result.var));
+						ZEND_VM_C_GOTO(fetch_obj_r_finish);
+					}
+				}
+				if (zend_collection_read_intrinsic_property(container, name, EX_VAR(opline->result.var)) == FAILURE) {
+					zend_throw_error(NULL, "Undefined intrinsic property \"%s\" on collection", ZSTR_VAL(name));
+					ZVAL_UNDEF(EX_VAR(opline->result.var));
+				}
+				if (OP2_TYPE != IS_CONST) {
+					zend_tmp_string_release(tmp_name);
+				}
+				ZEND_VM_C_GOTO(fetch_obj_r_finish);
+			}
 			zend_wrong_property_read(container, GET_OP2_ZVAL_PTR(BP_VAR_R));
 			ZVAL_NULL(EX_VAR(opline->result.var));
 			ZEND_VM_C_GOTO(fetch_obj_r_finish);
@@ -2310,6 +2333,27 @@ ZEND_VM_COLD_CONST_HANDLER(91, ZEND_FETCH_OBJ_IS, CONST|TMPVAR|UNUSED|THIS|CV, C
 			}
 			if (OP2_TYPE == IS_CV && Z_TYPE_P(EX_VAR(opline->op2.var)) == IS_UNDEF) {
 				ZVAL_UNDEFINED_OP2();
+			}
+			if (EXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+				/* Intrinsic collection property in isset()/?? context: a known name
+				 * yields its value; an unknown name yields null without an error. */
+				zend_string *name, *tmp_name;
+				if (OP2_TYPE == IS_CONST) {
+					name = Z_STR_P(GET_OP2_ZVAL_PTR(BP_VAR_R));
+				} else {
+					name = zval_try_get_tmp_string(GET_OP2_ZVAL_PTR(BP_VAR_R), &tmp_name);
+					if (UNEXPECTED(!name)) {
+						ZVAL_NULL(EX_VAR(opline->result.var));
+						ZEND_VM_C_GOTO(fetch_obj_is_finish);
+					}
+				}
+				if (zend_collection_read_intrinsic_property(container, name, EX_VAR(opline->result.var)) == FAILURE) {
+					ZVAL_NULL(EX_VAR(opline->result.var));
+				}
+				if (OP2_TYPE != IS_CONST) {
+					zend_tmp_string_release(tmp_name);
+				}
+				ZEND_VM_C_GOTO(fetch_obj_is_finish);
 			}
 			ZVAL_NULL(EX_VAR(opline->result.var));
 			ZEND_VM_C_GOTO(fetch_obj_is_finish);
@@ -3288,7 +3332,10 @@ ZEND_VM_HOT_HANDLER(127, ZEND_FE_FREE, TMPVAR, LOOP_END)
 	var = EX_VAR(opline->op1.var);
 	if (Z_TYPE_P(var) != IS_ARRAY) {
 		SAVE_OPLINE();
-		if (Z_FE_ITER_P(var) != (uint32_t)-1) {
+		/* A collection holds its foreach position in u2.fe_pos, which aliases
+		 * fe_iter_idx; it owns no EG(ht_iterators) slot, so it must not reach
+		 * zend_hash_iterator_del(). Drop the reference only. */
+		if (Z_TYPE_P(var) != IS_COLLECTION && Z_FE_ITER_P(var) != (uint32_t)-1) {
 			zend_hash_iterator_del(Z_FE_ITER_P(var));
 		}
 		zval_ptr_dtor_nogc(var);
@@ -3642,6 +3689,42 @@ ZEND_VM_HOT_OBJ_HANDLER(112, ZEND_INIT_METHOD_CALL, CONST|TMP|UNUSED|THIS|CV, CO
 			FREE_OP1();
 			HANDLE_EXCEPTION();
 		} while (0);
+	}
+
+	/* Native-collection intrinsic method dispatch. A collection is not an object
+	 * and has no $this: the receiver travels in the call frame header
+	 * (Z_PTR(This)) with clean no-This call_info. The detection follows a possible
+	 * reference dereference so $ref->m() on a reference-to-collection dispatches
+	 * exactly like a direct receiver; the dereference here is a read only, so the
+	 * regular object path below (unchanged) still handles non-collection refs. */
+	if (OP1_TYPE != IS_UNUSED) {
+		zval *collection = object;
+		if ((OP1_TYPE & (IS_VAR|IS_CV)) && UNEXPECTED(Z_ISREF_P(collection))) {
+			collection = Z_REFVAL_P(collection);
+		}
+		if (UNEXPECTED(Z_TYPE_P(collection) == IS_COLLECTION)) {
+			if (OP2_TYPE == IS_CONST) {
+				function_name = GET_OP2_ZVAL_PTR_UNDEF(BP_VAR_R);
+			}
+			fbc = zend_collection_resolve_intrinsic_method(collection, Z_STR_P(function_name));
+			if (UNEXPECTED(fbc == NULL)) {
+				zend_throw_error(NULL, "Call to undefined method %s() on collection",
+					ZSTR_VAL(Z_STR_P(function_name)));
+				FREE_OP2();
+				FREE_OP1();
+				HANDLE_EXCEPTION();
+			}
+			if (OP2_TYPE != IS_CONST) {
+				FREE_OP2();
+			}
+			call = zend_vm_stack_push_call_frame(ZEND_CALL_NESTED_FUNCTION,
+				fbc, opline->extended_value, NULL);
+			zend_collection_call_set_receiver(call, collection);
+			FREE_OP1();
+			call->prev_execute_data = EX(call);
+			EX(call) = call;
+			ZEND_VM_NEXT_OPCODE();
+		}
 	}
 
 	if (OP1_TYPE == IS_UNUSED) {
@@ -4452,7 +4535,12 @@ ZEND_VM_C_LABEL(fcall_end):
 		}
 	}
 
-	if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
+	if (UNEXPECTED(zend_call_owns_collection_receiver(call))) {
+		/* Release the header-stored receiver of a direct collection intrinsic
+		 * call (normal return and arity-error return alike). FCC frames borrow
+		 * from the Closure and are excluded by the ownership predicate. */
+		zend_collection_call_release_receiver(call);
+	} else if (UNEXPECTED(ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS)) {
 		OBJ_RELEASE(Z_OBJ(call->This));
 	}
 
@@ -5762,7 +5850,10 @@ ZEND_VM_HOT_HANDLER(63, ZEND_RECV, NUM, UNUSED)
 
 	param = EX_VAR(opline->result.var);
 
-	if (UNEXPECTED(!(opline->op2.num & (1u << Z_TYPE_P(param))))) {
+	/* op2.num is the full type mask, so mask off everything above the may-be bits:
+	 * a runtime tag above the mask (IS_COLLECTION) would otherwise alias a
+	 * structural flag and skip verification entirely. */
+	if (UNEXPECTED(!(opline->op2.num & _ZEND_TYPE_MAY_BE_MASK & (1u << Z_TYPE_P(param))))) {
 		ZEND_VM_DISPATCH_TO_HELPER(zend_verify_recv_arg_type_helper, op_1, param);
 	}
 
@@ -6553,6 +6644,193 @@ ZEND_VM_HANDLER(71, ZEND_INIT_ARRAY, CONST|TMP|VAR|CV|UNUSED, CONST|TMP|UNUSED|N
 	}
 }
 
+/* Build a collection value from the already evaluated elements of a literal.
+ *
+ * OP1 is the completed element array -- the literal's elements are compiled
+ * into an ordinary packed array first, so they are evaluated left to right by
+ * the existing array opcodes and freed by the existing live range if one of
+ * them throws. EXTENDED_VALUE indexes op_array->collection_types, which is
+ * where the compiled descriptor lives; it is not a literal index, because
+ * literals are relocated by compact_literals.c.
+ *
+ * The handler does no type work of its own: it does not create canonical
+ * nodes, parse type strings or promote descriptors. It looks the descriptor up,
+ * resolves it through the existing per-request cache, and constructs the value
+ * once, at full size. */
+ZEND_VM_HANDLER(214, ZEND_CONSTRUCT_COLLECTION, CONST|TMP, UNUSED, NUM)
+{
+	USE_OPLINE
+	zval *elements;
+	zend_type descriptor;
+	const zend_collection_info *info;
+	zend_vec *vec;
+	uint32_t failed_index = 0;
+
+	SAVE_OPLINE();
+	elements = GET_OP1_ZVAL_PTR(BP_VAR_R);
+	ZEND_ASSERT(Z_TYPE_P(elements) == IS_ARRAY);
+
+	/* Promotion happens at most once per request per literal site; every later
+	 * execution is a hash probe returning a borrowed node (INV-11). */
+	descriptor = EX(func)->op_array.collection_types[opline->extended_value];
+	info = zend_collection_info_resolve(descriptor);
+
+	if (UNEXPECTED(info == NULL)
+	 || UNEXPECTED(!ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(info))) {
+		zend_collection_not_constructible_error(descriptor);
+		FREE_OP1();
+		UNDEF_RESULT();
+		HANDLE_EXCEPTION();
+	}
+
+	vec = zend_collection_construct(Z_ARRVAL_P(elements), info, &failed_index);
+	if (UNEXPECTED(vec == NULL)) {
+		/* Nothing partial escaped: construction destroyed what it had built,
+		 * and the elements are still owned by the array OP1, which is released
+		 * here (L2). */
+		zend_collection_element_type_error(info, Z_ARRVAL_P(elements), failed_index);
+		FREE_OP1();
+		UNDEF_RESULT();
+		HANDLE_EXCEPTION();
+	}
+
+	FREE_OP1();
+	ZVAL_VEC(EX_VAR(opline->result.var), vec);
+	ZEND_VM_NEXT_OPCODE();
+}
+
+/* Direct collection construction (Architecture B spike, vec only). Three opcodes replace
+ * INIT_ARRAY + ADD_ARRAY_ELEMENT + CONSTRUCT_COLLECTION for a `vec[...]{...}` literal, so
+ * no intermediate zend_array/HashTable is built. The final packed payload is an ordinary
+ * owned VM TMP that participates in normal unwind and GC. Evaluation/validation ordering is
+ * preserved: elements are stored WITHOUT type validation, and FINISH validates every slot
+ * only after all element expressions have run. `count` during this window is the
+ * initialized-slot count, not a user-visible validated cardinality; the payload is never
+ * published before FINISH succeeds. tuple/set keep the array path above. */
+ZEND_VM_HANDLER(215, ZEND_INIT_COLLECTION, NUM, UNUSED, NUM)
+{
+	USE_OPLINE
+	zend_type descriptor;
+	const zend_collection_info *info;
+	zend_vec *vec;
+
+	SAVE_OPLINE();
+	/* Resolve the declared type once (a borrowed canonical node after promotion). The
+	 * value-constructibility gate is deferred to FINISH_COLLECTION so that a
+	 * non-constructible type (e.g. vec[?int]) still evaluates its elements' side effects
+	 * before "Cannot create ..." is raised, exactly as the array path does. A compiled
+	 * literal's descriptor always resolves; the NULL guard is defensive. */
+	descriptor = EX(func)->op_array.collection_types[opline->extended_value];
+	info = zend_collection_info_resolve(descriptor);
+	if (UNEXPECTED(info == NULL)) {
+		zend_collection_not_constructible_error(descriptor);
+		UNDEF_RESULT();
+		HANDLE_EXCEPTION();
+	}
+	/* Exact-size, empty payload (count == 0). op1.num is the element count, known at
+	 * compile time (= the number of ADD_COLLECTION_ELEMENT opcodes that follow). */
+	vec = zend_vec_builder_alloc(opline->op1.num, info);
+	ZVAL_VEC(EX_VAR(opline->result.var), vec);
+	ZEND_VM_NEXT_OPCODE();
+}
+
+ZEND_VM_HANDLER(216, ZEND_ADD_COLLECTION_ELEMENT, CONST|TMP|VAR|CV, UNUSED)
+{
+	USE_OPLINE
+	zval *value_ptr, tmp;
+	zend_vec *vec;
+
+	SAVE_OPLINE();
+	value_ptr = GET_OP1_ZVAL_PTR(BP_VAR_R);
+	/* Same operand ownership as ADD_ARRAY_ELEMENT's element path: a TMP is moved into the
+	 * slot (its reference transfers, no addref), a CONST/CV is copied with an addref, a
+	 * VAR is moved (dereferencing a reference operand first). The result is that a stored
+	 * element is never IS_REFERENCE, exactly as the array path guarantees. */
+	if (OP1_TYPE == IS_TMP_VAR) {
+		/* moved: nothing to do */
+	} else if (OP1_TYPE == IS_CONST) {
+		Z_TRY_ADDREF_P(value_ptr);
+	} else if (OP1_TYPE == IS_CV) {
+		ZVAL_DEREF(value_ptr);
+		Z_TRY_ADDREF_P(value_ptr);
+	} else /* IS_VAR */ {
+		if (UNEXPECTED(Z_ISREF_P(value_ptr))) {
+			zend_refcounted *ref = Z_COUNTED_P(value_ptr);
+
+			value_ptr = Z_REFVAL_P(value_ptr);
+			if (UNEXPECTED(GC_DELREF(ref) == 0)) {
+				ZVAL_COPY_VALUE(&tmp, value_ptr);
+				value_ptr = &tmp;
+				efree_size(ref, sizeof(zend_reference));
+			} else if (Z_OPT_REFCOUNTED_P(value_ptr)) {
+				Z_ADDREF_P(value_ptr);
+			}
+		}
+	}
+	vec = Z_VEC_P(EX_VAR(opline->result.var));
+	/* Store, then publish the slot by raising count AFTER the write, so destroy/GC of the
+	 * partial payload never read an uninitialised slot. No type validation here: FINISH
+	 * validates every slot once all element expressions have run (preserves eval order).
+	 * The store + count-raise is the storage contract's encapsulated append, so the payload
+	 * layout stays private to the backend. */
+	zend_stor_builder_append(vec, value_ptr);
+	ZEND_VM_NEXT_OPCODE();
+}
+
+ZEND_VM_HANDLER(217, ZEND_FINISH_COLLECTION, TMP, UNUSED, NUM)
+{
+	USE_OPLINE
+	zval *payload;
+	zend_vec *vec;
+	uint32_t failed_index = 0;
+
+	SAVE_OPLINE();
+	payload = GET_OP1_ZVAL_PTR(BP_VAR_R);
+	ZEND_ASSERT(Z_TYPE_P(payload) == IS_COLLECTION);
+	vec = Z_VEC_P(payload);
+	/* Value-constructibility is gated here, after every element expression has run, so a
+	 * non-constructible vec type reports "Cannot create ..." only after its elements' side
+	 * effects and takes precedence over an element type error -- exactly as the array path
+	 * does at CONSTRUCT. The unwind (FREE_OP1 -> zend_vec_destroy) frees the stored slots. */
+	if (UNEXPECTED(!ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(vec->type))) {
+		zend_collection_not_constructible_error(
+			EX(func)->op_array.collection_types[opline->extended_value]);
+		FREE_OP1();
+		UNDEF_RESULT();
+		HANDLE_EXCEPTION();
+	}
+	/* Now validate all initialized slots in source order; the first offender's slot index
+	 * is its observable left-to-right position. On failure the ordinary TMP unwind
+	 * (FREE_OP1 -> zend_vec_destroy) destroys exactly the initialized slots, and nothing is
+	 * ever published. */
+	if (UNEXPECTED(!zend_vec_builder_validate(vec, &failed_index))) {
+		zend_collection_element_type_error_ex(vec->type, failed_index, &vec->elements[failed_index]);
+		FREE_OP1();
+		UNDEF_RESULT();
+		HANDLE_EXCEPTION();
+	}
+	/* A set deduplicates only after every slot is validated: it lowers `count` to the unique
+	 * cardinality in place (first occurrence kept, first-occurrence order preserved) and
+	 * releases the discarded duplicates. The partition runs no user code and the count is made
+	 * consistent before any discard is freed, so a GC triggered while freeing a discard scans
+	 * only the finished unique prefix. vec/tuple keep every slot. The dedup comparison is the
+	 * one construction step that can throw (a recursive strict array comparison); on that it
+	 * returns with the payload fully initialized (count unchanged), so the ordinary TMP unwind
+	 * frees every slot exactly once, exactly like the element-type-error path above. */
+	if (vec->type->kind == ZEND_COLLECTION_TYPE_SET) {
+		zend_set_builder_dedup(vec);
+		if (UNEXPECTED(EG(exception))) {
+			FREE_OP1();
+			UNDEF_RESULT();
+			HANDLE_EXCEPTION();
+		}
+	}
+	/* Publish: the payload itself is the result. op1 is a TMP being consumed, so transfer
+	 * it without an addref and do not free it. */
+	ZVAL_COPY_VALUE(EX_VAR(opline->result.var), payload);
+	ZEND_VM_NEXT_OPCODE();
+}
+
 ZEND_VM_COLD_CONST_HANDLER(51, ZEND_CAST, CONST|TMP|CV, ANY, TYPE)
 {
 	USE_OPLINE
@@ -6915,9 +7193,13 @@ ZEND_VM_HANDLER(76, ZEND_UNSET_OBJ, VAR|UNUSED|THIS|CV, CONST|TMP|CV, CACHE_SLOT
 					 && UNEXPECTED(Z_TYPE_P(container) == IS_UNDEF)) {
 						ZVAL_UNDEFINED_OP1();
 					}
-					break;
+					/* A collection falls through to the intrinsic-property
+					 * diagnostic below, which needs the resolved name. */
+					if (EXPECTED(Z_TYPE_P(container) != IS_COLLECTION)) {
+						break;
+					}
 				}
-			} else {
+			} else if (EXPECTED(Z_TYPE_P(container) != IS_COLLECTION)) {
 				break;
 			}
 		}
@@ -6928,6 +7210,13 @@ ZEND_VM_HANDLER(76, ZEND_UNSET_OBJ, VAR|UNUSED|THIS|CV, CONST|TMP|CV, CACHE_SLOT
 			if (UNEXPECTED(!name)) {
 				break;
 			}
+		}
+		if (UNEXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+			zend_throw_error(NULL, "Cannot unset intrinsic property \"%s\" on collection", ZSTR_VAL(name));
+			if (OP2_TYPE != IS_CONST) {
+				zend_tmp_string_release(tmp_name);
+			}
+			break;
 		}
 		Z_OBJ_HT_P(container)->unset_property(Z_OBJ_P(container), name, ((OP2_TYPE == IS_CONST) ? CACHE_ADDR(opline->extended_value) : NULL));
 		if (OP2_TYPE != IS_CONST) {
@@ -6952,6 +7241,21 @@ ZEND_VM_HANDLER(77, ZEND_FE_RESET_R, CONST|TMP|CV, JMP_ADDR)
 		result = EX_VAR(opline->result.var);
 		ZVAL_COPY_VALUE(result, array_ptr);
 		if (OP1_TYPE != IS_TMP_VAR && Z_OPT_REFCOUNTED_P(result)) {
+			Z_ADDREF_P(array_ptr);
+		}
+		Z_FE_POS_P(result) = 0;
+
+		FREE_OP1_IF_VAR();
+		ZEND_VM_NEXT_OPCODE();
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Immutable collection: iterate the packed elements by an integer
+		 * position held in the result temp (u2.fe_pos), exactly as a packed
+		 * array does. Iteration never mutates the shared value, so nested and
+		 * concurrent loops keep independent positions. A collection is always
+		 * refcounted and is never a CONST operand. */
+		result = EX_VAR(opline->result.var);
+		ZVAL_COPY_VALUE(result, array_ptr);
+		if (OP1_TYPE != IS_TMP_VAR) {
 			Z_ADDREF_P(array_ptr);
 		}
 		Z_FE_POS_P(result) = 0;
@@ -7107,6 +7411,15 @@ ZEND_VM_COLD_CONST_HANDLER(125, ZEND_FE_RESET_RW, CONST|TMP|VAR|CV, JMP_ADDR)
 				ZEND_VM_NEXT_OPCODE();
 			}
 		}
+	} else if (EXPECTED(Z_TYPE_P(array_ptr) == IS_COLLECTION)) {
+		/* Collections are immutable: there is no element slot to alias, so
+		 * by-reference iteration is rejected with a hard Error rather than
+		 * silently iterating references to a detached copy. */
+		zend_throw_error(NULL, "Cannot iterate over %s by reference",
+			zend_collection_type_kind_name(Z_VEC_P(array_ptr)->type->kind));
+		UNDEF_RESULT();
+		FREE_OP1();
+		HANDLE_EXCEPTION();
 	} else {
 		zend_error(E_WARNING, "foreach() argument must be of type array|object, %s given", zend_zval_value_name(array_ptr));
 		ZVAL_UNDEF(EX_VAR(opline->result.var));
@@ -7238,6 +7551,56 @@ ZEND_VM_C_LABEL(fe_fetch_r_exit):
 	ZEND_VM_NEXT_OPCODE_CHECK_EXCEPTION();
 }
 
+ZEND_VM_HELPER(zend_fe_fetch_collection_helper, ANY, ANY)
+{
+	USE_OPLINE
+	zval *array;
+	zval *value;
+	uint32_t value_type;
+	zend_vec *vec;
+	uint32_t pos;
+
+	array = EX_VAR(opline->op1.var);
+	SAVE_OPLINE();
+
+	ZEND_ASSERT(Z_TYPE_P(array) == IS_COLLECTION);
+	vec = Z_VEC_P(array);
+	pos = Z_FE_POS_P(array);
+	if (UNEXPECTED(pos >= zend_stor_count(vec))) {
+		/* reached end of iteration */
+		ZEND_VM_SET_RELATIVE_OPCODE(opline, opline->extended_value);
+		ZEND_VM_CONTINUE();
+	}
+	/* Ordered read at logical position pos via the storage contract. Packed
+	 * storage has no holes in [0, count): FLAT resolves to elements[pos] with no
+	 * skip loop. The position advances in the result temp only; the shared vec is
+	 * never written, so a second loop over the same value is independent. */
+	value = zend_stor_iter(vec, pos);
+	value_type = Z_TYPE_INFO_P(value);
+	Z_FE_POS_P(array) = pos + 1;
+	if (RETURN_VALUE_USED(opline)) {
+		ZVAL_LONG(EX_VAR(opline->result.var), pos);
+	}
+
+	if (EXPECTED(OP2_TYPE == IS_CV)) {
+		zval *variable_ptr = EX_VAR(opline->op2.var);
+		zend_assign_to_variable(variable_ptr, value, IS_CV, EX_USES_STRICT_TYPES());
+	} else {
+		if (UNEXPECTED(Z_ISREF_P(value))) {
+			value = Z_REFVAL_P(value);
+			value_type = Z_TYPE_INFO_P(value);
+		}
+		zval *res = EX_VAR(opline->op2.var);
+		zend_refcounted *gc = Z_COUNTED_P(value);
+
+		ZVAL_COPY_VALUE_EX(res, value, gc, value_type);
+		if (Z_TYPE_INFO_REFCOUNTED(value_type)) {
+			GC_ADDREF(gc);
+		}
+	}
+	ZEND_VM_NEXT_OPCODE_CHECK_EXCEPTION();
+}
+
 ZEND_VM_HOT_HANDLER(78, ZEND_FE_FETCH_R, TMP, ANY, JMP_ADDR)
 {
 	USE_OPLINE
@@ -7249,6 +7612,9 @@ ZEND_VM_HOT_HANDLER(78, ZEND_FE_FETCH_R, TMP, ANY, JMP_ADDR)
 
 	array = EX_VAR(opline->op1.var);
 	if (UNEXPECTED(Z_TYPE_P(array) != IS_ARRAY)) {
+		if (EXPECTED(Z_TYPE_P(array) == IS_COLLECTION)) {
+			ZEND_VM_DISPATCH_TO_HELPER(zend_fe_fetch_collection_helper);
+		}
 		ZEND_VM_DISPATCH_TO_HELPER(zend_fe_fetch_object_helper);
 	}
 	fe_ht = Z_ARRVAL_P(array);
@@ -7708,10 +8074,13 @@ ZEND_VM_COLD_CONST_HANDLER(148, ZEND_ISSET_ISEMPTY_PROP_OBJ, CONST|TMP|UNUSED|TH
 		if ((OP1_TYPE & (IS_VAR|IS_CV)) && Z_ISREF_P(container)) {
 			container = Z_REFVAL_P(container);
 			if (UNEXPECTED(Z_TYPE_P(container) != IS_OBJECT)) {
-				result = (opline->extended_value & ZEND_ISEMPTY);
-				ZEND_VM_C_GOTO(isset_object_finish);
+				/* A collection falls through to the intrinsic-property branch below. */
+				if (EXPECTED(Z_TYPE_P(container) != IS_COLLECTION)) {
+					result = (opline->extended_value & ZEND_ISEMPTY);
+					ZEND_VM_C_GOTO(isset_object_finish);
+				}
 			}
-		} else {
+		} else if (EXPECTED(Z_TYPE_P(container) != IS_COLLECTION)) {
 			result = (opline->extended_value & ZEND_ISEMPTY);
 			ZEND_VM_C_GOTO(isset_object_finish);
 		}
@@ -7725,6 +8094,22 @@ ZEND_VM_COLD_CONST_HANDLER(148, ZEND_ISSET_ISEMPTY_PROP_OBJ, CONST|TMP|UNUSED|TH
 			result = 0;
 			ZEND_VM_C_GOTO(isset_object_finish);
 		}
+	}
+
+	if (OP1_TYPE != IS_UNUSED && UNEXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+		/* Intrinsic collection properties: a known name is always set, so isset()
+		 * is true and empty() reflects the value's truthiness; an unknown name is
+		 * absent, so isset() is false and empty() is true. Never throws. */
+		zval tmp;
+		if (zend_collection_read_intrinsic_property(container, name, &tmp) == SUCCESS) {
+			result = (opline->extended_value & ZEND_ISEMPTY) ? !i_zend_is_true(&tmp) : 1;
+		} else {
+			result = (opline->extended_value & ZEND_ISEMPTY) ? 1 : 0;
+		}
+		if (OP2_TYPE != IS_CONST) {
+			zend_tmp_string_release(tmp_name);
+		}
+		ZEND_VM_C_GOTO(isset_object_finish);
 	}
 
 	result =
@@ -8894,7 +9279,7 @@ ZEND_VM_HOT_NOCONST_HANDLER(123, ZEND_TYPE_CHECK, CONST|TMP|CV, ANY, TYPE_MASK)
 	int result = 0;
 
 	value = GET_OP1_ZVAL_PTR_UNDEF(BP_VAR_R);
-	if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+	if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 ZEND_VM_C_LABEL(type_check_resource):
 		if (opline->extended_value != MAY_BE_RESOURCE
 		 || EXPECTED(NULL != zend_rsrc_list_get_rsrc_type(Z_RES_P(value)))) {
@@ -8902,7 +9287,7 @@ ZEND_VM_C_LABEL(type_check_resource):
 		}
 	} else if ((OP1_TYPE & (IS_CV|IS_VAR)) && Z_ISREF_P(value)) {
 		value = Z_REFVAL_P(value);
-		if ((opline->extended_value >> (uint32_t)Z_TYPE_P(value)) & 1) {
+		if (ZEND_TYPE_CHECK_MASK_MATCHES(opline->extended_value, Z_TYPE_P(value))) {
 			ZEND_VM_C_GOTO(type_check_resource);
 		}
 	} else if (OP1_TYPE == IS_CV && UNEXPECTED(Z_TYPE_P(value) == IS_UNDEF)) {

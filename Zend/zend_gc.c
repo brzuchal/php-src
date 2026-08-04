@@ -71,6 +71,7 @@
 #include "zend_errors.h"
 #include "zend_fibers.h"
 #include "zend_hrtime.h"
+#include "zend_vec.h"
 #include "zend_portability.h"
 #include "zend_types.h"
 #include "zend_weakrefs.h"
@@ -693,7 +694,9 @@ static zend_never_inline void ZEND_FASTCALL gc_possible_root_when_full(zend_refc
 	uint32_t idx;
 	gc_root_buffer *newRoot;
 
-	ZEND_ASSERT(GC_TYPE(ref) == IS_ARRAY || GC_TYPE(ref) == IS_OBJECT);
+	/* IS_VEC_GC is an allocation kind, not the IS_COLLECTION zval type. */
+	ZEND_ASSERT(GC_TYPE(ref) == IS_ARRAY || GC_TYPE(ref) == IS_OBJECT
+		|| GC_TYPE(ref) == IS_VEC_GC);
 	ZEND_ASSERT(GC_INFO(ref) == 0);
 
 	if (GC_G(gc_enabled) && !GC_G(gc_active)) {
@@ -754,7 +757,9 @@ ZEND_API void ZEND_FASTCALL gc_possible_root(zend_refcounted *ref)
 		return;
 	}
 
-	ZEND_ASSERT(GC_TYPE(ref) == IS_ARRAY || GC_TYPE(ref) == IS_OBJECT);
+	/* IS_VEC_GC is an allocation kind, not the IS_COLLECTION zval type. */
+	ZEND_ASSERT(GC_TYPE(ref) == IS_ARRAY || GC_TYPE(ref) == IS_OBJECT
+		|| GC_TYPE(ref) == IS_VEC_GC);
 	ZEND_ASSERT(GC_INFO(ref) == 0);
 
 	newRoot = GC_IDX2PTR(idx);
@@ -789,7 +794,9 @@ static void ZEND_FASTCALL gc_extra_root(zend_refcounted *ref)
 		idx = GC_FETCH_NEXT_UNUSED();
 	}
 
-	ZEND_ASSERT(GC_TYPE(ref) == IS_ARRAY || GC_TYPE(ref) == IS_OBJECT);
+	/* IS_VEC_GC is an allocation kind, not the IS_COLLECTION zval type. */
+	ZEND_ASSERT(GC_TYPE(ref) == IS_ARRAY || GC_TYPE(ref) == IS_OBJECT
+		|| GC_TYPE(ref) == IS_VEC_GC);
 	ZEND_ASSERT(GC_REF_ADDRESS(ref) == 0);
 
 	newRoot = GC_IDX2PTR(idx);
@@ -977,6 +984,37 @@ handle_zvals:
 				zv++;
 			}
 		}
+	} else if (GC_TYPE(ref) == IS_VEC_GC) {
+		/* IS_VEC_GC is the refcounted allocation kind; the zval runtime type is
+		 * IS_COLLECTION. A vec stores its elements as a flat zval array, so the
+		 * packed-array walker below applies unchanged. Nested collections need
+		 * no special case: a contained vec is simply another collectable
+		 * element that the same walker follows. */
+		/* Traverse via the storage span contract. FLAT is exactly one span
+		 * {elements, count}, so this compiles to the same n/zv load as before;
+		 * a multi-span backend (hybrid/trie) must loop every span here. */
+		{
+			/* General span traversal via the storage contract, bounded by logical
+			 * count so unused capacity is never scanned. FLAT/CAPACITY yield exactly
+			 * one span {elements, count} (an empty value is one span with n == 0, so
+			 * the walker skips it); a multi-span representation enqueues spans
+			 * 1..N-1 at the guarded point below. For a single span this folds to the
+			 * same n/zv load as before, so the one-span path is unchanged. */
+			zend_vec *vec = (zend_vec *) ref;
+			uint32_t nspans = zend_stor_span_count(vec);
+			if (UNEXPECTED(nspans > 1)) {
+				ZEND_UNREACHABLE(); /* multi-span extension point */
+			}
+			if (EXPECTED(nspans == 1)) {
+				zend_stor_span span = zend_stor_span_get(vec, 0);
+				n = span.n;
+				zv = span.base;
+			} else {
+				n = 0;      /* zero-span backend: nothing to scan */
+				zv = NULL;
+			}
+		}
+		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		ZEND_ASSERT((zend_array*)ref != &EG(symbol_table));
 		ht = (zend_array*)ref;
@@ -1154,6 +1192,37 @@ handle_zvals:
 				zv++;
 			}
 		}
+	} else if (GC_TYPE(ref) == IS_VEC_GC) {
+		/* IS_VEC_GC is the refcounted allocation kind; the zval runtime type is
+		 * IS_COLLECTION. A vec stores its elements as a flat zval array, so the
+		 * packed-array walker below applies unchanged. Nested collections need
+		 * no special case: a contained vec is simply another collectable
+		 * element that the same walker follows. */
+		/* Traverse via the storage span contract. FLAT is exactly one span
+		 * {elements, count}, so this compiles to the same n/zv load as before;
+		 * a multi-span backend (hybrid/trie) must loop every span here. */
+		{
+			/* General span traversal via the storage contract, bounded by logical
+			 * count so unused capacity is never scanned. FLAT/CAPACITY yield exactly
+			 * one span {elements, count} (an empty value is one span with n == 0, so
+			 * the walker skips it); a multi-span representation enqueues spans
+			 * 1..N-1 at the guarded point below. For a single span this folds to the
+			 * same n/zv load as before, so the one-span path is unchanged. */
+			zend_vec *vec = (zend_vec *) ref;
+			uint32_t nspans = zend_stor_span_count(vec);
+			if (UNEXPECTED(nspans > 1)) {
+				ZEND_UNREACHABLE(); /* multi-span extension point */
+			}
+			if (EXPECTED(nspans == 1)) {
+				zend_stor_span span = zend_stor_span_get(vec, 0);
+				n = span.n;
+				zv = span.base;
+			} else {
+				n = 0;      /* zero-span backend: nothing to scan */
+				zv = NULL;
+			}
+		}
+		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		ZEND_ASSERT(((zend_array*)ref) != &EG(symbol_table));
 		ht = (zend_array*)ref;
@@ -1372,6 +1441,37 @@ handle_zvals:
 				zv++;
 			}
 		}
+	} else if (GC_TYPE(ref) == IS_VEC_GC) {
+		/* IS_VEC_GC is the refcounted allocation kind; the zval runtime type is
+		 * IS_COLLECTION. A vec stores its elements as a flat zval array, so the
+		 * packed-array walker below applies unchanged. Nested collections need
+		 * no special case: a contained vec is simply another collectable
+		 * element that the same walker follows. */
+		/* Traverse via the storage span contract. FLAT is exactly one span
+		 * {elements, count}, so this compiles to the same n/zv load as before;
+		 * a multi-span backend (hybrid/trie) must loop every span here. */
+		{
+			/* General span traversal via the storage contract, bounded by logical
+			 * count so unused capacity is never scanned. FLAT/CAPACITY yield exactly
+			 * one span {elements, count} (an empty value is one span with n == 0, so
+			 * the walker skips it); a multi-span representation enqueues spans
+			 * 1..N-1 at the guarded point below. For a single span this folds to the
+			 * same n/zv load as before, so the one-span path is unchanged. */
+			zend_vec *vec = (zend_vec *) ref;
+			uint32_t nspans = zend_stor_span_count(vec);
+			if (UNEXPECTED(nspans > 1)) {
+				ZEND_UNREACHABLE(); /* multi-span extension point */
+			}
+			if (EXPECTED(nspans == 1)) {
+				zend_stor_span span = zend_stor_span_get(vec, 0);
+				n = span.n;
+				zv = span.base;
+			} else {
+				n = 0;      /* zero-span backend: nothing to scan */
+				zv = NULL;
+			}
+		}
+		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		ht = (HashTable *)ref;
 		ZEND_ASSERT(ht != &EG(symbol_table));
@@ -1614,6 +1714,36 @@ handle_zvals:
 				zv++;
 			}
 		}
+	} else if (GC_TYPE(ref) == IS_VEC_GC) {
+		/* optimization: color is GC_BLACK (0) */
+		if (!GC_INFO(ref)) {
+			gc_add_garbage(ref);
+		}
+		/* Traverse via the storage span contract. FLAT is exactly one span
+		 * {elements, count}, so this compiles to the same n/zv load as before;
+		 * a multi-span backend (hybrid/trie) must loop every span here. */
+		{
+			/* General span traversal via the storage contract, bounded by logical
+			 * count so unused capacity is never scanned. FLAT/CAPACITY yield exactly
+			 * one span {elements, count} (an empty value is one span with n == 0, so
+			 * the walker skips it); a multi-span representation enqueues spans
+			 * 1..N-1 at the guarded point below. For a single span this folds to the
+			 * same n/zv load as before, so the one-span path is unchanged. */
+			zend_vec *vec = (zend_vec *) ref;
+			uint32_t nspans = zend_stor_span_count(vec);
+			if (UNEXPECTED(nspans > 1)) {
+				ZEND_UNREACHABLE(); /* multi-span extension point */
+			}
+			if (EXPECTED(nspans == 1)) {
+				zend_stor_span span = zend_stor_span_get(vec, 0);
+				n = span.n;
+				zv = span.base;
+			} else {
+				n = 0;      /* zero-span backend: nothing to scan */
+				zv = NULL;
+			}
+		}
+		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		/* optimization: color is GC_BLACK (0) */
 		if (!GC_INFO(ref)) {
@@ -1806,6 +1936,37 @@ handle_zvals:
 				zv++;
 			}
 		}
+	} else if (GC_TYPE(ref) == IS_VEC_GC) {
+		/* IS_VEC_GC is the refcounted allocation kind; the zval runtime type is
+		 * IS_COLLECTION. A vec stores its elements as a flat zval array, so the
+		 * packed-array walker below applies unchanged. Nested collections need
+		 * no special case: a contained vec is simply another collectable
+		 * element that the same walker follows. */
+		/* Traverse via the storage span contract. FLAT is exactly one span
+		 * {elements, count}, so this compiles to the same n/zv load as before;
+		 * a multi-span backend (hybrid/trie) must loop every span here. */
+		{
+			/* General span traversal via the storage contract, bounded by logical
+			 * count so unused capacity is never scanned. FLAT/CAPACITY yield exactly
+			 * one span {elements, count} (an empty value is one span with n == 0, so
+			 * the walker skips it); a multi-span representation enqueues spans
+			 * 1..N-1 at the guarded point below. For a single span this folds to the
+			 * same n/zv load as before, so the one-span path is unchanged. */
+			zend_vec *vec = (zend_vec *) ref;
+			uint32_t nspans = zend_stor_span_count(vec);
+			if (UNEXPECTED(nspans > 1)) {
+				ZEND_UNREACHABLE(); /* multi-span extension point */
+			}
+			if (EXPECTED(nspans == 1)) {
+				zend_stor_span span = zend_stor_span_get(vec, 0);
+				n = span.n;
+				zv = span.base;
+			} else {
+				n = 0;      /* zero-span backend: nothing to scan */
+				zv = NULL;
+			}
+		}
+		goto handle_zvals;
 	} else if (GC_TYPE(ref) == IS_ARRAY) {
 		ht = (zend_array*)ref;
 

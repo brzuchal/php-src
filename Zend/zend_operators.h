@@ -436,6 +436,15 @@ again:
 				result = 1;
 			}
 			break;
+		case IS_COLLECTION:
+			/* A collection value is always true, empty or not, like an object.
+			 * A collection is a value/handle, not a container tested for
+			 * emptiness, so truthiness deliberately does not depend on element
+			 * count: (bool) vec[int]{} and (bool) set[int]{} are both true.
+			 * Interim and intended final semantics -- see
+			 * implementation-notes/design-audit-literals.md (A2). */
+			result = 1;
+			break;
 		case IS_REFERENCE:
 			op = Z_REFVAL_P(op);
 			goto again;

@@ -28,6 +28,7 @@
 #include "zend_strtod.h"
 #include "zend_exceptions.h"
 #include "zend_closures.h"
+#include "zend_vec.h"
 
 #include <locale.h>
 #ifdef HAVE_LANGINFO_H
@@ -57,7 +58,20 @@ static _locale_t current_locale = NULL;
 #define zend_tolower(c) tolower(c)
 #endif
 
-#define TYPE_PAIR(t1,t2) (((t1) << 4) | (t2))
+/* Packs two type tags into one dispatch key. Both coordinates must fit in
+ * ZEND_TYPE_PAIR_BITS and the result must be held in zend_type_pair; a narrower
+ * variable silently aliases unrelated pairs onto the same key. */
+#define ZEND_TYPE_PAIR_BITS 5
+typedef uint32_t zend_type_pair;
+#define TYPE_PAIR(t1,t2) (((zend_type_pair)(t1) << ZEND_TYPE_PAIR_BITS) | (zend_type_pair)(t2))
+
+/* Asserts the highest tag; extend when adding one above IS_COLLECTION. */
+ZEND_STATIC_ASSERT(IS_COLLECTION < (1u << ZEND_TYPE_PAIR_BITS),
+	"TYPE_PAIR: a runtime type tag no longer fits in ZEND_TYPE_PAIR_BITS");
+ZEND_STATIC_ASSERT(IS_CONSTANT_AST < (1u << ZEND_TYPE_PAIR_BITS),
+	"TYPE_PAIR: core runtime tags must fit in ZEND_TYPE_PAIR_BITS");
+ZEND_STATIC_ASSERT(sizeof(zend_type_pair) * CHAR_BIT >= 2 * ZEND_TYPE_PAIR_BITS,
+	"TYPE_PAIR: zend_type_pair is too narrow to hold both coordinates");
 
 #ifdef ZEND_INTRIN_AVX2_NATIVE
 #define HAVE_BLOCKCONV
@@ -357,6 +371,10 @@ static zend_never_inline zend_result ZEND_FASTCALL _zendi_try_convert_scalar_to_
 			return SUCCESS;
 		case IS_RESOURCE:
 		case IS_ARRAY:
+		case IS_COLLECTION:
+			/* No numeric value; like an array, this makes the arithmetic
+			 * operator report "Unsupported operand types" rather than reach the
+			 * ZEND_UNREACHABLE below (UB in release, an abort in debug). */
 			return FAILURE;
 		default: ZEND_UNREACHABLE();
 	}
@@ -451,6 +469,10 @@ try_again:
 		case IS_UNDEF:
 		case IS_RESOURCE:
 		case IS_ARRAY:
+		case IS_COLLECTION:
+			/* No integer value; like an array, this makes the bitwise/shift
+			 * operator report "Unsupported operand types" rather than reach the
+			 * ZEND_UNREACHABLE() below (a release-build crash, a debug abort). */
 			*failed = true;
 			return 0;
 		case IS_REFERENCE:
@@ -606,6 +628,13 @@ try_again:
 		case IS_REFERENCE:
 			zend_unwrap_reference(op);
 			goto try_again;
+		case IS_COLLECTION:
+			/* A collection has no integer value; throw like the (int) cast
+			 * (zval_get_long_func()) instead of reaching ZEND_UNREACHABLE() -- a
+			 * release-build crash, a debug abort. settype() reaches this. op is
+			 * left unchanged and the pending TypeError propagates. */
+			zend_type_error("Cannot convert a collection to int");
+			return;
 		default: ZEND_UNREACHABLE();
 	}
 }
@@ -665,6 +694,12 @@ try_again:
 		case IS_REFERENCE:
 			zend_unwrap_reference(op);
 			goto try_again;
+		case IS_COLLECTION:
+			/* No float value; throw like the (float) cast instead of the
+			 * ZEND_UNREACHABLE() below. op is left unchanged; the TypeError
+			 * propagates (settype() reaches this). */
+			zend_type_error("Cannot convert a collection to float");
+			break;
 		default: ZEND_UNREACHABLE();
 	}
 }
@@ -747,6 +782,13 @@ try_again:
 		case IS_REFERENCE:
 			zend_unwrap_reference(op);
 			goto try_again;
+		case IS_COLLECTION:
+			/* A collection is always truthy (see i_zend_is_true); release it and
+			 * store true, rather than reaching the ZEND_UNREACHABLE() below.
+			 * settype($c, 'bool') reaches this. */
+			zval_ptr_dtor(op);
+			ZVAL_TRUE(op);
+			break;
 		default: ZEND_UNREACHABLE();
 	}
 }
@@ -802,6 +844,13 @@ try_again:
 			ZVAL_EMPTY_STRING(op);
 			break;
 		}
+		case IS_COLLECTION:
+			/* No string value; throw like the (string) cast
+			 * (__zval_get_string_func()) instead of reaching the
+			 * ZEND_UNREACHABLE() below. op is left unchanged; the TypeError
+			 * propagates (settype($c, 'string') reaches this). */
+			zend_type_error("Cannot convert a collection to string");
+			break;
 		case IS_REFERENCE:
 			zend_unwrap_reference(op);
 			goto try_again;
@@ -1014,6 +1063,13 @@ try_again:
 		case IS_REFERENCE:
 			op = Z_REFVAL_P(op);
 			goto try_again;
+		case IS_COLLECTION:
+			/* A collection has no integer value. Without this arm the value
+			 * falls into ZEND_UNREACHABLE() -- undefined in release (observed
+			 * as a crash for the double path), an abort in debug -- so fail
+			 * explicitly, like the string conversion above. */
+			zend_type_error("Cannot convert a collection to int");
+			return 0;
 		default: ZEND_UNREACHABLE();
 	}
 	return 0;
@@ -1053,6 +1109,11 @@ try_again:
 		case IS_REFERENCE:
 			op = Z_REFVAL_P(op);
 			goto try_again;
+		case IS_COLLECTION:
+			/* No float value; see zval_get_long_func. This path in particular
+			 * crashed a release build via ZEND_UNREACHABLE. */
+			zend_type_error("Cannot convert a collection to float");
+			return 0.0;
 		default: ZEND_UNREACHABLE();
 	}
 	return 0.0;
@@ -1094,6 +1155,12 @@ try_again:
 			goto try_again;
 		case IS_STRING:
 			return zend_string_copy(Z_STR_P(op));
+		case IS_COLLECTION:
+			/* Collections have no string conversion. Without this arm the value
+			 * falls into ZEND_UNREACHABLE(), which aborts a debug build and is
+			 * undefined behaviour in a release build. */
+			zend_type_error("Cannot convert a collection to string");
+			return ZSTR_EMPTY_ALLOC();
 		default: ZEND_UNREACHABLE();
 	}
 	return NULL;
@@ -1139,7 +1206,7 @@ static zend_never_inline void ZEND_FASTCALL add_function_array(zval *result, con
 
 static zend_always_inline zend_result add_function_fast(zval *result, zval *op1, zval *op2) /* {{{ */
 {
-	uint8_t type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
+	zend_type_pair type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
 
 	if (EXPECTED(type_pair == TYPE_PAIR(IS_LONG, IS_LONG))) {
 		fast_long_add_function(result, op1, op2);
@@ -1205,7 +1272,7 @@ ZEND_API zend_result ZEND_FASTCALL add_function(zval *result, zval *op1, zval *o
 
 static zend_always_inline zend_result sub_function_fast(zval *result, zval *op1, zval *op2) /* {{{ */
 {
-	uint8_t type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
+	zend_type_pair type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
 
 	if (EXPECTED(type_pair == TYPE_PAIR(IS_LONG, IS_LONG))) {
 		fast_long_sub_function(result, op1, op2);
@@ -1270,7 +1337,7 @@ ZEND_API zend_result ZEND_FASTCALL sub_function(zval *result, zval *op1, zval *o
 
 static zend_always_inline zend_result mul_function_fast(zval *result, zval *op1, zval *op2) /* {{{ */
 {
-	uint8_t type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
+	zend_type_pair type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
 
 	if (EXPECTED(type_pair == TYPE_PAIR(IS_LONG, IS_LONG))) {
 		zend_long overflow;
@@ -1353,7 +1420,7 @@ static double safe_pow(double base, double exponent)
 
 static zend_result ZEND_FASTCALL pow_function_base(zval *result, zval *op1, zval *op2) /* {{{ */
 {
-	uint8_t type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
+	zend_type_pair type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
 
 	if (EXPECTED(type_pair == TYPE_PAIR(IS_LONG, IS_LONG))) {
 		if (Z_LVAL_P(op2) >= 0) {
@@ -1449,7 +1516,7 @@ typedef enum {
 
 static zend_div_status ZEND_FASTCALL div_function_base(zval *result, const zval *op1, const zval *op2) /* {{{ */
 {
-	uint8_t type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
+	zend_type_pair type_pair = TYPE_PAIR(Z_TYPE_P(op1), Z_TYPE_P(op2));
 
 	if (EXPECTED(type_pair == TYPE_PAIR(IS_LONG, IS_LONG))) {
 		if (Z_LVAL_P(op2) == 0) {
@@ -2381,6 +2448,26 @@ ZEND_API int ZEND_FASTCALL zend_compare(zval *op1, zval *op2) /* {{{ */
 					continue;
 				}
 
+				if (UNEXPECTED(Z_TYPE_P(op1) == IS_COLLECTION)
+				 || UNEXPECTED(Z_TYPE_P(op2) == IS_COLLECTION)) {
+					/* Collections have no ordering or non-strict equality yet.
+					 * Every comparison operator (==, !=, <, <=>, and the
+					 * internal comparators behind sort() and non-strict
+					 * in_array()/array_search()) funnels here, and the
+					 * scalar-coercion fallback below would drive a collection
+					 * into ZEND_UNREACHABLE() -- undefined in release, an abort
+					 * in debug. Fail explicitly instead, matching the other
+					 * unsupported collection operations (serialize, var_export,
+					 * string cast). Strict identity (===/!==) never reaches
+					 * this: it is answered by zend_is_identical(). Structural
+					 * comparison is a separate, unimplemented stage. */
+					zend_type_error("Cannot compare collection values");
+					/* Uncomparable: for a caller that ignores EG(exception),
+					 * this makes ==, <, <=, >, >= all false. The exception is
+					 * the real signal. */
+					return ZEND_UNCOMPARABLE;
+				}
+
 				if (Z_TYPE_P(op1) == IS_OBJECT
 				 || Z_TYPE_P(op2) == IS_OBJECT) {
 					zval *object, *other;
@@ -2495,6 +2582,13 @@ ZEND_API bool ZEND_FASTCALL zend_is_identical(const zval *op1, const zval *op2) 
 				zend_hash_compare(Z_ARRVAL_P(op1), Z_ARRVAL_P(op2), (compare_func_t) hash_zval_identical_function, 1) == 0);
 		case IS_OBJECT:
 			return (Z_OBJ_P(op1) == Z_OBJ_P(op2));
+		case IS_COLLECTION:
+			/* Immutable collections are value types under strict identity:
+			 * recursively equal by descriptor and elements (order-insensitive for
+			 * set), not by pointer. Reflexive ($a === $a) via a same-pointer fast
+			 * path inside. This is the one definition of collection equality; set
+			 * membership and every set operation share it through the same call. */
+			return zend_collection_is_identical(op1, op2);
 		default:
 			return 0;
 	}
@@ -2782,6 +2876,9 @@ try_again:
 		}
 		case IS_RESOURCE:
 		case IS_ARRAY:
+		case IS_COLLECTION:
+			/* Like an array, a collection cannot be incremented; report the
+			 * unsupported operation rather than reaching ZEND_UNREACHABLE(). */
 			zend_type_error("Cannot increment %s", zend_zval_value_name(op1));
 			return FAILURE;
 		default: ZEND_UNREACHABLE();
@@ -2889,6 +2986,9 @@ try_again:
 		}
 		case IS_RESOURCE:
 		case IS_ARRAY:
+		case IS_COLLECTION:
+			/* Like an array, a collection cannot be decremented; report the
+			 * unsupported operation rather than reaching ZEND_UNREACHABLE(). */
 			zend_type_error("Cannot decrement %s", zend_zval_value_name(op1));
 			return FAILURE;
 		default: ZEND_UNREACHABLE();

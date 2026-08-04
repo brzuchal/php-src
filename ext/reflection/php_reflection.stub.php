@@ -753,6 +753,13 @@ class ReflectionIntersectionType extends ReflectionType
     public function getTypes(): array {}
 }
 
+class ReflectionCollectionType extends ReflectionType
+{
+    public function getCollectionName(): string {}
+
+    public function getTypes(): array {}
+}
+
 /** @not-serializable */
 class ReflectionExtension implements Reflector
 {

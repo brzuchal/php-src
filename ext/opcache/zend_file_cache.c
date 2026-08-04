@@ -473,7 +473,16 @@ static void zend_file_cache_serialize_attribute(zval                     *zv,
 static void zend_file_cache_serialize_type(
 		zend_type *type, zend_persistent_script *script, zend_file_cache_metainfo *info, void *buf)
 {
-	if (ZEND_TYPE_HAS_LIST(*type)) {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*type)) {
+		zend_collection_type *desc = ZEND_TYPE_COLLECTION(*type);
+		SERIALIZE_PTR(desc);
+		ZEND_TYPE_SET_PTR(*type, desc);
+		UNSERIALIZE_PTR(desc);
+
+		for (uint32_t i = 0; i < desc->num_types; i++) {
+			zend_file_cache_serialize_type(&desc->types[i], script, info, buf);
+		}
+	} else if (ZEND_TYPE_IS_TYPE_LIST(*type)) {
 		zend_type_list *list = ZEND_TYPE_LIST(*type);
 		SERIALIZE_PTR(list);
 		ZEND_TYPE_SET_PTR(*type, list);
@@ -511,6 +520,7 @@ static void zend_file_cache_serialize_op_array(zend_op_array            *op_arra
 			SERIALIZE_PTR(op_array->literals);
 			SERIALIZE_PTR(op_array->opcodes);
 			SERIALIZE_PTR(op_array->arg_info);
+			SERIALIZE_PTR(op_array->collection_types);
 			SERIALIZE_PTR(op_array->vars);
 			SERIALIZE_STR(op_array->function_name);
 			SERIALIZE_STR(op_array->filename);
@@ -658,6 +668,19 @@ static void zend_file_cache_serialize_op_array(zend_op_array            *op_arra
 				}
 				zend_file_cache_serialize_type(&p->type, script, info, buf);
 				SERIALIZE_STR(p->doc_comment);
+				p++;
+			}
+		}
+
+		if (op_array->collection_types) {
+			zend_type *p, *end;
+
+			SERIALIZE_PTR(op_array->collection_types);
+			p = op_array->collection_types;
+			UNSERIALIZE_PTR(p);
+			end = p + op_array->last_collection_type;
+			while (p < end) {
+				zend_file_cache_serialize_type(p, script, info, buf);
 				p++;
 			}
 		}
@@ -1389,7 +1412,15 @@ static void zend_file_cache_unserialize_attribute(zval *zv, zend_persistent_scri
 static void zend_file_cache_unserialize_type(
 		zend_type *type, zend_class_entry *scope, zend_persistent_script *script, void *buf)
 {
-	if (ZEND_TYPE_HAS_LIST(*type)) {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*type)) {
+		zend_collection_type *desc = ZEND_TYPE_COLLECTION(*type);
+		UNSERIALIZE_PTR(desc);
+		ZEND_TYPE_SET_PTR(*type, desc);
+
+		for (uint32_t i = 0; i < desc->num_types; i++) {
+			zend_file_cache_unserialize_type(&desc->types[i], scope, script, buf);
+		}
+	} else if (ZEND_TYPE_IS_TYPE_LIST(*type)) {
 		zend_type_list *list = ZEND_TYPE_LIST(*type);
 		UNSERIALIZE_PTR(list);
 		ZEND_TYPE_SET_PTR(*type, list);
@@ -1443,6 +1474,7 @@ static void zend_file_cache_unserialize_op_array(zend_op_array           *op_arr
 		UNSERIALIZE_PTR(op_array->literals);
 		UNSERIALIZE_PTR(op_array->opcodes);
 		UNSERIALIZE_PTR(op_array->arg_info);
+		UNSERIALIZE_PTR(op_array->collection_types);
 		UNSERIALIZE_PTR(op_array->vars);
 		UNSERIALIZE_STR(op_array->function_name);
 		UNSERIALIZE_STR(op_array->filename);
@@ -1562,6 +1594,19 @@ static void zend_file_cache_unserialize_op_array(zend_op_array           *op_arr
 				}
 				zend_file_cache_unserialize_type(&p->type, (op_array->fn_flags & ZEND_ACC_CLOSURE) ? NULL : op_array->scope, script, buf);
 				UNSERIALIZE_STR(p->doc_comment);
+				p++;
+			}
+		}
+
+		if (op_array->collection_types) {
+			zend_type *p, *end;
+
+			UNSERIALIZE_PTR(op_array->collection_types);
+			p = op_array->collection_types;
+			end = p + op_array->last_collection_type;
+			while (p < end) {
+				zend_file_cache_unserialize_type(p,
+					(op_array->fn_flags & ZEND_ACC_CLOSURE) ? NULL : op_array->scope, script, buf);
 				p++;
 			}
 		}

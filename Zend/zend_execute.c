@@ -28,6 +28,8 @@
 #include "zend_API.h"
 #include "zend_ptr_stack.h"
 #include "zend_constants.h"
+#include "zend_vec.h"
+#include "zend_collection_info.h"
 #include "zend_extensions.h"
 #include "zend_ini.h"
 #include "zend_exceptions.h"
@@ -683,7 +685,7 @@ static zend_never_inline ZEND_COLD void ZEND_FASTCALL zend_throw_non_object_erro
 static zend_never_inline ZEND_COLD void zend_verify_type_error_common(
 		const zend_function *zf, const zend_arg_info *arg_info, const zval *value,
 		const char **fname, const char **fsep, const char **fclass,
-		zend_string **need_msg, const char **given_kind)
+		zend_string **need_msg, const char **given_kind, zend_string **given_str)
 {
 	*fname = ZSTR_VAL(zf->common.function_name);
 	if (zf->common.scope) {
@@ -697,8 +699,12 @@ static zend_never_inline ZEND_COLD void zend_verify_type_error_common(
 	*need_msg = zend_type_to_string_resolved(arg_info->type, zf->common.scope);
 
 	if (value) {
-		*given_kind = zend_zval_value_name(value);
+		/* Prefer the value's full runtime type name, so a mismatched collection
+		 * reports vec[int] rather than the coarse "collection". */
+		*given_str = zend_zval_collection_type_name(value);
+		*given_kind = *given_str ? ZSTR_VAL(*given_str) : zend_zval_value_name(value);
 	} else {
+		*given_str = NULL;
 		*given_kind = "none";
 	}
 }
@@ -710,9 +716,10 @@ ZEND_API zend_never_inline ZEND_COLD void zend_verify_arg_error(
 	const char *fname, *fsep, *fclass;
 	zend_string *need_msg;
 	const char *given_msg;
+	zend_string *given_str;
 
 	zend_verify_type_error_common(
-		zf, arg_info, value, &fname, &fsep, &fclass, &need_msg, &given_msg);
+		zf, arg_info, value, &fname, &fsep, &fclass, &need_msg, &given_msg, &given_str);
 
 	ZEND_ASSERT(zf->common.type == ZEND_USER_FUNCTION
 		&& "Arginfo verification is not performed for internal functions");
@@ -727,6 +734,9 @@ ZEND_API zend_never_inline ZEND_COLD void zend_verify_arg_error(
 	}
 
 	zend_string_release(need_msg);
+	if (given_str) {
+		zend_string_release(given_str);
+	}
 }
 
 static bool zend_verify_weak_scalar_type_hint(uint32_t type_mask, zval *arg)
@@ -838,12 +848,71 @@ ZEND_API bool zend_verify_scalar_type_hint(uint32_t type_mask, zval *arg, bool s
 	return zend_verify_weak_scalar_type_hint(type_mask, arg);
 }
 
+/* A collection type that cannot have values at all: an element type outside the
+ * subset a value may hold (vec[iterable], vec[int|string]), or a descriptor
+ * outside the canonicalization boundary. This is not decidable while compiling
+ * the literal -- for a nested parameter the answer is a property of the
+ * promoted child node, and promotion is per request -- so it is reported here,
+ * on the first execution that reaches the site. */
+static zend_never_inline ZEND_COLD void zend_collection_not_constructible_error(zend_type descriptor)
+{
+	zend_string *type_str = zend_type_to_string(descriptor);
+
+	zend_type_error("Cannot create a value of type %s", ZSTR_VAL(type_str));
+	zend_string_release(type_str);
+}
+
+/* One element of a collection literal does not satisfy the declared member type.
+ * `index` is the element's position, which is also its key/slot: the literal is compiled
+ * into sequential positions. `value` is that element (already dereferenced by the caller
+ * for the builder path; the array path passes a live element). Shared by the array
+ * constructor (CONSTRUCT_COLLECTION) and the direct builder (FINISH_COLLECTION). */
+static zend_never_inline ZEND_COLD void zend_collection_element_type_error_ex(
+		const zend_collection_info *info, uint32_t index, zval *value)
+{
+	zend_string *type_str = zend_collection_info_to_string(info);
+	/* Which member type the failed element was checked against. vec and set have
+	 * one member, so it is always member 0 no matter the element position; tuple
+	 * is positional, so member i answers element i. This mirrors the per-index
+	 * check in collection_member_matches(). */
+	uint32_t member_idx = (info->kind == ZEND_COLLECTION_TYPE_TUPLE) ? index : 0;
+	zend_string *member_str = zend_collection_info_member_to_string(info, member_idx);
+
+	ZVAL_DEREF(value);
+
+	zend_string *given_str = zend_zval_collection_type_name(value);
+	zend_type_error("Element %" PRIu32 " of %s must be of type %s, %s given",
+		index, ZSTR_VAL(type_str), ZSTR_VAL(member_str),
+		given_str ? ZSTR_VAL(given_str) : zend_zval_value_name(value));
+	if (given_str) {
+		zend_string_release(given_str);
+	}
+	zend_string_release(member_str);
+	zend_string_release(type_str);
+}
+
+/* Array-constructor variant: the offending element is the value at `index` in the
+ * temporary packed array. */
+static zend_never_inline ZEND_COLD void zend_collection_element_type_error(
+		const zend_collection_info *info, const HashTable *values, uint32_t index)
+{
+	zval *value = zend_hash_index_find((HashTable *) values, index);
+
+	ZEND_ASSERT(value != NULL);
+	zend_collection_element_type_error_ex(info, index, value);
+}
+
 static zend_never_inline ZEND_COLD void zend_verify_class_constant_type_error(const zend_class_constant *c, const zend_string *name, const zval *constant)
 {
 	zend_string *type_str = zend_type_to_string(c->type);
 
+	zend_string *given_str = zend_zval_collection_type_name(constant);
 	zend_type_error("Cannot assign %s to class constant %s::%s of type %s",
-		zend_zval_type_name(constant), ZSTR_VAL(c->ce->name), ZSTR_VAL(name), ZSTR_VAL(type_str));
+		given_str ? ZSTR_VAL(given_str) : zend_zval_type_name(constant),
+		ZSTR_VAL(c->ce->name), ZSTR_VAL(name), ZSTR_VAL(type_str));
+	if (given_str) {
+		zend_string_release(given_str);
+	}
 
 	zend_string_release(type_str);
 }
@@ -858,11 +927,15 @@ static zend_never_inline ZEND_COLD void zend_verify_property_type_error(const ze
 	}
 
 	type_str = zend_type_to_string(info->type);
+	zend_string *given_str = zend_zval_collection_type_name(property);
 	zend_type_error("Cannot assign %s to property %s::$%s of type %s",
-		zend_zval_value_name(property),
+		given_str ? ZSTR_VAL(given_str) : zend_zval_value_name(property),
 		ZSTR_VAL(info->ce->name),
 		zend_get_unmangled_property_name(info->name),
 		ZSTR_VAL(type_str));
+	if (given_str) {
+		zend_string_release(given_str);
+	}
 	zend_string_release(type_str);
 }
 
@@ -874,12 +947,16 @@ static zend_never_inline ZEND_COLD void zend_magic_get_property_type_inconsisten
 	}
 
 	zend_string *type_str = zend_type_to_string(info->type);
+	zend_string *given_str = zend_zval_collection_type_name(property);
 	zend_type_error("Value of type %s returned from %s::__get() must be compatible with unset property %s::$%s of type %s",
-		zend_zval_type_name(property),
+		given_str ? ZSTR_VAL(given_str) : zend_zval_type_name(property),
 		ZSTR_VAL(info->ce->name),
 		ZSTR_VAL(info->ce->name),
 		zend_get_unmangled_property_name(info->name),
 		ZSTR_VAL(type_str));
+	if (given_str) {
+		zend_string_release(given_str);
+	}
 	zend_string_release(type_str);
 }
 
@@ -1002,7 +1079,11 @@ static bool zend_check_intersection_for_property_or_class_constant_class_type(
 
 static bool zend_check_and_resolve_property_or_class_constant_class_type(
 	const zend_class_entry *scope, const zend_type member_type, const zend_class_entry *value_ce) {
-	if (ZEND_TYPE_HAS_LIST(member_type)) {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(member_type)) {
+		/* Never satisfied by a class instance. */
+		return false;
+	}
+	if (ZEND_TYPE_IS_TYPE_LIST(member_type)) {
 		if (ZEND_TYPE_IS_INTERSECTION(member_type)) {
 			return zend_check_intersection_for_property_or_class_constant_class_type(
 				scope, ZEND_TYPE_LIST(member_type), value_ce);
@@ -1039,11 +1120,53 @@ static bool zend_check_and_resolve_property_or_class_constant_class_type(
 	return false;
 }
 
+/* A collection type is satisfied only by a collection value whose own element
+ * type is structurally identical to the declared parameter: compatibility is
+ * invariant. Never routed through the class or scalar paths. */
+static bool zend_check_collection_type(const zend_type *type, const zval *arg)
+{
+	if (Z_TYPE_P(arg) != IS_COLLECTION) {
+		return false;
+	}
+	const zend_collection_type *desc = ZEND_TYPE_COLLECTION(*type);
+
+	/* Bare kind (num_types == 0): an existential declaration -- accept any concrete
+	 * value of the same kind, matched on the kind alone. No resolve, no node, no
+	 * member walk; cheaper than the full descriptor check. The value keeps its own
+	 * concrete descriptor untouched. */
+	if (desc->num_types == 0) {
+		return Z_VEC_P(arg)->type->kind == desc->kind;
+	}
+
+	/* Both sides are canonical after the declaration is resolved, so the check
+	 * is a pointer comparison. The descriptor is walked at most once per
+	 * request, on the first execution that reaches this declaration; every
+	 * later execution answers from the resolution cache.
+	 *
+	 * Fails closed when the declaration is outside the supported boundary:
+	 * no node exists for it, so no value can satisfy it. */
+	const zend_collection_info *declared = zend_collection_info_resolve(*type);
+
+	return declared != NULL && Z_VEC_P(arg)->type == declared;
+}
+
 static zend_always_inline bool i_zend_check_property_type(const zend_property_info *info, zval *property, bool strict)
 {
 	ZEND_ASSERT(!Z_ISREF_P(property));
 	if (EXPECTED(ZEND_TYPE_CONTAINS_CODE(info->type, Z_TYPE_P(property)))) {
 		return 1;
+	}
+
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(info->type)) {
+		return zend_check_collection_type(&info->type, property);
+	}
+
+	if (UNEXPECTED(Z_TYPE_P(property) == IS_COLLECTION)) {
+		/* A collection has no may-be bit, so no mask can accept it. It satisfies
+		 * `mixed` and, since F2, the standalone `iterable` type (fallback bit);
+		 * object, array and an explicit array|Traversable union keep rejecting it. */
+		return ZEND_TYPE_IS_MIXED(info->type)
+			|| ZEND_TYPE_IS_ITERABLE_FALLBACK(info->type);
 	}
 
 	if (ZEND_TYPE_IS_COMPLEX(info->type) && Z_TYPE_P(property) == IS_OBJECT
@@ -1155,9 +1278,22 @@ static zend_always_inline bool zend_check_type_slow(
 		const zend_type *type, zval *arg, const zend_reference *ref,
 		bool current_frame, bool is_internal)
 {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(*type)) {
+		return zend_check_collection_type(type, arg);
+	}
+
+	if (UNEXPECTED(Z_TYPE_P(arg) == IS_COLLECTION)) {
+		/* A collection has no may-be bit, so no mask can accept it. It satisfies
+		 * `mixed` and, since F2, the standalone `iterable` type (fallback bit);
+		 * object, array and an explicit array|Traversable union keep rejecting it.
+		 * It must never reach the scalar coercion helpers below. */
+		return ZEND_TYPE_IS_MIXED(*type)
+			|| ZEND_TYPE_IS_ITERABLE_FALLBACK(*type);
+	}
+
 	if (ZEND_TYPE_IS_COMPLEX(*type) && EXPECTED(Z_TYPE_P(arg) == IS_OBJECT)) {
 		zend_class_entry *ce;
-		if (UNEXPECTED(ZEND_TYPE_HAS_LIST(*type))) {
+		if (UNEXPECTED(ZEND_TYPE_IS_TYPE_LIST(*type))) {
 			if (ZEND_TYPE_IS_INTERSECTION(*type)) {
 				return zend_check_intersection_type_from_list(ZEND_TYPE_LIST(*type), Z_OBJCE_P(arg));
 			} else {
@@ -1433,14 +1569,18 @@ ZEND_API zend_never_inline ZEND_COLD void zend_verify_return_error(const zend_fu
 	const char *fname, *fsep, *fclass;
 	zend_string *need_msg;
 	const char *given_msg;
+	zend_string *given_str;
 
 	zend_verify_type_error_common(
-		zf, arg_info, value, &fname, &fsep, &fclass, &need_msg, &given_msg);
+		zf, arg_info, value, &fname, &fsep, &fclass, &need_msg, &given_msg, &given_str);
 
 	zend_type_error("%s%s%s(): Return value must be of type %s, %s returned",
 		fclass, fsep, fname, ZSTR_VAL(need_msg), given_msg);
 
 	zend_string_release(need_msg);
+	if (given_str) {
+		zend_string_release(given_str);
+	}
 }
 
 ZEND_API zend_never_inline ZEND_COLD void zend_verify_never_error(const zend_function *zf)
@@ -1460,9 +1600,10 @@ static zend_never_inline ZEND_COLD void zend_verify_internal_return_error(const 
 	const char *fname, *fsep, *fclass;
 	zend_string *need_msg;
 	const char *given_msg;
+	zend_string *given_str;
 
 	zend_verify_type_error_common(
-		zf, arg_info, value, &fname, &fsep, &fclass, &need_msg, &given_msg);
+		zf, arg_info, value, &fname, &fsep, &fclass, &need_msg, &given_msg, &given_str);
 
 	zend_error_noreturn(E_CORE_ERROR, "%s%s%s(): Return value must be of type %s, %s returned",
 		fclass, fsep, fname, ZSTR_VAL(need_msg), given_msg);
@@ -1518,6 +1659,10 @@ static zend_always_inline bool zend_check_class_constant_type(const zend_class_c
 	ZEND_ASSERT(!Z_ISREF_P(constant));
 	if (EXPECTED(ZEND_TYPE_CONTAINS_CODE(c->type, Z_TYPE_P(constant)))) {
 		return 1;
+	}
+
+	if (UNEXPECTED(Z_TYPE_P(constant) == IS_COLLECTION)) {
+		return ZEND_TYPE_IS_MIXED(c->type);
 	}
 
 	if (((ZEND_TYPE_PURE_MASK(c->type) & MAY_BE_STATIC) || ZEND_TYPE_IS_COMPLEX(c->type)) && Z_TYPE_P(constant) == IS_OBJECT
@@ -3001,6 +3146,18 @@ fetch_from_array:
 		if (UNEXPECTED(GC_DELREF(obj) == 0)) {
 			zend_objects_store_del(obj);
 		}
+	} else if (UNEXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+		/* Writable dimension fetch over an immutable collection: this feeds W / RW /
+		 * UNSET, i.e. `&$v[i]`, `f(&$v[i])`, `$v[i]++`/`--`, and unset via this helper.
+		 * A collection has no writable element slot to alias, so reject with a hard Error
+		 * rather than compute an address. Read access ($v[i], $v[i] ?? d) uses the
+		 * separate read helper and is unaffected. */
+		if (type == BP_VAR_UNSET) {
+			zend_throw_error(NULL, "Cannot unset an offset of an immutable collection");
+		} else {
+			zend_throw_error(NULL, "Cannot modify an immutable collection");
+		}
+		ZVAL_UNDEF(result);
 	} else {
 		if (EXPECTED(Z_TYPE_P(container) <= IS_FALSE)) {
 			if (type != BP_VAR_W && UNEXPECTED(Z_TYPE_P(container) == IS_UNDEF)) {
@@ -3059,6 +3216,92 @@ static zend_never_inline void ZEND_FASTCALL zend_fetch_dimension_address_UNSET(z
 {
 	zval *result = EX_VAR(opline->result.var);
 	zend_fetch_dimension_address(result, container_ptr, dim, dim_type, BP_VAR_UNSET EXECUTE_DATA_CC);
+}
+
+/* Read-only indexed access for vec and tuple (never set). A collection offset is a
+ * strict int in 0..count-1: the index is an integer *type*, not a coercible value, so
+ * "0"/1.0/true/null are rejected rather than coerced the way an array key would be. This
+ * resolver classifies an offset without throwing, so the read path (which throws on a
+ * miss) and the total isset()/empty() paths share one policy. On OK it yields a *borrowed
+ * const* element pointer; the caller copies the value (with its own reference) and never
+ * exposes the internal slot. The collection and its descriptor are never touched. */
+typedef enum {
+	ZEND_COLLECTION_DIM_OK,            /* in-range int index: *element is set */
+	ZEND_COLLECTION_DIM_NOT_INDEXABLE, /* a set has no positional access */
+	ZEND_COLLECTION_DIM_BAD_KEY,       /* offset is not a strict int */
+	ZEND_COLLECTION_DIM_OUT_OF_RANGE,  /* int, but < 0 or >= count */
+} zend_collection_dim_result;
+
+static zend_always_inline zend_collection_dim_result zend_collection_dim_lookup(
+		const zend_vec *vec, zval *offset, zval **element)
+{
+	if (UNEXPECTED(vec->type->kind == ZEND_COLLECTION_TYPE_SET)) {
+		return ZEND_COLLECTION_DIM_NOT_INDEXABLE;
+	}
+	ZVAL_DEREF(offset);
+	if (UNEXPECTED(Z_TYPE_P(offset) != IS_LONG)) {
+		return ZEND_COLLECTION_DIM_BAD_KEY;
+	}
+	zend_long i = Z_LVAL_P(offset);
+	if (UNEXPECTED(i < 0 || i >= (zend_long) vec->count)) {
+		return ZEND_COLLECTION_DIM_OUT_OF_RANGE;
+	}
+	/* A borrowed, read-only pointer into the immutable payload: the caller copies from it
+	 * and never writes through it (no writable slot is exposed to userland). The const is
+	 * dropped only to satisfy the value-copy macros; the collection itself is never mutated
+	 * (its handle here is `const zend_vec *`). */
+	*element = zend_stor_get(vec, (uint32_t) i);
+	return ZEND_COLLECTION_DIM_OK;
+}
+
+/* $v[i] / $t[i] and the read behind $v[i] ?? d. BP_VAR_R throws on any miss; BP_VAR_IS
+ * (the ?? form) is silent, leaving NULL so the coalesce default applies. The element is
+ * copied into result with an owned reference; the collection is never mutated and no
+ * writable slot is exposed. Exported (not static) because the JIT's generic DIM paths
+ * reach it for containers the optimizer could not prove collection-free. */
+ZEND_API void ZEND_FASTCALL zend_collection_read_dimension(
+		zval *result, const zval *container, zval *dim, int type)
+{
+	zval *element;
+	zend_collection_dim_result r = zend_collection_dim_lookup(Z_VEC_P(container), dim, &element);
+
+	if (EXPECTED(r == ZEND_COLLECTION_DIM_OK)) {
+		ZVAL_COPY_DEREF(result, element);
+		return;
+	}
+	if (type != BP_VAR_IS) {
+		ZVAL_DEREF(dim);
+		switch (r) {
+			case ZEND_COLLECTION_DIM_NOT_INDEXABLE:
+				zend_throw_error(NULL, "Cannot index a set");
+				break;
+			case ZEND_COLLECTION_DIM_BAD_KEY:
+				zend_type_error("Collection index must be of type int, %s given",
+					zend_zval_value_name(dim));
+				break;
+			case ZEND_COLLECTION_DIM_OUT_OF_RANGE:
+				zend_value_error("Collection index " ZEND_LONG_FMT " is out of range",
+					Z_LVAL_P(dim));
+				break;
+			default: ZEND_UNREACHABLE();
+		}
+	}
+	ZVAL_NULL(result);
+}
+
+/* isset($v[i]) / the existence half of $v[i] ?? — total, never throws. A strict
+ * in-range int index whose element is non-null is "set"; a set, a non-int key, or an
+ * out-of-range index is not. Exported for the JIT's generic isset path, and the single
+ * policy behind zend_isset_dim_slow()'s collection branch. */
+ZEND_API bool ZEND_FASTCALL zend_collection_isset_dimension(const zval *container, zval *offset)
+{
+	zval *element;
+
+	if (zend_collection_dim_lookup(Z_VEC_P(container), offset, &element) != ZEND_COLLECTION_DIM_OK) {
+		return 0;
+	}
+	ZVAL_DEREF(element);
+	return Z_TYPE_P(element) != IS_NULL;
 }
 
 static zend_always_inline void zend_fetch_dimension_address_read(zval *result, const zval *container, zval *dim, int dim_type, int type, bool is_list, bool slow EXECUTE_DATA_DC)
@@ -3197,6 +3440,15 @@ try_string_offset:
 		if (UNEXPECTED(GC_DELREF(obj) == 0)) {
 			zend_objects_store_del(obj);
 		}
+	} else if (EXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+		/* $v[i] / $t[i] read (and the BP_VAR_IS read behind $v[i] ?? d). A constant
+		 * numeric-string key like $v["0"] is compile-time folded to a long, with the
+		 * original string kept as the next literal (ZEND_EXTRA_VALUE); mirror the object
+		 * branch's bump so the strict-int check sees the string and rejects it. */
+		if (dim_type == IS_CONST && Z_EXTRA_P(dim) == ZEND_EXTRA_VALUE) {
+			dim++;
+		}
+		zend_collection_read_dimension(result, container, dim, type);
 	} else {
 		if (type != BP_VAR_IS && UNEXPECTED(Z_TYPE_P(container) == IS_UNDEF)) {
 			container = ZVAL_UNDEFINED_OP1();
@@ -3333,6 +3585,8 @@ str_offset:
 			}
 			return 0;
 		}
+	} else if (EXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+		return zend_collection_isset_dimension(container, offset);
 	} else {
 		return 0;
 	}
@@ -3372,6 +3626,16 @@ str_offset:
 			}
 			return 1;
 		}
+	} else if (EXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+		/* empty($v[i]) — total, never throws. Absent (set / non-int / out-of-range) is
+		 * empty; otherwise empty iff the element is falsy (a nested collection is always
+		 * truthy, matching i_zend_is_true). */
+		zval *element;
+		if (zend_collection_dim_lookup(Z_VEC_P(container), offset, &element) != ZEND_COLLECTION_DIM_OK) {
+			return 1;
+		}
+		ZVAL_DEREF(element);
+		return !i_zend_is_true(element);
 	} else {
 		return 1;
 	}
@@ -3514,6 +3778,729 @@ static zend_never_inline bool zend_handle_fetch_obj_flags(
 	return 1;
 }
 
+/* Intrinsic readonly properties on native collection values: $collection->count
+ * and $collection->isEmpty. Computed, never stored as separate zvals; O(1) -- a
+ * single ZEND_VEC_COUNT field read, with no element access, no allocation and no
+ * element-descriptor resolution. Dispatched purely by runtime type
+ * (Z_TYPE == IS_COLLECTION) so the behaviour is identical whether the value came
+ * from a full descriptor, a future bare kind, mixed, a property, an array element
+ * or a return value -- it never inspects the declared type. Returns SUCCESS and
+ * writes *result (an int or bool, never refcounted) for a known name; returns
+ * FAILURE and leaves *result untouched for any other name, so each caller applies
+ * its own unknown-name policy: a plain read throws, while isset()/?? treat an
+ * unknown intrinsic as absent. */
+ZEND_API zend_result ZEND_FASTCALL zend_collection_read_intrinsic_property(
+		const zval *collection, zend_string *name, zval *result)
+{
+	ZEND_ASSERT(Z_TYPE_P(collection) == IS_COLLECTION);
+
+	uint32_t count = zend_stor_count(Z_VEC_P((zval *) collection));
+
+	if (zend_string_equals_literal(name, "count")) {
+		ZVAL_LONG(result, (zend_long) count);
+		return SUCCESS;
+	}
+	if (zend_string_equals_literal(name, "isEmpty")) {
+		ZVAL_BOOL(result, count == 0);
+		return SUCCESS;
+	}
+	return FAILURE;
+}
+
+/* ==========================================================================
+ * Native-collection intrinsic methods -- infrastructure.
+ *
+ * A collection value is not an object and gains no second object model: it has
+ * no zend_class_entry, no zend_object, no $this, no visibility, and no user-
+ * extensible registration. Its intrinsic methods are a CLOSED set of synthetic
+ * scope-less zend_internal_functions dispatched from the IS_COLLECTION branch of
+ * ZEND_INIT_METHOD_CALL.
+ *
+ * The receiver travels by value in the call frame HEADER: its collectable
+ * pointer lives in Z_PTR(call->This) while call_info stays a plain no-This
+ * function call (ZEND_CALL_NESTED_FUNCTION == 0, so Z_TYPE(This) == IS_UNDEF and
+ * nothing advertises IS_OBJECT / IS_COLLECTION / ZEND_CALL_HAS_THIS). This is the
+ * proven Model D transport -- it survives argument unpacking and stack-segment
+ * reallocation, unlike any argument/temp slot. Raw payload access is confined to
+ * the ownership helpers below; method handlers never touch Z_PTR(call->This).
+ *
+ * The vec table holds append/prepend/withAt/withoutAt, the tuple table holds
+ * withAt, and the set table holds with/without/union/intersect/diff. Every method
+ * returns a value and never mutates the receiver; a set no-op (adding a present
+ * value, removing an absent one, or an empty-effect binary op) returns the receiver
+ * itself as an owned reference.
+ * ========================================================================== */
+
+/* Set the owned receiver on a freshly pushed direct-call frame. The frame owns
+ * one reference until teardown (or until it is transferred to a Closure).
+ * File-static: the only writer is the INIT_METHOD_CALL branch in this TU. */
+static void ZEND_FASTCALL zend_collection_call_set_receiver(zend_execute_data *call, const zval *receiver)
+{
+	zend_refcounted *rc = Z_COUNTED_P(receiver);
+	GC_ADDREF(rc);
+	Z_PTR(call->This) = rc;
+}
+
+/* Borrow the receiver of a collection intrinsic frame (no refcount change).
+ * File-static: the only reader is the intrinsic handler in this TU. */
+static zend_vec * ZEND_FASTCALL zend_collection_call_get_receiver(const zend_execute_data *call)
+{
+	return (zend_vec *) Z_PTR(call->This);
+}
+
+/* Move the owned receiver out of the frame into a destination zval (e.g. a
+ * Closure field). Ownership transfers with no refcount change; the frame slot is
+ * cleared so teardown will not release it. */
+ZEND_API void ZEND_FASTCALL zend_collection_call_transfer_receiver(zend_execute_data *call, zval *dest)
+{
+	ZVAL_VEC(dest, (zend_vec *) Z_PTR(call->This));
+	Z_PTR(call->This) = NULL;
+}
+
+/* Release the frame-owned receiver. Safe to call on any exit path; a NULL slot
+ * (already transferred, or never set) is a no-op. */
+ZEND_API void ZEND_FASTCALL zend_collection_call_release_receiver(zend_execute_data *call)
+{
+	zend_vec *rc = (zend_vec *) Z_PTR(call->This);
+	if (EXPECTED(rc != NULL)) {
+		zval tmp;
+		ZVAL_VEC(&tmp, rc);
+		Z_PTR(call->This) = NULL;
+		zval_ptr_dtor(&tmp);
+	}
+}
+
+/* The value at argument position `arg_num` (named $`arg_name`) does not satisfy
+ * the receiver's element type. Name the receiver's full type and its element
+ * type, so "vec[int]::append(): Argument #1 ($value) must be of type int, string
+ * given" reads exactly like a declaration mismatch. arg_num/arg_name are passed
+ * because the inserted value is argument #1 for append/prepend but #2 for withAt.
+ * (Distinct from zend_collection_element_type_error above, which reports a literal
+ * element mismatch at construction time.) */
+static ZEND_COLD void zend_collection_method_value_type_error(
+		const zend_vec *receiver, const char *method,
+		uint32_t arg_num, const char *arg_name, const zval *value)
+{
+	zend_string *coll = zend_collection_info_to_string(receiver->type);
+	/* Member 0 for vec/set. Use the node-aware member stringifier: a nested member
+	 * type (e.g. vec[vec[int]]) carries a canonical zend_collection_info *, which
+	 * zend_type_to_string() would misread as a compile-time zend_collection_type
+	 * and dereference bogus fields. */
+	zend_string *elem = zend_collection_info_member_to_string(receiver->type, 0);
+	zend_type_error("%s::%s(): Argument #%u ($%s) must be of type %s, %s given",
+		ZSTR_VAL(coll), method, arg_num, arg_name, ZSTR_VAL(elem), zend_zval_value_name(value));
+	zend_string_release(elem);
+	zend_string_release(coll);
+}
+
+/* `index` is outside the receiver's 0..count-1 range. Reported as a ValueError,
+ * distinct from the TypeError a wrong-typed value raises, and naming the valid
+ * range so the diagnostic is actionable. An empty receiver has no valid index at
+ * all, so it gets its own wording rather than an inverted "0 and -1" range. */
+static ZEND_COLD void zend_collection_index_range_error(
+		const zend_vec *receiver, const char *method, zend_long index)
+{
+	zend_string *coll = zend_collection_info_to_string(receiver->type);
+	if (receiver->count == 0) {
+		zend_value_error("%s::%s(): Argument #1 ($index) must be a valid index, but %s is empty",
+			ZSTR_VAL(coll), method, ZSTR_VAL(coll));
+	} else {
+		zend_value_error(
+			"%s::%s(): Argument #1 ($index) must be between 0 and " ZEND_LONG_FMT ", " ZEND_LONG_FMT " given",
+			ZSTR_VAL(coll), method, (zend_long) receiver->count - 1, index);
+	}
+	zend_string_release(coll);
+}
+
+/* The exclusive-consume ownership condition (centralized; used by append, prepend,
+ * withAt, withoutAt): the direct-call frame owns the SOLE observable reference to the
+ * receiver, so the receiver may be mutated in place instead of copied.
+ *
+ * True iff (1) the frame is NOT a closure invocation -- a first-class callable only
+ * BORROWS the receiver from the Closure's retained value_receiver, so consuming there
+ * would corrupt the retained value and break FCC repeatability -- AND (2) no other zval
+ * references the storage (GC_REFCOUNT == 1). The direct-call INIT_METHOD_CALL branch
+ * addrefs the receiver (set_receiver) then FREE_OP1s the operand, so a *consumed*
+ * sole-owner TMP/VAR collapses to rc 1 here, while a borrowed CV or any alias stays
+ * >= 2. The consume operations never invoke userland, suspend a fiber, or re-enter, so
+ * the receiver cannot be observed at rc 1 mid-operation (observer hooks that retain it
+ * would addref, raising rc). GC-root membership is uncounted and tolerates the
+ * install-then-publish mutation. This is the same predicate PHP arrays use for
+ * copy-on-write. */
+static zend_always_inline bool zend_collection_call_receiver_is_exclusive(
+		const zend_execute_data *call, const zend_vec *receiver)
+{
+	return !(ZEND_CALL_INFO(call) & ZEND_CALL_CLOSURE)
+		&& GC_REFCOUNT(receiver) == 1;
+}
+
+/* Shared body for vec::append / vec::prepend. Build a NEW vec that is the
+ * receiver with $value appended (prepend == false) or prepended; the receiver is
+ * immutable and never changes. The result carries the receiver's exact concrete
+ * descriptor (zend_vec_create_with borrows receiver->type). The receiver is read
+ * only through the centralized header-receiver helper. For an FCC invocation the
+ * wrapper reinjects the receiver first, so the same body serves both. */
+static zend_always_inline void zend_collection_vec_insert(
+		zend_execute_data *execute_data, zval *return_value, bool prepend, const char *method)
+{
+	zend_vec *receiver = zend_collection_call_get_receiver(execute_data);
+	zval *value;
+
+	ZEND_ASSERT(receiver != NULL);
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_ZVAL(value)
+	ZEND_PARSE_PARAMETERS_END();
+
+	bool exclusive = zend_collection_call_receiver_is_exclusive(execute_data, receiver);
+	/* append routes through the C1 dispatcher (retained flat -> HYBRID, exclusive
+	 * flat -> in-place, hybrid -> matrix); prepend has no hybrid form in C1 and
+	 * stays the flat create_with path. */
+	zend_vec *out = prepend
+		? zend_vec_create_with(receiver, value, /* prepend */ true, exclusive)
+		: zend_vec_append_value(receiver, value, exclusive);
+	if (UNEXPECTED(out == NULL)) {
+		zend_collection_method_value_type_error(receiver, method, 1, "value", value);
+		RETURN_THROWS();
+	}
+	if (out == receiver) {
+		/* Consumed the receiver in place: move its sole, frame-owned reference to
+		 * the result and disarm the frame teardown -- no addref, no double-free. */
+		zend_collection_call_transfer_receiver(execute_data, return_value);
+	} else {
+		ZVAL_VEC(return_value, out); /* fresh refcount 1; teardown releases the receiver */
+	}
+}
+
+static ZEND_NAMED_FUNCTION(zend_collection_vec_append)
+{
+	zend_collection_vec_insert(execute_data, return_value, /* prepend */ false, "append");
+}
+
+static ZEND_NAMED_FUNCTION(zend_collection_vec_prepend)
+{
+	zend_collection_vec_insert(execute_data, return_value, /* prepend */ true, "prepend");
+}
+
+/* vec::withAt(int $index, mixed $value): vec[]. Build a NEW vec equal to the
+ * receiver with the element at $index replaced by $value; the receiver is
+ * immutable and never changes, and the result carries its exact descriptor. Both
+ * failure modes map to distinct diagnostics: an out-of-range index to a
+ * ValueError, a value that fails the element type to a TypeError. Index is
+ * validated first, matching left-to-right argument order ($index is #1). */
+static ZEND_NAMED_FUNCTION(zend_collection_vec_with_at)
+{
+	zend_vec *receiver = zend_collection_call_get_receiver(execute_data);
+	zend_long index;
+	zval *value;
+
+	ZEND_ASSERT(receiver != NULL);
+
+	ZEND_PARSE_PARAMETERS_START(2, 2)
+		Z_PARAM_LONG(index)
+		Z_PARAM_ZVAL(value)
+	ZEND_PARSE_PARAMETERS_END();
+
+	zend_vec_with_status status;
+	bool exclusive = zend_collection_call_receiver_is_exclusive(execute_data, receiver);
+	zend_vec *out = zend_vec_with_at(receiver, index, value, &status, exclusive);
+	if (UNEXPECTED(out == NULL)) {
+		if (status == ZEND_VEC_WITH_BAD_INDEX) {
+			zend_collection_index_range_error(receiver, "withAt", index);
+		} else {
+			zend_collection_method_value_type_error(receiver, "withAt", 2, "value", value);
+		}
+		RETURN_THROWS();
+	}
+	if (out == receiver) {
+		zend_collection_call_transfer_receiver(execute_data, return_value);
+	} else {
+		ZVAL_VEC(return_value, out); /* out has refcount 1; teardown releases the receiver */
+	}
+}
+
+/* vec::withoutAt(int $index): vec[]. Build a NEW vec equal to the receiver with
+ * the element at $index removed and the following elements compacted down; the
+ * receiver is immutable, the result carries its exact descriptor, and removing
+ * the only element yields an empty vec of the same descriptor. The only failure
+ * is an out-of-range index (ValueError); there is no value to type-check. */
+static ZEND_NAMED_FUNCTION(zend_collection_vec_without_at)
+{
+	zend_vec *receiver = zend_collection_call_get_receiver(execute_data);
+	zend_long index;
+
+	ZEND_ASSERT(receiver != NULL);
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_LONG(index)
+	ZEND_PARSE_PARAMETERS_END();
+
+	zend_vec_with_status status;
+	bool exclusive = zend_collection_call_receiver_is_exclusive(execute_data, receiver);
+	zend_vec *out = zend_vec_without_at(receiver, index, &status, exclusive);
+	if (UNEXPECTED(out == NULL)) {
+		ZEND_ASSERT(status == ZEND_VEC_WITH_BAD_INDEX);
+		zend_collection_index_range_error(receiver, "withoutAt", index);
+		RETURN_THROWS();
+	}
+	if (out == receiver) {
+		zend_collection_call_transfer_receiver(execute_data, return_value);
+	} else {
+		ZVAL_VEC(return_value, out); /* out has refcount 1; teardown releases the receiver */
+	}
+}
+
+/* $value does not satisfy the type declared for tuple position `index`. Unlike
+ * the vec helper, the expected type is the descriptor member for that specific
+ * position (types[index]), not a single element type; the receiver's index has
+ * already been range-checked, so types[index] is in bounds. */
+static ZEND_COLD void zend_collection_tuple_value_type_error(
+		const zend_vec *receiver, zend_long index, const zval *value)
+{
+	zend_string *coll = zend_collection_info_to_string(receiver->type);
+	/* Positional: member `index` (already range-checked). Node-aware member
+	 * stringifier, so a nested tuple member type stringifies through its canonical
+	 * node instead of being misread as a compile-time descriptor. */
+	zend_string *elem = zend_collection_info_member_to_string(receiver->type, (uint32_t) index);
+	zend_type_error("%s::withAt(): Argument #2 ($value) must be of type %s, %s given",
+		ZSTR_VAL(coll), ZSTR_VAL(elem), zend_zval_value_name(value));
+	zend_string_release(elem);
+	zend_string_release(coll);
+}
+
+/* tuple::withAt(int $index, mixed $value): tuple[]. Build a NEW tuple equal to
+ * the receiver with position $index replaced by $value; the receiver is immutable
+ * and never changes, the arity is invariant, and the result carries the exact
+ * concrete tuple descriptor. $value is validated against the type declared for
+ * that position (see zend_tuple_with_at), so a wrong type is a TypeError naming
+ * the position's type; an out-of-range index is a ValueError. Index is validated
+ * before the value, matching left-to-right argument order ($index is #1). */
+static ZEND_NAMED_FUNCTION(zend_collection_tuple_with_at)
+{
+	zend_vec *receiver = zend_collection_call_get_receiver(execute_data);
+	zend_long index;
+	zval *value;
+
+	ZEND_ASSERT(receiver != NULL);
+
+	ZEND_PARSE_PARAMETERS_START(2, 2)
+		Z_PARAM_LONG(index)
+		Z_PARAM_ZVAL(value)
+	ZEND_PARSE_PARAMETERS_END();
+
+	zend_tuple_with_status status;
+	zend_vec *out = zend_tuple_with_at(receiver, index, value, &status);
+	if (UNEXPECTED(out == NULL)) {
+		if (status == ZEND_TUPLE_WITH_BAD_INDEX) {
+			zend_collection_index_range_error(receiver, "withAt", index);
+		} else {
+			zend_collection_tuple_value_type_error(receiver, index, value);
+		}
+		RETURN_THROWS();
+	}
+	ZVAL_VEC(return_value, out); /* out has refcount 1; ownership transfers */
+}
+
+/* Shared body for set::with / set::without. Build the receiver plus/minus $value;
+ * a set is single-member, so $value is validated against member 0 exactly like a
+ * vec insert. Both operations may legitimately not change the set (adding a present
+ * value, removing an absent one): the primitive then returns the receiver itself as
+ * an already-owned reference, so the same ZVAL_VEC installs either a freshly built
+ * set (refcount 1) or the reused receiver (refcount already raised) with balanced
+ * refcounting. A wrong-typed value is a TypeError, checked before any membership
+ * work. The receiver is read only through the centralized header helper; for an FCC
+ * invocation the wrapper reinjects it first, so this body serves both. */
+static zend_always_inline void zend_collection_set_op(
+		zend_execute_data *execute_data, zval *return_value, bool remove, const char *method)
+{
+	zend_vec *receiver = zend_collection_call_get_receiver(execute_data);
+	zval *value;
+
+	ZEND_ASSERT(receiver != NULL);
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_ZVAL(value)
+	ZEND_PARSE_PARAMETERS_END();
+
+	zend_set_with_status status;
+	zend_vec *out = remove
+		? zend_set_without(receiver, value, &status)
+		: zend_set_with(receiver, value, &status);
+	if (UNEXPECTED(out == NULL)) {
+		ZEND_ASSERT(status == ZEND_SET_WITH_BAD_VALUE);
+		zend_collection_method_value_type_error(receiver, method, 1, "value", value);
+		RETURN_THROWS();
+	}
+	/* out is either a new set (refcount 1) or the receiver returned as an owned
+	 * reference (refcount already raised for a no-op); either way it transfers. */
+	ZVAL_VEC(return_value, out);
+}
+
+static ZEND_NAMED_FUNCTION(zend_collection_set_with)
+{
+	zend_collection_set_op(execute_data, return_value, /* remove */ false, "with");
+}
+
+static ZEND_NAMED_FUNCTION(zend_collection_set_without)
+{
+	zend_collection_set_op(execute_data, return_value, /* remove */ true, "without");
+}
+
+/* $other is not a set of the receiver's exact descriptor. INV-17 makes the check a
+ * pointer comparison (`other->type == receiver->type` iff the same concrete set type),
+ * so this one diagnostic covers a non-collection, a wrong kind (vec/tuple), and a set of
+ * a different element type. Expected and given are named as full collection types --
+ * `set[int]` vs `set[string]` / `vec[int]` / `array`. No dedicated CollectionTypeError:
+ * a descriptor mismatch is an ordinary argument TypeError (v1 frozen, §7). */
+static ZEND_COLD void zend_collection_set_arg_type_error(
+		const zend_vec *receiver, const char *method, const zval *other)
+{
+	zend_string *expected = zend_collection_info_to_string(receiver->type);
+	zend_string *given = zend_zval_collection_type_name(other);   /* NULL for a non-collection */
+	zend_type_error("%s::%s(): Argument #1 ($other) must be of type %s, %s given",
+		ZSTR_VAL(expected), method, ZSTR_VAL(expected),
+		given ? ZSTR_VAL(given) : zend_zval_value_name(other));
+	if (given) {
+		zend_string_release(given);
+	}
+	zend_string_release(expected);
+}
+
+/* Shared body for set::union / set::intersect / set::diff. The $other argument must be a
+ * set carrying the receiver's *exact* descriptor -- validated by pointer identity
+ * (INV-17: canonical nodes, so `==` iff the same concrete set type); no widening, merge,
+ * inference or structural recompare. Any other value is a TypeError before any work. On
+ * success the chosen operation runs and returns a new set, or the receiver itself as an
+ * owned reference for an empty-effect no-op (INV-34); the same ZVAL_VEC installs both. */
+static zend_always_inline void zend_collection_set_binary(
+		zend_execute_data *execute_data, zval *return_value, const char *method,
+		zend_vec *(*op)(const zend_vec *, const zend_vec *))
+{
+	zend_vec *receiver = zend_collection_call_get_receiver(execute_data);
+	zval *other;
+
+	ZEND_ASSERT(receiver != NULL);
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_ZVAL(other)
+	ZEND_PARSE_PARAMETERS_END();
+
+	ZVAL_DEREF(other);
+	if (UNEXPECTED(Z_TYPE_P(other) != IS_COLLECTION || Z_VEC_P(other)->type != receiver->type)) {
+		zend_collection_set_arg_type_error(receiver, method, other);
+		RETURN_THROWS();
+	}
+
+	/* out is a fresh set (refcount 1) or the receiver as an owned reference (no-op,
+	 * refcount already raised); either way it transfers. */
+	zend_vec *out = op(receiver, Z_VEC_P(other));
+	ZVAL_VEC(return_value, out);
+}
+
+static ZEND_NAMED_FUNCTION(zend_collection_set_union)
+{
+	zend_collection_set_binary(execute_data, return_value, "union", zend_set_union);
+}
+
+static ZEND_NAMED_FUNCTION(zend_collection_set_intersect)
+{
+	zend_collection_set_binary(execute_data, return_value, "intersect", zend_set_intersect);
+}
+
+static ZEND_NAMED_FUNCTION(zend_collection_set_diff)
+{
+	zend_collection_set_binary(execute_data, return_value, "diff", zend_set_diff);
+}
+
+/* Public signature: append(mixed $value): vec[] / prepend(mixed $value): vec[].
+ * $value is a required, mixed public parameter; the return type IS_MIXED here is
+ * a placeholder that startup overwrites with the erased vec[] descriptor below
+ * (the conversion pipeline has no literal spelling for a collection type). The
+ * per-instance element type is not expressible at arginfo time, so the value is
+ * checked at runtime in the handler, not by ZPP. */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(zend_collection_vec_insert_arginfo, 0, 1, IS_MIXED, 0)
+	ZEND_ARG_TYPE_INFO(0, value, IS_MIXED, 0)
+ZEND_END_ARG_INFO()
+
+/* Public signature: withAt(int $index, mixed $value): vec[]. $index is a strict
+ * int (ZPP enforces the type; a wrong-typed index is a TypeError before the
+ * handler runs); $value is mixed and element-checked at runtime. The IS_MIXED
+ * return is the same startup-overwritten placeholder as append/prepend. */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(zend_collection_vec_with_at_arginfo, 0, 2, IS_MIXED, 0)
+	ZEND_ARG_TYPE_INFO(0, index, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, value, IS_MIXED, 0)
+ZEND_END_ARG_INFO()
+
+/* Public signature: withoutAt(int $index): vec[]. One strict int parameter; the
+ * return placeholder is overwritten with the erased vec[] descriptor at startup. */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(zend_collection_vec_without_at_arginfo, 0, 1, IS_MIXED, 0)
+	ZEND_ARG_TYPE_INFO(0, index, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+/* Public signature: withAt(int $index, mixed $value): tuple[]. Same shape as
+ * vec::withAt -- strict int $index, mixed $value checked at runtime against the
+ * selected position's type -- but the return placeholder is overwritten with the
+ * erased tuple[] descriptor at startup. Kept separate from the vec arginfo so the
+ * two kinds do not share a symbol. */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(zend_collection_tuple_with_at_arginfo, 0, 2, IS_MIXED, 0)
+	ZEND_ARG_TYPE_INFO(0, index, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, value, IS_MIXED, 0)
+ZEND_END_ARG_INFO()
+
+/* Public signature: with(mixed $value): set[] / without(mixed $value): set[]. One
+ * required mixed parameter, checked at runtime against the receiver's element type;
+ * the return placeholder is overwritten with the erased set[] descriptor at startup.
+ * with and without share it -- identical signatures. */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(zend_collection_set_insert_arginfo, 0, 1, IS_MIXED, 0)
+	ZEND_ARG_TYPE_INFO(0, value, IS_MIXED, 0)
+ZEND_END_ARG_INFO()
+
+/* Public signature: union/intersect/diff(set[] $other): set[]. Both the return slot and
+ * the $other parameter are IS_MIXED placeholders overwritten at startup with the erased
+ * set[] descriptor (the pipeline has no literal spelling for a collection type), so
+ * Reflection shows `set[] $other` and `: set[]`. The three share it -- identical
+ * signatures. The declared `set[]` accepts any set; the exact-descriptor rule is a
+ * runtime pointer check in the handler. */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(zend_collection_set_binary_arginfo, 0, 1, IS_MIXED, 0)
+	ZEND_ARG_TYPE_INFO(0, other, IS_MIXED, 0)
+ZEND_END_ARG_INFO()
+
+/* The erased return types `vec[]`, `tuple[]` and `set[]`: bare-kind collection
+ * descriptors (num_types == 0) that the type checker treats as existential --
+ * satisfied by any concrete value of the same kind -- and that Reflection renders
+ * as "vec[]" / "tuple[]" / "set[]".
+ *
+ * LIFETIME (process-static, non-owning). These three descriptors and the synthetic
+ * functions' runtime arg_info arrays below are process-lifetime static metadata:
+ * filled once at startup, read-only thereafter, and never freed. Each descriptor is
+ * SHARED -- every method of a kind points its return slot (and, for the set-binary
+ * ops, its `$other` parameter slot) at the one static via ZEND_TYPE_SET_COLLECTION,
+ * which stores a borrowed pointer and copies nothing.
+ *
+ * The synthetic functions therefore MUST NEVER reach zend_free_internal_arg_info().
+ * They don't: they are never inserted into any function or class table (the resolver
+ * returns a raw pointer and ZEND_INIT_METHOD_CALL builds a frame from it directly),
+ * an FCC closure's free_storage releases only function_name + value_receiver, and
+ * Reflection frees nothing (that path is gated on ZEND_ACC_CALL_VIA_TRAMPOLINE, which
+ * these never carry). If one of these arg_info ever DID reach it,
+ * zend_free_internal_arg_info() -> zend_type_release() would pefree() the shared
+ * static descriptor and pefree() the static arg_info array -- a free of static
+ * memory, multiplied across every shared user, i.e. heap corruption. Note the free
+ * would fire precisely because ZEND_TYPE_SET_COLLECTION does not set the arena bit;
+ * that bit is a provenance marker ("this descriptor lives in an arena") and MUST NOT
+ * be set here to fake-suppress the free -- a file-static descriptor is not arena-
+ * owned. The invariant is non-reachability, asserted at registration below. */
+static zend_collection_type zend_collection_vec_erased_desc;
+static zend_collection_type zend_collection_tuple_erased_desc;
+static zend_collection_type zend_collection_set_erased_desc;
+
+/* One synthetic function per intrinsic. Scope-less (no class), marked with
+ * ZEND_ACC2_COLLECTION_RECEIVER so teardown and FCC capture recognise the header
+ * receiver without a per-function pointer comparison. arg_info holds the runtime
+ * (converted, interned) argument info at index +1, exactly as registered
+ * functions do. */
+static zend_internal_function zend_collection_vec_append_fn;
+static zend_internal_function zend_collection_vec_prepend_fn;
+static zend_internal_function zend_collection_vec_with_at_fn;
+static zend_internal_function zend_collection_vec_without_at_fn;
+static zend_internal_function zend_collection_tuple_with_at_fn;
+static zend_internal_function zend_collection_set_with_fn;
+static zend_internal_function zend_collection_set_without_fn;
+static zend_internal_function zend_collection_set_union_fn;
+static zend_internal_function zend_collection_set_intersect_fn;
+static zend_internal_function zend_collection_set_diff_fn;
+
+/* Runtime (converted, interned) arg_info per function: [0] is the return slot
+ * (the erased vec[] / tuple[] / set[]), [1..] the parameters. append, prepend,
+ * withoutAt, set::with and set::without take one parameter; vec::withAt and
+ * tuple::withAt take two. Each function owns its array -- they are tiny and
+ * read-only after startup, so there is no reason to alias them. */
+static zend_arg_info zend_collection_vec_append_rt_arg_info[2];
+static zend_arg_info zend_collection_vec_prepend_rt_arg_info[2];
+static zend_arg_info zend_collection_vec_with_at_rt_arg_info[3];
+static zend_arg_info zend_collection_vec_without_at_rt_arg_info[2];
+static zend_arg_info zend_collection_tuple_with_at_rt_arg_info[3];
+static zend_arg_info zend_collection_set_with_rt_arg_info[2];
+static zend_arg_info zend_collection_set_without_rt_arg_info[2];
+static zend_arg_info zend_collection_set_union_rt_arg_info[2];
+static zend_arg_info zend_collection_set_intersect_rt_arg_info[2];
+static zend_arg_info zend_collection_set_diff_rt_arg_info[2];
+
+/* Closed per-kind method tables (name -> synthetic function). No method-name
+ * switches live in the generated VM handlers; the resolver walks these tables.
+ * MAP and SHAPE are unimplemented, so their (absent) tables resolve to nothing.
+ * Names are interned at startup for case-insensitive lookup. */
+typedef struct {
+	zend_string              *name;
+	const zend_internal_function *fn;
+} zend_collection_intrinsic_entry;
+
+/* append, prepend, withAt, withoutAt, NULL sentinel. */
+static zend_collection_intrinsic_entry zend_collection_vec_methods[5];
+/* with, without, union, intersect, diff, NULL sentinel. */
+static zend_collection_intrinsic_entry zend_collection_set_methods[6];
+static zend_collection_intrinsic_entry zend_collection_tuple_methods[2]; /* withAt, NULL sentinel */
+
+/* Install one synthetic scope-less collection method into `slot`: convert its
+ * arg_info through the standard pipeline, overwrite the return slot's IS_MIXED
+ * placeholder with `erased_return` -- the bare-kind vec[] or tuple[] descriptor
+ * (the pipeline has no literal spelling for a collection type) -- and point the
+ * function at the runtime arg_info. All num_args parameters are required in v1.
+ * ZEND_ACC2_COLLECTION_RECEIVER routes the receiver through the frame header;
+ * ZEND_ACC_HAS_RETURN_TYPE exposes the erased return to Reflection and the debug
+ * return-type verifier. The erased descriptor is the only per-kind input, so vec
+ * and tuple share this one registrar rather than a public method registry. */
+static void zend_collection_register_method(
+		zend_internal_function *fn, const char *name, size_t name_len, zif_handler handler,
+		uint32_t num_args, const zend_internal_arg_info *src, zend_arg_info *rt,
+		const zend_collection_type *erased_return, zend_collection_intrinsic_entry *slot)
+{
+	memset(fn, 0, sizeof(*fn));
+	fn->type = ZEND_INTERNAL_FUNCTION;
+	fn->fn_flags = ZEND_ACC_PUBLIC | ZEND_ACC_HAS_RETURN_TYPE;
+	fn->fn_flags2 = ZEND_ACC2_COLLECTION_RECEIVER;
+	fn->function_name = zend_string_init_interned(name, name_len, 1);
+	fn->scope = NULL;
+	fn->num_args = num_args;
+	fn->required_num_args = num_args;
+
+	/* Return slot (index 0), then each parameter (1..num_args). */
+	zend_convert_internal_arg_info(&rt[0], &src[0], true, true);
+	for (uint32_t i = 1; i <= num_args; i++) {
+		zend_convert_internal_arg_info(&rt[i], &src[i], false, true);
+	}
+	memset(&rt[0].type, 0, sizeof(zend_type));
+	/* The erased return descriptor is process-static and shared; it must be the bare
+	 * (existential) form. See the descriptor-lifetime note above. */
+	ZEND_ASSERT(erased_return->num_types == 0);
+	ZEND_TYPE_SET_COLLECTION(rt[0].type, (zend_collection_type *) erased_return);
+
+	fn->arg_info = rt + 1;
+	fn->handler = handler;
+
+	/* These functions must stay off every path that frees arg_info: scope-less (never
+	 * in a class function table) and never trampolined. Both keep their shared static
+	 * descriptor and arg_info array out of zend_free_internal_arg_info(). */
+	ZEND_ASSERT(fn->scope == NULL);
+	ZEND_ASSERT(!(fn->fn_flags & ZEND_ACC_CALL_VIA_TRAMPOLINE));
+
+	slot->name = zend_string_copy(fn->function_name);
+	slot->fn = fn;
+}
+
+/* Register the closed intrinsic-method set once, at engine startup. Engine-
+ * internal only: there is deliberately no public API to add entries. */
+ZEND_API void zend_collection_intrinsics_startup(void)
+{
+	/* Erased vec[] / tuple[] / set[] return descriptors: bare kind, no members. Each
+	 * is shared by its kind's method return slots. */
+	zend_collection_vec_erased_desc.kind = ZEND_COLLECTION_TYPE_VEC;
+	zend_collection_vec_erased_desc.num_types = 0;
+	zend_collection_tuple_erased_desc.kind = ZEND_COLLECTION_TYPE_TUPLE;
+	zend_collection_tuple_erased_desc.num_types = 0;
+	zend_collection_set_erased_desc.kind = ZEND_COLLECTION_TYPE_SET;
+	zend_collection_set_erased_desc.num_types = 0;
+
+	/* vec: append and prepend share the one-parameter insert arginfo (identical
+	 * signatures); withAt and withoutAt have their own. All return vec[]. */
+	zend_collection_register_method(
+		&zend_collection_vec_append_fn, "append", sizeof("append") - 1,
+		zend_collection_vec_append, 1,
+		zend_collection_vec_insert_arginfo, zend_collection_vec_append_rt_arg_info,
+		&zend_collection_vec_erased_desc, &zend_collection_vec_methods[0]);
+	zend_collection_register_method(
+		&zend_collection_vec_prepend_fn, "prepend", sizeof("prepend") - 1,
+		zend_collection_vec_prepend, 1,
+		zend_collection_vec_insert_arginfo, zend_collection_vec_prepend_rt_arg_info,
+		&zend_collection_vec_erased_desc, &zend_collection_vec_methods[1]);
+	zend_collection_register_method(
+		&zend_collection_vec_with_at_fn, "withAt", sizeof("withAt") - 1,
+		zend_collection_vec_with_at, 2,
+		zend_collection_vec_with_at_arginfo, zend_collection_vec_with_at_rt_arg_info,
+		&zend_collection_vec_erased_desc, &zend_collection_vec_methods[2]);
+	zend_collection_register_method(
+		&zend_collection_vec_without_at_fn, "withoutAt", sizeof("withoutAt") - 1,
+		zend_collection_vec_without_at, 1,
+		zend_collection_vec_without_at_arginfo, zend_collection_vec_without_at_rt_arg_info,
+		&zend_collection_vec_erased_desc, &zend_collection_vec_methods[3]);
+
+	/* tuple: withAt only. Returns tuple[]. */
+	zend_collection_register_method(
+		&zend_collection_tuple_with_at_fn, "withAt", sizeof("withAt") - 1,
+		zend_collection_tuple_with_at, 2,
+		zend_collection_tuple_with_at_arginfo, zend_collection_tuple_with_at_rt_arg_info,
+		&zend_collection_tuple_erased_desc, &zend_collection_tuple_methods[0]);
+
+	/* set: with and without share the one-parameter insert arginfo. Both return set[]. */
+	zend_collection_register_method(
+		&zend_collection_set_with_fn, "with", sizeof("with") - 1,
+		zend_collection_set_with, 1,
+		zend_collection_set_insert_arginfo, zend_collection_set_with_rt_arg_info,
+		&zend_collection_set_erased_desc, &zend_collection_set_methods[0]);
+	zend_collection_register_method(
+		&zend_collection_set_without_fn, "without", sizeof("without") - 1,
+		zend_collection_set_without, 1,
+		zend_collection_set_insert_arginfo, zend_collection_set_without_rt_arg_info,
+		&zend_collection_set_erased_desc, &zend_collection_set_methods[1]);
+
+	/* set binary ops: union/intersect/diff share the one-parameter binary arginfo and
+	 * all return set[]. Unlike the unary methods their parameter is a collection type,
+	 * so after registration each $other slot (rt[1], the converted parameter) is retyped
+	 * to the erased set[] descriptor -- so Reflection shows `set[] $other`. rt+1 is what
+	 * fn->arg_info points at, so this mutates exactly the slot the function exposes. */
+	zend_collection_register_method(
+		&zend_collection_set_union_fn, "union", sizeof("union") - 1,
+		zend_collection_set_union, 1,
+		zend_collection_set_binary_arginfo, zend_collection_set_union_rt_arg_info,
+		&zend_collection_set_erased_desc, &zend_collection_set_methods[2]);
+	zend_collection_register_method(
+		&zend_collection_set_intersect_fn, "intersect", sizeof("intersect") - 1,
+		zend_collection_set_intersect, 1,
+		zend_collection_set_binary_arginfo, zend_collection_set_intersect_rt_arg_info,
+		&zend_collection_set_erased_desc, &zend_collection_set_methods[3]);
+	zend_collection_register_method(
+		&zend_collection_set_diff_fn, "diff", sizeof("diff") - 1,
+		zend_collection_set_diff, 1,
+		zend_collection_set_binary_arginfo, zend_collection_set_diff_rt_arg_info,
+		&zend_collection_set_erased_desc, &zend_collection_set_methods[4]);
+
+	zend_arg_info *set_binary_rt[] = {
+		zend_collection_set_union_rt_arg_info,
+		zend_collection_set_intersect_rt_arg_info,
+		zend_collection_set_diff_rt_arg_info,
+	};
+	for (size_t i = 0; i < 3; i++) {
+		memset(&set_binary_rt[i][1].type, 0, sizeof(zend_type));
+		ZEND_TYPE_SET_COLLECTION(set_binary_rt[i][1].type, &zend_collection_set_erased_desc);
+	}
+	/* vec_methods[4], tuple_methods[1] and set_methods[5] stay zero-initialised:
+	 * the NULL name terminates each table. */
+}
+
+/* Centralised intrinsic-method resolver invoked from the IS_COLLECTION branch of
+ * ZEND_INIT_METHOD_CALL. Generic zval receiver; the kind is read from the value
+ * and selects a closed table; the name is matched case-insensitively (property-
+ * hook precedent). Returns the synthetic function or NULL for an unknown name. */
+ZEND_API zend_function *ZEND_FASTCALL zend_collection_resolve_intrinsic_method(
+		const zval *receiver, zend_string *name)
+{
+	ZEND_ASSERT(Z_TYPE_P(receiver) == IS_COLLECTION);
+
+	const zend_collection_intrinsic_entry *table;
+	switch (Z_VEC_P(receiver)->type->kind) {
+		case ZEND_COLLECTION_TYPE_VEC:   table = zend_collection_vec_methods;   break;
+		case ZEND_COLLECTION_TYPE_SET:   table = zend_collection_set_methods;   break;
+		case ZEND_COLLECTION_TYPE_TUPLE: table = zend_collection_tuple_methods; break;
+		default:                         return NULL; /* MAP/SHAPE: unimplemented */
+	}
+	for (; table->name != NULL; table++) {
+		if (zend_string_equals_ci(name, table->name)) {
+			return (zend_function *) table->fn;
+		}
+	}
+	return NULL;
+}
+
 static zend_always_inline void zend_fetch_property_address(
 	zval *result,
 	const zval *container,
@@ -3551,6 +4538,13 @@ static zend_always_inline void zend_fetch_property_address(
 
 			/* this should modify object only if it's empty */
 			if (type == BP_VAR_UNSET) {
+				if (UNEXPECTED(Z_TYPE_P(container) == IS_COLLECTION)) {
+					name = zval_get_tmp_string((zval *) prop_ptr, &tmp_name);
+					zend_throw_error(NULL, "Cannot unset intrinsic property \"%s\" on collection", ZSTR_VAL(name));
+					zend_tmp_string_release(tmp_name);
+					ZVAL_ERROR(result);
+					return;
+				}
 				ZVAL_NULL(result);
 				return;
 			}
@@ -3956,6 +4950,18 @@ static zend_always_inline int i_zend_verify_type_assignable_zval(
 
 	if (EXPECTED(ZEND_TYPE_CONTAINS_CODE(type, zv_type))) {
 		return 1;
+	}
+
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
+		return zend_check_collection_type(&type, zv) ? 1 : 0;
+	}
+
+	if (UNEXPECTED(zv_type == IS_COLLECTION)) {
+		/* A collection has no may-be bit, so no mask can accept it. It satisfies
+		 * `mixed` and, since F2, the standalone `iterable` type (fallback bit);
+		 * it must never reach the scalar coercion below. */
+		return (ZEND_TYPE_IS_MIXED(type)
+			|| ZEND_TYPE_IS_ITERABLE_FALLBACK(type)) ? 1 : 0;
 	}
 
 	if (ZEND_TYPE_IS_COMPLEX(type) && zv_type == IS_OBJECT
@@ -4903,6 +5909,12 @@ static void cleanup_unfinished_calls(zend_execute_data *execute_data, uint32_t o
 
 			zend_vm_stack_free_args(EX(call));
 
+			if (UNEXPECTED(zend_call_owns_collection_receiver(call))) {
+				/* A direct collection intrinsic call abandoned by an exception
+				 * before its handler ran (e.g. an unknown-named-parameter or
+				 * argument-type error): release the header-stored receiver. */
+				zend_collection_call_release_receiver(call);
+			}
 			if (ZEND_CALL_INFO(call) & ZEND_CALL_RELEASE_THIS) {
 				OBJ_RELEASE(Z_OBJ(call->This));
 			}
@@ -4956,7 +5968,11 @@ static void cleanup_live_vars(zend_execute_data *execute_data, uint32_t op_num, 
 					zend_object_store_ctor_failed(obj);
 					OBJ_RELEASE(obj);
 				} else if (kind == ZEND_LIVE_LOOP) {
-					if (Z_TYPE_P(var) != IS_ARRAY && Z_FE_ITER_P(var) != (uint32_t)-1) {
+					/* A collection foreach keeps its position in fe_pos, which
+					 * aliases fe_iter_idx, and owns no EG(ht_iterators) slot, so
+					 * on exception unwind it must not reach
+					 * zend_hash_iterator_del(); drop the reference only. */
+					if (Z_TYPE_P(var) != IS_ARRAY && Z_TYPE_P(var) != IS_COLLECTION && Z_FE_ITER_P(var) != (uint32_t)-1) {
 						zend_hash_iterator_del(Z_FE_ITER_P(var));
 					}
 					zval_ptr_dtor_nogc(var);

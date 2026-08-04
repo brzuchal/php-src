@@ -840,6 +840,14 @@ zend_jit_trace_stop ZEND_FASTCALL zend_jit_trace_execute(zend_execute_data  *ex,
 				if (HT_IS_PACKED(Z_ARRVAL_P(zv))) {
 					flags |= IS_TRACE_PACKED;
 				}
+			} else if (Z_TYPE_P(zv) == IS_COLLECTION) {
+				/* A collection value's zval type (IS_COLLECTION == 21) does not fit
+				 * the trace record's 4-bit type field and would be misdecoded
+				 * downstream as IS_TRACE_PACKED|IS_DOUBLE. The JIT never specialises
+				 * on collection values (ZEND_CONSTRUCT_COLLECTION falls back to the
+				 * VM), so record the operand as unknown to keep the trace generic. */
+				op1_type = IS_UNKNOWN;
+				flags = 0;
 			}
 			op1_type |= flags;
 		} else if (opline->op1_type == IS_UNUSED && (op_array->fn_flags & ZEND_ACC_CLOSURE)) {
@@ -885,6 +893,11 @@ zend_jit_trace_stop ZEND_FASTCALL zend_jit_trace_execute(zend_execute_data  *ex,
 			}
 			if (Z_TYPE_P(zv) == IS_OBJECT) {
 				ce2 = Z_OBJCE_P(zv);
+			} else if (Z_TYPE_P(zv) == IS_COLLECTION) {
+				/* See the op1 handling above: IS_COLLECTION is not representable in
+				 * the trace type field, so record it as unknown. */
+				op2_type = IS_UNKNOWN;
+				flags = 0;
 			}
 			op2_type |= flags;
 		}
@@ -910,6 +923,12 @@ zend_jit_trace_stop ZEND_FASTCALL zend_jit_trace_execute(zend_execute_data  *ex,
 					zv = Z_REFVAL_P(zv);
 					op3_type = Z_TYPE_P(zv);
 					flags |= IS_TRACE_REFERENCE;
+				}
+				if (Z_TYPE_P(zv) == IS_COLLECTION) {
+					/* See the op1 handling above: IS_COLLECTION is not representable
+					 * in the trace type field, so record it as unknown. */
+					op3_type = IS_UNKNOWN;
+					flags = 0;
 				}
 				op3_type |= flags;
 			}

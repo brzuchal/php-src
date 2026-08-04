@@ -1,5 +1,5 @@
 /* This is a generated file, edit test.stub.php instead.
- * Stub hash: a221a3df3815679d61fd546ba120fd3a374fe71f
+ * Stub hash: c578d1688c2d6f4b82d3bc9dce40738aafe38bd5
  * Has decl header: yes */
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_trigger_bailout, 0, 0, 0)
@@ -116,6 +116,55 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_refcount, 0, 0, 1)
 	ZEND_ARG_INFO(0, value)
 ZEND_END_ARG_INFO()
+
+#define arginfo_zend_test_vec_selftest arginfo_zend_trigger_bailout
+
+#define arginfo_zend_test_vec_layout arginfo_zend_trigger_bailout
+
+#define arginfo_zend_test_collection_type_selftest arginfo_zend_trigger_bailout
+
+#define arginfo_zend_test_nested_collection_type_selftest arginfo_zend_trigger_bailout
+
+#define arginfo_zend_test_type_code_alias_selftest arginfo_zend_trigger_bailout
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_make_vec, 0, 0, 3)
+	ZEND_ARG_INFO(0, values)
+	ZEND_ARG_INFO(0, element_type)
+	ZEND_ARG_INFO(1, out)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_vec_count, 0, 0, 1)
+	ZEND_ARG_INFO(0, vec)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_vec_get, 0, 0, 2)
+	ZEND_ARG_INFO(0, vec)
+	ZEND_ARG_INFO(0, index)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_zend_test_collection_key, 0, 0, 1)
+	ZEND_ARG_INFO(0, function)
+ZEND_END_ARG_INFO()
+
+#define arginfo_zend_test_collection_key_supported arginfo_zend_test_collection_key
+
+#define arginfo_zend_test_collection_key_positional arginfo_zend_trigger_bailout
+
+#define arginfo_zend_test_collection_key_provenance arginfo_zend_test_collection_key
+
+#define arginfo_zend_test_collection_key_unsupported arginfo_zend_trigger_bailout
+
+#define arginfo_zend_test_collection_intern arginfo_zend_test_collection_key
+
+#define arginfo_zend_test_vec_type_id arginfo_zend_test_vec_count
+
+#define arginfo_zend_test_collection_collision_selftest arginfo_zend_trigger_bailout
+
+#define arginfo_zend_test_collection_classify arginfo_zend_test_collection_key
+
+#define arginfo_zend_test_collection_descents arginfo_zend_trigger_bailout
+
+#define arginfo_zend_test_collection_stats arginfo_zend_trigger_bailout
 
 #define arginfo_zend_test_zend_ini_parse_quantity arginfo_zend_create_unterminated_string
 
@@ -295,6 +344,25 @@ static ZEND_FUNCTION(zend_object_init_with_constructor);
 static ZEND_FUNCTION(zend_call_method_if_exists);
 static ZEND_FUNCTION(zend_test_call_with_consumed_args);
 static ZEND_FUNCTION(zend_test_refcount);
+static ZEND_FUNCTION(zend_test_vec_selftest);
+static ZEND_FUNCTION(zend_test_vec_layout);
+static ZEND_FUNCTION(zend_test_collection_type_selftest);
+static ZEND_FUNCTION(zend_test_nested_collection_type_selftest);
+static ZEND_FUNCTION(zend_test_type_code_alias_selftest);
+static ZEND_FUNCTION(zend_test_make_vec);
+static ZEND_FUNCTION(zend_test_vec_count);
+static ZEND_FUNCTION(zend_test_vec_get);
+static ZEND_FUNCTION(zend_test_collection_key);
+static ZEND_FUNCTION(zend_test_collection_key_supported);
+static ZEND_FUNCTION(zend_test_collection_key_positional);
+static ZEND_FUNCTION(zend_test_collection_key_provenance);
+static ZEND_FUNCTION(zend_test_collection_key_unsupported);
+static ZEND_FUNCTION(zend_test_collection_intern);
+static ZEND_FUNCTION(zend_test_vec_type_id);
+static ZEND_FUNCTION(zend_test_collection_collision_selftest);
+static ZEND_FUNCTION(zend_test_collection_classify);
+static ZEND_FUNCTION(zend_test_collection_descents);
+static ZEND_FUNCTION(zend_test_collection_stats);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_quantity);
 static ZEND_FUNCTION(zend_test_zend_ini_parse_uquantity);
 static ZEND_FUNCTION(zend_test_zend_ini_str);
@@ -403,6 +471,25 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(zend_call_method_if_exists, arginfo_zend_call_method_if_exists)
 	ZEND_FE(zend_test_call_with_consumed_args, arginfo_zend_test_call_with_consumed_args)
 	ZEND_FE(zend_test_refcount, arginfo_zend_test_refcount)
+	ZEND_FE(zend_test_vec_selftest, arginfo_zend_test_vec_selftest)
+	ZEND_FE(zend_test_vec_layout, arginfo_zend_test_vec_layout)
+	ZEND_FE(zend_test_collection_type_selftest, arginfo_zend_test_collection_type_selftest)
+	ZEND_FE(zend_test_nested_collection_type_selftest, arginfo_zend_test_nested_collection_type_selftest)
+	ZEND_FE(zend_test_type_code_alias_selftest, arginfo_zend_test_type_code_alias_selftest)
+	ZEND_FE(zend_test_make_vec, arginfo_zend_test_make_vec)
+	ZEND_FE(zend_test_vec_count, arginfo_zend_test_vec_count)
+	ZEND_FE(zend_test_vec_get, arginfo_zend_test_vec_get)
+	ZEND_FE(zend_test_collection_key, arginfo_zend_test_collection_key)
+	ZEND_FE(zend_test_collection_key_supported, arginfo_zend_test_collection_key_supported)
+	ZEND_FE(zend_test_collection_key_positional, arginfo_zend_test_collection_key_positional)
+	ZEND_FE(zend_test_collection_key_provenance, arginfo_zend_test_collection_key_provenance)
+	ZEND_FE(zend_test_collection_key_unsupported, arginfo_zend_test_collection_key_unsupported)
+	ZEND_FE(zend_test_collection_intern, arginfo_zend_test_collection_intern)
+	ZEND_FE(zend_test_vec_type_id, arginfo_zend_test_vec_type_id)
+	ZEND_FE(zend_test_collection_collision_selftest, arginfo_zend_test_collection_collision_selftest)
+	ZEND_FE(zend_test_collection_classify, arginfo_zend_test_collection_classify)
+	ZEND_FE(zend_test_collection_descents, arginfo_zend_test_collection_descents)
+	ZEND_FE(zend_test_collection_stats, arginfo_zend_test_collection_stats)
 	ZEND_FE(zend_test_zend_ini_parse_quantity, arginfo_zend_test_zend_ini_parse_quantity)
 	ZEND_FE(zend_test_zend_ini_parse_uquantity, arginfo_zend_test_zend_ini_parse_uquantity)
 	ZEND_FE(zend_test_zend_ini_str, arginfo_zend_test_zend_ini_str)

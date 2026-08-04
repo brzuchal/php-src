@@ -17,6 +17,8 @@
 #include "php_incomplete_class.h"
 #include "zend_portability.h"
 #include "zend_exceptions.h"
+#include "zend_vec.h"
+#include "zend_compile.h"
 
 /* {{{ reference-handling for unserializer: var_* */
 #define VAR_ENTRIES_MAX 1018     /* 1024 - offsetof(php_unserialize_data, entries) / sizeof(void*) */
@@ -882,6 +884,273 @@ PHPAPI int php_var_unserialize(UNSERIALIZE_PARAMETER)
 	return result;
 }
 
+/* --- collection unserialization ------------------------------------------
+ * Decodes the wire format documented in
+ * implementation-notes/collection-serialization-format.md. The descriptor is
+ * rebuilt structurally (never from a type string), promoted through the normal
+ * intern path, and the value is built by the same zend_collection_construct()
+ * every literal uses -- so a crafted string can only produce a value the
+ * language could itself construct, and every element is revalidated. */
+
+#define PHP_COLLECTION_MAX_ARITY      255
+#define PHP_COLLECTION_MAX_DESC_DEPTH 64
+
+/* Parse an unsigned integer terminated by `term`, advancing *p past it.
+ * Overflow-safe; requires at least one digit and the exact terminator. */
+static bool php_collection_parse_uint(
+		const unsigned char **p, const unsigned char *max, char term, zend_ulong *out)
+{
+	const unsigned char *cur = *p;
+	zend_ulong val = 0;
+
+	if (cur >= max || *cur < '0' || *cur > '9') {
+		return false;
+	}
+	do {
+		zend_ulong digit = (zend_ulong) (*cur - '0');
+		if (UNEXPECTED(val > (ZEND_ULONG_MAX - digit) / 10)) {
+			return false;
+		}
+		val = val * 10 + digit;
+		cur++;
+	} while (cur < max && *cur >= '0' && *cur <= '9');
+	if (cur >= max || *cur != (unsigned char) term) {
+		return false;
+	}
+	*p = cur + 1;
+	*out = val;
+	return true;
+}
+
+/* The element mask for a builtin member letter, or 0 if not one. Inverse of the
+ * serializer's php_collection_builtin_member_letter(); the two must agree. */
+static uint32_t php_collection_builtin_member_mask(unsigned char letter)
+{
+	switch (letter) {
+		case 'i': return (1u << IS_LONG);
+		case 'd': return (1u << IS_DOUBLE);
+		case 's': return (1u << IS_STRING);
+		case 'b': return ((1u << IS_FALSE) | (1u << IS_TRUE));
+		case 'a': return (1u << IS_ARRAY);
+		default:  return 0;
+	}
+}
+
+/* Parse "kindname:arity:{member...}" into a fresh, non-persistent
+ * zend_collection_type. A member is a builtin letter (i/d/s/b/a) then ';', a
+ * class c:<len>:"<name>";, or a nested l:<descriptor>;. The member tags are
+ * lowercase, distinct from serialize()'s value-position C/L. Members are
+ * zero-initialised first so a partial parse can be released wholesale. Returns
+ * NULL on malformed input, having released anything it built. */
+static zend_collection_type *php_collection_parse_descriptor(
+		const unsigned char **p, const unsigned char *max, int depth)
+{
+	const unsigned char *name_start;
+	size_t name_len;
+	uint32_t kind;
+	zend_ulong arity;
+	zend_collection_type *desc;
+
+	if (depth > PHP_COLLECTION_MAX_DESC_DEPTH) {
+		return NULL;
+	}
+
+	/* kindname ":" -- a source-level name, resolved through the compiler table. */
+	name_start = *p;
+	while (*p < max && **p != ':') {
+		(*p)++;
+	}
+	if (*p >= max) {
+		return NULL;
+	}
+	name_len = (size_t) (*p - name_start);
+	(*p)++;   /* ':' */
+	if (name_len == 0
+	 || !zend_collection_kind_by_name((const char *) name_start, name_len, &kind)) {
+		return NULL;   /* unknown kind name -> clean refusal */
+	}
+
+	if (!php_collection_parse_uint(p, max, ':', &arity)
+	 || arity == 0 || arity > PHP_COLLECTION_MAX_ARITY) {
+		return NULL;
+	}
+	if (*p >= max || **p != '{') {
+		return NULL;
+	}
+	(*p)++;
+
+	desc = zend_type_collection_alloc(kind, (uint32_t) arity, /* persistent */ false);
+	for (uint32_t i = 0; i < arity; i++) {
+		desc->types[i] = (zend_type) ZEND_TYPE_INIT_NONE(0);
+	}
+
+	for (uint32_t i = 0; i < arity; i++) {
+		unsigned char tag;
+		uint32_t builtin_mask;
+
+		if (*p >= max) {
+			goto fail;
+		}
+		tag = (*p)[0];
+
+		if ((builtin_mask = php_collection_builtin_member_mask(tag)) != 0) {
+			/* builtin: <letter> ";" */
+			*p += 1;
+			if (*p >= max || **p != ';') {
+				goto fail;
+			}
+			(*p)++;
+			ZEND_TYPE_FULL_MASK(desc->types[i]) = builtin_mask;
+		} else if (tag == 'c') {
+			/* class: c:<len>:"<name>"; */
+			zend_ulong len;
+			zend_string *name;
+			*p += 1;
+			if (*p >= max || **p != ':') {
+				goto fail;
+			}
+			(*p)++;
+			if (!php_collection_parse_uint(p, max, ':', &len)) {
+				goto fail;
+			}
+			if (*p >= max || **p != '"' || (zend_ulong) (max - *p) < len + 3) {
+				goto fail;   /* '"' + name + '";' */
+			}
+			(*p)++;
+			name = zend_string_init((const char *) *p, len, 0);
+			*p += len;
+			if ((*p)[0] != '"' || (*p)[1] != ';') {
+				zend_string_release(name);
+				goto fail;
+			}
+			*p += 2;
+			desc->types[i] = (zend_type) ZEND_TYPE_INIT_CLASS(name, 0, 0);
+		} else if (tag == 'l') {
+			/* nested collection: l:<descriptor>; */
+			zend_collection_type *child;
+			zend_type child_type;
+			*p += 1;
+			if (*p >= max || **p != ':') {
+				goto fail;
+			}
+			(*p)++;
+			child = php_collection_parse_descriptor(p, max, depth + 1);
+			if (!child) {
+				goto fail;
+			}
+			child_type = (zend_type) ZEND_TYPE_INIT_NONE(0);
+			ZEND_TYPE_SET_COLLECTION(child_type, child);
+			desc->types[i] = child_type;   /* owned by desc now; released on fail */
+			if (*p >= max || **p != ';') {
+				goto fail;
+			}
+			(*p)++;
+		} else {
+			goto fail;   /* unknown member tag -> clean refusal */
+		}
+	}
+
+	if (*p >= max || **p != '}') {
+		goto fail;
+	}
+	(*p)++;
+	return desc;
+
+fail: {
+	zend_type wrap = (zend_type) ZEND_TYPE_INIT_NONE(0);
+	ZEND_TYPE_SET_COLLECTION(wrap, desc);
+	zend_type_release(wrap, /* persistent */ false);
+	return NULL;
+}
+}
+
+/* Decode "L:" <descriptor> ":" <count> ":{" <element>{count} "}" from *p
+ * (positioned just after "L:"). Returns 1 with rval set on success, 0 on any
+ * malformed/unsupported/failing input. */
+static int php_var_unserialize_collection(UNSERIALIZE_PARAMETER)
+{
+	zend_ulong count, i;
+	zend_collection_type *desc;
+	zend_type desc_type;
+	const zend_collection_info *info;
+	zend_array *ht;
+	zend_vec *vec;
+
+	desc = php_collection_parse_descriptor(p, max, 0);
+	if (!desc) {
+		return 0;
+	}
+	desc_type = (zend_type) ZEND_TYPE_INIT_NONE(0);
+	ZEND_TYPE_SET_COLLECTION(desc_type, desc);
+
+	if (*p >= max || **p != ':') {
+		goto fail_desc;
+	}
+	(*p)++;
+	if (!php_collection_parse_uint(p, max, ':', &count)
+	 || count >= HT_MAX_SIZE || IS_FAKE_ELEM_COUNT(count, max - *p)) {
+		goto fail_desc;
+	}
+	if (*p >= max || **p != '{') {
+		goto fail_desc;
+	}
+	(*p)++;
+
+	/* Promote to a canonical node. intern() rather than resolve(): the
+	 * descriptor is a throwaway, and resolve() would cache it under an address
+	 * about to be freed. A non-constructible or unsupported form (unknown kind,
+	 * bad element type) is rejected here or by construction below. */
+	info = zend_collection_info_intern(desc_type);
+	if (!info || !ZEND_COLLECTION_INFO_IS_VALUE_CONSTRUCTIBLE(info)) {
+		goto fail_desc;
+	}
+
+	/* Read elements into a temporary array so each element has a stable,
+	 * referenceable slot: r:/R: may point at an element from later in the
+	 * stream. The array is kept alive past construction (below); the built
+	 * value holds its own copies of the elements. */
+	ht = zend_new_array(count);
+	for (i = 0; i < count; i++) {
+		zval *slot = zend_hash_next_index_insert(ht, &EG(uninitialized_zval));
+		if (!php_var_unserialize_internal(slot, p, max, var_hash)) {
+			goto fail_ht;
+		}
+		if (i + 1 < count && *(*p - 1) != ';' && *(*p - 1) != '}') {
+			(*p)--;
+			goto fail_ht;
+		}
+	}
+	if (*p >= max || **p != '}') {
+		goto fail_ht;
+	}
+	(*p)++;
+
+	vec = zend_collection_construct(ht, info, NULL);
+	if (!vec) {
+		goto fail_ht;   /* element/type mismatch -> unserialize fails */
+	}
+
+	/* Keep the element array (holding the same element objects the value now
+	 * shares) alive until unserialize finishes, so a later backward reference
+	 * into an element resolves. The dtor list takes a reference; drop ours. */
+	{
+		zval ht_zv;
+		ZVAL_ARR(&ht_zv, ht);
+		var_push_dtor(var_hash, &ht_zv);
+	}
+	zend_array_release(ht);
+
+	zend_type_release(desc_type, /* persistent */ false);
+	ZVAL_VEC(rval, vec);
+	return 1;
+
+fail_ht:
+	zend_array_release(ht);
+fail_desc:
+	zend_type_release(desc_type, /* persistent */ false);
+	return 0;
+}
+
 static int php_var_unserialize_internal(UNSERIALIZE_PARAMETER)
 {
 	const unsigned char *cursor, *limit, *marker, *start;
@@ -1132,6 +1401,14 @@ use_double:
 	}
 
 	return finish_nested_data(UNSERIALIZE_PASSTHRU);
+}
+
+"L:" {
+	/* Collection value; the rest (version, descriptor, count, elements) is
+	 * parsed by hand because the descriptor is a variable-shape tree. */
+	*p = YYCURSOR;
+	if (!var_hash) return 0;
+	return php_var_unserialize_collection(UNSERIALIZE_PASSTHRU);
 }
 
 object ":" uiv ":" ["]	{

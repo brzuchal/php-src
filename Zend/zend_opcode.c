@@ -91,6 +91,9 @@ void init_op_array(zend_op_array *op_array, zend_function_type type, int initial
 	op_array->num_dynamic_func_defs = 0;
 	op_array->dynamic_func_defs = NULL;
 
+	op_array->last_collection_type = 0;
+	op_array->collection_types = NULL;
+
 	ZEND_MAP_PTR_INIT(op_array->run_time_cache, NULL);
 	op_array->cache_size = zend_op_array_extension_handles * sizeof(void*);
 
@@ -109,8 +112,88 @@ ZEND_API void destroy_zend_function(zend_function *function)
 	zend_function_dtor(&tmp);
 }
 
+uint32_t zend_op_array_add_collection_type(zend_op_array *op_array, zend_type type)
+{
+	/* One entry per literal site, appended in compilation order and never
+	 * renumbered. Growing one at a time is deliberate: a literal is rare
+	 * compared to an opcode or a literal zval, and a capacity field would have
+	 * to be persisted or recomputed for something that is reallocated a handful
+	 * of times per op_array at most. */
+	uint32_t index = op_array->last_collection_type++;
+
+	op_array->collection_types = safe_erealloc(op_array->collection_types,
+		op_array->last_collection_type, sizeof(zend_type), 0);
+	op_array->collection_types[index] = type;
+
+	return index;
+}
+
+ZEND_API zend_collection_type *zend_type_collection_alloc(uint32_t kind, uint32_t num_types, bool persistent) {
+	ZEND_ASSERT(num_types > 0);
+	zend_collection_type *desc = pemalloc(ZEND_TYPE_COLLECTION_SIZE(num_types), persistent);
+	desc->kind = kind;
+	desc->num_types = num_types;
+	return desc;
+}
+
+/* Structural identity of two types. Collection compatibility is invariant, so
+ * this is the comparison the inheritance and runtime checks use; it recurses
+ * through descriptors and type lists rather than comparing payload pointers. */
+ZEND_API bool zend_type_structurally_equals(zend_type a, zend_type b) {
+	if (ZEND_TYPE_PURE_MASK(a) != ZEND_TYPE_PURE_MASK(b)) {
+		return false;
+	}
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(a) || ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(b)) {
+		if (!ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(a) || !ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(b)) {
+			return false;
+		}
+		const zend_collection_type *da = ZEND_TYPE_COLLECTION(a);
+		const zend_collection_type *db = ZEND_TYPE_COLLECTION(b);
+		if (da->kind != db->kind || da->num_types != db->num_types) {
+			return false;
+		}
+		for (uint32_t i = 0; i < da->num_types; i++) {
+			if (!zend_type_structurally_equals(da->types[i], db->types[i])) {
+				return false;
+			}
+		}
+		return true;
+	}
+	if (ZEND_TYPE_IS_TYPE_LIST(a) || ZEND_TYPE_IS_TYPE_LIST(b)) {
+		if (!ZEND_TYPE_IS_TYPE_LIST(a) || !ZEND_TYPE_IS_TYPE_LIST(b)) {
+			return false;
+		}
+		const zend_type_list *la = ZEND_TYPE_LIST(a);
+		const zend_type_list *lb = ZEND_TYPE_LIST(b);
+		if (la->num_types != lb->num_types) {
+			return false;
+		}
+		for (uint32_t i = 0; i < la->num_types; i++) {
+			if (!zend_type_structurally_equals(la->types[i], lb->types[i])) {
+				return false;
+			}
+		}
+		return true;
+	}
+	if (ZEND_TYPE_HAS_NAME(a) || ZEND_TYPE_HAS_NAME(b)) {
+		if (!ZEND_TYPE_HAS_NAME(a) || !ZEND_TYPE_HAS_NAME(b)) {
+			return false;
+		}
+		return zend_string_equals_ci(ZEND_TYPE_NAME(a), ZEND_TYPE_NAME(b));
+	}
+	return true;
+}
+
 ZEND_API void zend_type_release(zend_type type, bool persistent) {
-	if (ZEND_TYPE_HAS_LIST(type)) {
+	if (ZEND_TYPE_HAS_COLLECTION_DESCRIPTOR(type)) {
+		zend_collection_type *desc = ZEND_TYPE_COLLECTION(type);
+		for (uint32_t i = 0; i < desc->num_types; i++) {
+			zend_type_release(desc->types[i], persistent);
+		}
+		if (!ZEND_TYPE_USES_ARENA(type)) {
+			pefree(desc, persistent);
+		}
+	} else if (ZEND_TYPE_IS_TYPE_LIST(type)) {
 		zend_type *list_type;
 		ZEND_TYPE_LIST_FOREACH_MUTABLE(ZEND_TYPE_LIST(type), list_type) {
 			zend_type_release(*list_type, persistent);
@@ -661,6 +744,15 @@ ZEND_API void destroy_op_array(zend_op_array *op_array)
 		}
 		efree(arg_info);
 	}
+	if (op_array->collection_types) {
+		/* Same rule as arg_info: the entries are types, so releasing one
+		 * releases the class names it names and leaves arena-allocated
+		 * descriptors to the arena. */
+		for (i = 0; i < op_array->last_collection_type; i++) {
+			zend_type_release(op_array->collection_types[i], /* persistent */ false);
+		}
+		efree(op_array->collection_types);
+	}
 	if (op_array->static_variables) {
 		zend_array_destroy(op_array->static_variables);
 	}
@@ -909,7 +1001,8 @@ static bool is_fake_def(zend_op *opline) {
 	/* These opcodes only modify the result, not create it. */
 	return opline->opcode == ZEND_ROPE_ADD
 		|| opline->opcode == ZEND_ADD_ARRAY_ELEMENT
-		|| opline->opcode == ZEND_ADD_ARRAY_UNPACK;
+		|| opline->opcode == ZEND_ADD_ARRAY_UNPACK
+		|| opline->opcode == ZEND_ADD_COLLECTION_ELEMENT;
 }
 
 static bool keeps_op1_alive(zend_op *opline) {

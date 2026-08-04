@@ -18,6 +18,7 @@
 
 #include "zend.h"
 #include "zend_API.h"
+#include "zend_execute.h" /* zend_collection_intrinsics_startup() */
 #include "zend_attributes.h"
 #include "zend_builtin_functions.h"
 #include "zend_interfaces.h"
@@ -34,6 +35,7 @@ ZEND_API void zend_register_default_classes(void)
 	zend_register_default_exception();
 	zend_register_iterator_wrapper();
 	zend_register_closure_ce();
+	zend_collection_intrinsics_startup();
 	zend_register_generator_ce();
 	zend_register_weakref_ce();
 	zend_register_attribute_ce();
