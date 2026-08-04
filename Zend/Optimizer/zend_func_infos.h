@@ -617,6 +617,7 @@ static const func_info_t func_infos[] = {
 	F1("xml_error_string", MAY_BE_STRING|MAY_BE_NULL),
 	F1("xml_parser_get_option", MAY_BE_STRING|MAY_BE_LONG|MAY_BE_BOOL),
 	FN("zend_test_vec_selftest", MAY_BE_ARRAY|MAY_BE_ARRAY_KEY_STRING|MAY_BE_ARRAY_OF_FALSE|MAY_BE_ARRAY_OF_TRUE),
+	FN("zend_test_vec_layout", MAY_BE_ARRAY|MAY_BE_ARRAY_KEY_STRING|MAY_BE_ARRAY_OF_LONG),
 	FN("zend_test_collection_type_selftest", MAY_BE_ARRAY|MAY_BE_ARRAY_KEY_STRING|MAY_BE_ARRAY_OF_FALSE|MAY_BE_ARRAY_OF_TRUE),
 	FN("zend_test_nested_collection_type_selftest", MAY_BE_ARRAY|MAY_BE_ARRAY_KEY_STRING|MAY_BE_ARRAY_OF_FALSE|MAY_BE_ARRAY_OF_TRUE),
 	FN("zend_test_type_code_alias_selftest", MAY_BE_ARRAY|MAY_BE_ARRAY_KEY_STRING|MAY_BE_ARRAY_OF_FALSE|MAY_BE_ARRAY_OF_TRUE),
@@ -641,5 +642,4 @@ static const func_info_t func_infos[] = {
 	F1("gzinflate", MAY_BE_STRING|MAY_BE_FALSE),
 	F1("gzdecode", MAY_BE_STRING|MAY_BE_FALSE),
 	F1("gzuncompress", MAY_BE_STRING|MAY_BE_FALSE),
-	FN("zend_test_vec_layout", MAY_BE_ARRAY|MAY_BE_ARRAY_KEY_STRING|MAY_BE_ARRAY_OF_LONG),
 };
